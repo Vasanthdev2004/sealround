@@ -1,0 +1,12 @@
+{
+  "name": "fairground",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "arena": "pnpm --filter @fairground/arena arena"
+  },
+  "packageManager": "pnpm@12.3.4"
+}

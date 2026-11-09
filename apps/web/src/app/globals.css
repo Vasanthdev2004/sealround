@@ -1,0 +1,272 @@
+@import "tailwindcss";
+
+/*
+ * Fairground design tokens.
+ * Dark, quiet, tactile. Hairline dashed frame, skeuomorphic buttons,
+ * one blue accent. Numbers are always mono + tabular.
+ */
+:root {
+  --bg: #121212;
+  --bg-elev: #17171a;
+  --bg-elev-2: #1e1e22;
+  --bg-elev-hover: #1a1a1e;
+  --bg-inset: #0d0d0f;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  --line-dashed: rgba(255, 255, 255, 0.16);
+
+  --fg: #fafafa;
+  --fg-muted: #a8a8ad;
+  /* At least 4.5:1 on every surface up to bg-elev-2 (WCAG AA body text). */
+  --fg-subtle: #85858c;
+
+  --accent: #2b85ff;
+  --accent-strong: #0a62f0;
+  --accent-soft: rgba(43, 133, 255, 0.14);
+
+  --ok: #3ecf8e;
+  --ok-soft: rgba(62, 207, 142, 0.12);
+  --warn: #f5b341;
+  --warn-soft: rgba(245, 179, 65, 0.12);
+  --bad: #ff6161;
+  --bad-soft: rgba(255, 97, 97, 0.12);
+  --bot: #c084fc;
+  --bot-soft: rgba(192, 132, 252, 0.14);
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-elev: var(--bg-elev);
+  --color-elev-2: var(--bg-elev-2);
+  --color-elev-hover: var(--bg-elev-hover);
+  --color-inset: var(--bg-inset);
+  --color-hover: var(--bg-hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-line-dashed: var(--line-dashed);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-bot: var(--bot);
+  --color-bot-soft: var(--bot-soft);
+
+  --font-sans: var(--font-funnel-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-funnel-display), var(--font-funnel-sans), sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-tile: 10px;
+  --radius-btn: 11px;
+  --radius-card: 12px;
+  --radius-panel: 14px;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+/*
+ * In the base layer so an `outline-none` utility can turn it off. Text inputs
+ * use that: their Field box shows focus instead of a square ring.
+ */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * Surfaces, tactile buttons and the shimmer skeleton live in the components
+ * layer so Tailwind utilities (bg-*, border-*, focus:border-*, rounded-*)
+ * placed next to them can override them.
+ */
+@layer components {
+  /* ---------- Surfaces ---------- */
+
+  /* Diagonal hatch used in the outer gutters and empty states. */
+  .hatch {
+    background-image: repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.035) 0 1px,
+      transparent 1px 7px
+    );
+  }
+
+  .panel {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+  }
+
+  .tile {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-tile);
+  }
+
+  .inset {
+    background: var(--bg-inset);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-tile);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+
+  /* ---------- Tactile buttons ---------- */
+
+  .btn-tactile {
+    background: linear-gradient(#2a2a2e, #1f1f22);
+    border-radius: var(--radius-btn);
+    box-shadow:
+      inset -6px 0 6px rgba(0, 0, 0, 0.15),
+      inset 0 -6px 6px rgba(0, 0, 0, 0.25),
+      0 0 0 1px rgba(255, 255, 255, 0.1),
+      4px 10px 16px rgba(0, 0, 0, 0.5);
+    transition: filter 120ms ease, transform 120ms ease;
+  }
+  .btn-tactile:hover:not(:disabled) {
+    filter: brightness(1.12);
+  }
+  .btn-tactile:active:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow:
+      inset 0 2px 6px rgba(0, 0, 0, 0.45),
+      0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+
+  .btn-primary {
+    background: linear-gradient(#3a90ff, #0a62f0);
+    border-radius: var(--radius-btn);
+    color: #fff;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      inset 0 -4px 8px rgba(0, 0, 0, 0.18),
+      0 0 0 1px rgba(8, 72, 196, 0.9),
+      0 6px 16px rgba(10, 98, 240, 0.32);
+    transition: filter 120ms ease, transform 120ms ease;
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow:
+      inset 0 2px 6px rgba(0, 0, 0, 0.35),
+      0 0 0 1px rgba(8, 72, 196, 0.9);
+  }
+
+  .btn-danger {
+    background: linear-gradient(#ff7373, #d93b3b);
+    border-radius: var(--radius-btn);
+    color: #fff;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      inset 0 -4px 8px rgba(0, 0, 0, 0.18),
+      0 0 0 1px rgba(150, 30, 30, 0.9),
+      0 6px 16px rgba(217, 59, 59, 0.28);
+  }
+
+  /*
+   * Loading sweep. Only the gradient image is set, so a bg-* colour given
+   * alongside it shows through as the skeleton's base.
+   */
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.06) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+}
+
+.rule-dashed {
+  border-color: var(--line-dashed);
+  border-style: dashed;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- Numbers ---------- */
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Sealed ciphertext rendering. */
+.cipher {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-subtle);
+  word-break: break-all;
+  letter-spacing: 0.02em;
+}
+
+/* ---------- Motion ---------- */
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
