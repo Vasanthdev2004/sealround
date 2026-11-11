@@ -10,43 +10,39 @@ export const report = raw as unknown as ArenaReport;
 
 export type { ArenaReport, LaunchType, MetricDef, MetricId };
 
-export const LAUNCHES: LaunchType[] = ["bonding_curve", "fixed_price", "fairground"];
+/** Display order on the page: Sealround first, then what it is compared with. */
+export const LAUNCHES: LaunchType[] = ["fairground", "bonding_curve", "fixed_price"];
 
 export const LAUNCH_NAME: Record<LaunchType, string> = {
   bonding_curve: "Bonding curve",
   fixed_price: "Fixed price, first come",
-  fairground: "Fairground",
+  fairground: "Sealround",
 };
 
 export const LAUNCH_SHORT: Record<LaunchType, string> = {
   bonding_curve: "Bonding curve",
   fixed_price: "Fixed price",
-  fairground: "Fairground",
+  fairground: "Sealround",
 };
 
 /**
- * One colour per launch type, used by every chart on the page. Orange and aqua
- * were validated with the accent blue for colour-vision deficiency on the
- * dark surface. Bots always wear the bot colour, never a launch colour.
- * Hex values mirror the tokens in globals.css (--accent, --bot) because SVG
- * attributes in the charts need literal colours.
+ * One colour per launch type, used by every chart on the page: the viz-* tokens
+ * from globals.css (Sealround is always the accent blue). Bots always wear the
+ * bot purple, never a launch colour. CSS variables work in SVG presentation
+ * attributes, so recharts takes them as is.
  */
 export const LAUNCH_COLOR: Record<LaunchType, string> = {
-  bonding_curve: "#d95926",
-  fixed_price: "#199e70",
-  fairground: "#2b85ff",
+  bonding_curve: "var(--viz-bonding)",
+  fixed_price: "var(--viz-fixed)",
+  fairground: "var(--viz-fairground)",
 };
 
-export const BOT_COLOR = "#c084fc";
+export const BOT_COLOR = "var(--viz-bot)";
 
-/** Chart chrome, mirroring --line, --line-strong, --fg-subtle, --fg-muted, --bg-elev. */
-export const CHART = {
-  grid: "rgba(255,255,255,0.07)",
-  axis: "rgba(255,255,255,0.12)",
-  tick: "#85858c",
-  muted: "#a8a8ad",
-  surface: "#17171a",
-} as const;
+/** The "one run" key in a legend. Grid, ticks and cursor come from visual/chart-bits. */
+export const RUN_DOT_COLOR = "var(--fg-muted)";
+
+export const SERIES_MS = 450;
 
 export const metricDef = (id: MetricId): MetricDef => report.metrics.find((m) => m.id === id)!;
 
@@ -61,7 +57,7 @@ export function fmtMetric(unit: MetricDef["unit"], v: number | null | undefined,
       return compact ? n : `${n} USDC`;
     }
     case "ratio":
-      return `${v.toFixed(2)}x`;
+      return `${v.toFixed(2)}×`;
     case "index":
       return v.toFixed(2);
   }
@@ -73,9 +69,9 @@ export function fmtTick(unit: MetricDef["unit"], v: number): string {
     case "share":
       return `${Math.round(v * 100)}%`;
     case "usdc":
-      return Math.abs(v) >= 1000 ? `${Number((v / 1000).toFixed(1))}K` : `${Math.round(v)}`;
+      return Math.round(v).toLocaleString("en-US");
     case "ratio":
-      return `${Number(v.toFixed(1))}x`;
+      return `${Number(v.toFixed(1))}×`;
     case "index":
       return v.toFixed(1);
   }

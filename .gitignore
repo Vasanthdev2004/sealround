@@ -8,4 +8,6 @@ target/
 .env*
 !.env.example
 .vercel
+.sandbox-bin/
+.sandbox-home/
 .DS_Store

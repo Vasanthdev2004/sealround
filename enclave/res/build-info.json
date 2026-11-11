@@ -1,0 +1,95 @@
+{
+  "artifact": {
+    "file": "fairground_sealer.wasm",
+    "bytes": 276156,
+    "sha256": "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb"
+  },
+  "job": {
+    "package": "fairground-sealer-job",
+    "binary": "fairground-sealer",
+    "target": "wasm32-wasip1",
+    "profile": "release (enclave/Cargo.toml)"
+  },
+  "build": {
+    "image": "rust:1.97.1-trixie@sha256:4277ce860337f6cfa1b679891bbf689a447f4b3f4f55701742614ad31321cee7",
+    "dockerfile": "enclave/build/Dockerfile",
+    "machine": "x86_64",
+    "cwd": "/src/enclave",
+    "command": "cargo build --locked --release --target wasm32-wasip1 -p fairground-sealer-job",
+    "env": {
+      "PATH": "/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "HOME": "/tmp",
+      "LC_ALL": "C.UTF-8",
+      "TZ": "UTC",
+      "RUSTUP_HOME": "/usr/local/rustup",
+      "CARGO_HOME": "/usr/local/cargo",
+      "CARGO_TARGET_DIR": "/tmp/fairground-target",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_TERM_COLOR": "never",
+      "RUSTFLAGS": "--remap-path-prefix=/src=/fairground --remap-path-prefix=/usr/local/cargo=/cargo --remap-path-prefix=/tmp/fairground-target=/target"
+    }
+  },
+  "toolchain": {
+    "active": "1.97.1-x86_64-unknown-linux-gnu (overridden by '/src/enclave/rust-toolchain.toml')",
+    "rustc": "1.97.1",
+    "rustc_commit_hash": "8bab26f4f68e0e26f0bb7960be334d5b520ea452",
+    "rustc_commit_date": "2026-07-14",
+    "rustc_host": "x86_64-unknown-linux-gnu",
+    "llvm": "22.1.6",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)"
+  },
+  "inputs": {
+    "cargo_lock_sha256": "dc62f8e01f68a7156a6ba394eb0685bd9ed6a914f267942c3067eea9bd7d5fcc",
+    "files_sha256": "328a1f768770092568bc3901819f7bcfdf34b7a0e9b0264794c4e6b253efb5f1",
+    "files": {
+      ".cargo/config.toml": "431dd09b9b69035367d2614798d581c2c92a5423c6aabe8a887ce2aa4f5dd61f",
+      "Cargo.toml": "301f0756413b4ade4bf9b472569f955aa8b565a98a88e532fe77a2f94aaafd30",
+      "crates/clearing/Cargo.toml": "cfa55abcd31752f6df9f65b2e35a6527a35e9392f834bc05a08b09b962430c09",
+      "crates/clearing/src/checks.rs": "0c77f618d2d251d5a608bef265aa118d5766f5d0358afa06533fc2d3e9be9d5d",
+      "crates/clearing/src/clear.rs": "d5075ab3db375cbe8415094e53009275dc2067d2305ebddd4f24f76ff5e42e84",
+      "crates/clearing/src/hash.rs": "9d254d105423682ae7e65641379ce8ad3afa35ec9e43a509400a9a269356b71d",
+      "crates/clearing/src/lib.rs": "209206ecd40271e7aca02e06deb3002d981e8c44f2eb9d53f50ddee7fe1a11a4",
+      "crates/clearing/src/math.rs": "72cf453a90a73e5ef622dcbd0ed0e5387f49eec3f8a9baa6bba3d5dad9b22913",
+      "crates/clearing/src/sealed_bid.rs": "50872faaedb69a8221ba0861923b6cb02a508c41ba272b7514cc3bd8e6673e11",
+      "crates/sealer/Cargo.toml": "887d38007349e4abfb7157b643e49008ad1152f57eedb9c41740f7ba355aa7d4",
+      "crates/sealer/src/bid.rs": "28e6d4e0b51d3bd1fd6aef91c68e77dd667fae286d712c53699477c8c5d944cb",
+      "crates/sealer/src/job.rs": "f2dac29d2235673adb9bc7391903b982022b2ef8249131db3c12aff2d48cc59e",
+      "crates/sealer/src/keys.rs": "a708df438c631eedd3713bdff334c3a365b8d5d9a68941003120aaf5c87b0b66",
+      "crates/sealer/src/lib.rs": "7e4504e530278219dd014b5a4dc60d66a76ea5e3d447aec042b16e147d133cb0",
+      "enclave/Cargo.lock": "dc62f8e01f68a7156a6ba394eb0685bd9ed6a914f267942c3067eea9bd7d5fcc",
+      "enclave/Cargo.toml": "e64ecbad0158235688a969a5b99e996f54f28655255af5c2c46ce9ef9740099f",
+      "enclave/build/Dockerfile": "c89806e5eccf19d98e9aa27a413483471e22d1eba305af786b548f13d836fcf3",
+      "enclave/build/build.sh": "b6675cef77bc2f83194ff0a102c8b4ad8aa04b8f9535310c861e43dd69a12f1b",
+      "enclave/build/build_info.py": "6082291aca23e42996f813c81dcf34393dcf52a4e5cab83877bc7ebc44e7bfbb",
+      "enclave/job/Cargo.toml": "7e0086d74e9d9101c5e4d3043aab0d0dbc4326574c379380e65a0d6d9aa60dd9",
+      "enclave/job/src/main.rs": "87fb4b26bb7d8ec3c6c1d0af477c888752f4ac0087b3a69f7fa2c404a42dbf59",
+      "enclave/rust-toolchain.toml": "a7b454b615667bb9d746afe739eabb1f3b1753b0dc94187714b07b9e907ac716",
+      "enclave/tools/harness/Cargo.toml": "b08b75b83657e1665f45b683b507d1683f2c31e02de72aedf3117a47a10d5faf",
+      "enclave/tools/runner/Cargo.toml": "7dc198c490562d334a0d57bd0413eaedd8b1be7474e804ed1bee42dff21e599e"
+    }
+  },
+  "git": {
+    "commit": null,
+    "head": "781f75b0bcde91dc772fff8329dbecdca2f121cd",
+    "inputs_clean": false
+  },
+  "module": {
+    "imports": [
+      "wasi_snapshot_preview1.environ_get",
+      "wasi_snapshot_preview1.environ_sizes_get",
+      "wasi_snapshot_preview1.fd_read",
+      "wasi_snapshot_preview1.fd_write",
+      "wasi_snapshot_preview1.proc_exit"
+    ],
+    "exports": [
+      "memory",
+      "_start",
+      "__main_void"
+    ],
+    "custom_sections": {
+      "name": 30731,
+      "producers": 174,
+      "target_features": 148
+    }
+  }
+}

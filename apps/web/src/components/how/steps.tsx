@@ -1,77 +1,63 @@
-import { Tag } from "@/components/ui/badge";
-import { cn } from "@/lib/cn";
-import type { Tone } from "@/lib/format";
-
-const STEPS: { title: string; who: string; tone: Tone; body: React.ReactNode }[] = [
+const STEPS: { title: string; who: string; body: React.ReactNode }[] = [
   {
-    title: "Creator sets the sale",
-    who: "creator",
-    tone: "neutral",
-    body: "Supply for sale, floor price, minimum raise, bid window and per-account caps. Fairground deploys the token with a fixed supply. Every parameter is locked at creation; there is no admin key.",
+    title: "Set the sale terms",
+    who: "Creator",
+    body: (
+      <>
+        Choose the supply for sale, floor price, minimum raise, bid window and per-account caps. The contract deploys
+        the token with a fixed supply to its own sub-account,{" "}
+        <code className="font-mono text-label break-words text-fg">&lt;sale_id&gt;.&lt;contract&gt;</code>. Every parameter is locked
+        at creation, and there is no admin key.
+      </>
+    ),
   },
   {
-    title: "Bidder gets USDC on NEAR",
-    who: "bidder",
-    tone: "accent",
-    body: "Either they already hold it, or they fund from SOL, ETH, BTC or USDC on another chain through NEAR Intents 1Click. The USDC lands in their own NEAR account.",
+    title: "Get USDC on NEAR",
+    who: "Bidder",
+    body: "Use USDC you already hold on NEAR, or fund from SOL, ETH, BTC or USDC on another chain through NEAR Intents 1Click. The USDC lands in your own NEAR account.",
   },
   {
-    title: "Bidder submits a sealed bid",
-    who: "bidder",
-    tone: "accent",
-    body: "One transfer carries a public USDC deposit plus an encrypted payload: max price, max spend and a random salt. The browser seals it to the sale’s enclave key, so only the enclave can open it.",
+    title: "Submit a sealed bid",
+    who: "Bidder",
+    body: "One transfer carries a public USDC deposit plus an encrypted payload containing your max price, max spend and a random salt. The browser seals it to the sale’s enclave key. When the gas relayer covers the transaction, you need USDC and no NEAR.",
   },
   {
-    title: "The window closes",
-    who: "anyone",
-    tone: "neutral",
+    title: "Close the bid window",
+    who: "Anyone",
     body: "After the window ends, anyone can call close. The bid set is frozen on-chain and the contract stores its hash.",
   },
   {
-    title: "The enclave clears the sale",
+    title: "Calculate the clearing price",
     who: "OutLayer TEE",
-    tone: "warn",
-    body: "Inside the TEE, the job decrypts every bid, computes the clearing price and each fill, and returns a signed result. The contract checks the arithmetic it can see, then settles.",
+    body: "The enclave decrypts the bids, computes the clearing price and fills, and returns the result. The contract accepts a result from OutLayer for the job hash pinned at deployment. It checks the arithmetic it can see, then settles.",
   },
   {
-    title: "Everyone claims",
-    who: "every bidder",
-    tone: "ok",
-    body: "Winners get tokens at the clearing price plus any unspent USDC. Losing bids get a full refund. If the minimum raise is missed or clearing fails, everyone is refunded in full.",
+    title: "Claim tokens and refunds",
+    who: "Every bidder",
+    body: "Winners get tokens at the clearing price plus any unspent USDC. Valid bids that lose get a full refund, and so does every valid bid if the minimum raise is missed. A void bid gets its deposit back less 1 %. If clearing never arrives, everyone is refunded in full.",
   },
 ];
 
 export function SaleSteps() {
   return (
-    <ol className="rounded-panel border border-line bg-elev px-5 pt-5 pb-1">
-      {STEPS.map((s, i) => {
-        const last = i === STEPS.length - 1;
-        return (
-          <li key={s.title} className="relative flex gap-4 pb-5">
-            {!last && (
-              <span
-                aria-hidden
-                className="absolute top-9 bottom-1 left-[15px] border-l border-dashed border-line-dashed"
-              />
-            )}
-            <span
-              className={cn(
-                "num relative flex size-8 shrink-0 items-center justify-center rounded-full bg-elev-2 text-[12px] text-muted ring-1 ring-line",
-                last && "bg-ok-soft text-ok ring-ok/25",
-              )}
-            >
-              {String(i + 1).padStart(2, "0")}
-            </span>
-            <div className="min-w-0 pt-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-[14px] font-medium tracking-[-0.01em] text-fg">{s.title}</h3>
-                <Tag tone={s.tone}>{s.who}</Tag>
-              </div>
-              <p className="mt-1 max-w-2xl text-[13.5px] leading-relaxed text-muted">{s.body}</p>
+    <ol className="divide-y divide-line border-y border-line">
+      {STEPS.map((step, index) => (
+        <li key={step.title} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-3 py-4 sm:grid-cols-[2rem_minmax(0,1fr)] sm:gap-4">
+          <span aria-hidden className="num pt-0.5 text-label text-subtle">
+            {index + 1}
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+              <h3 className="text-h3 text-fg">
+                <span className="sr-only">Step {index + 1}. </span>
+                {step.title}
+              </h3>
+              <span className="text-label text-subtle">{step.who}</span>
             </div>
-          </li>
-        );
-      })}
+            <p className="mt-1 max-w-[68ch] text-body text-muted">{step.body}</p>
+          </div>
+        </li>
+      ))}
     </ol>
   );
 }

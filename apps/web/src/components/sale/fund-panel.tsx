@@ -1,20 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Globe, Loader2, RefreshCw, Wallet } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { formatUnits } from "@fairground/clearing";
+import { ActionError, PaidFallbackPrompt, RELAYER_CANNOT, usePaidFallback } from "@/components/sale-common/relay";
 import { Tag } from "@/components/ui/badge";
-import { Countdown, SimulatedNote, TokenAvatar } from "@/components/ui/bits";
+import { Countdown } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
-import { Field } from "@/components/ui/field";
+import { Field, Segmented } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
+import { Skeleton } from "@/components/ui/skeleton";
 import { KV } from "@/components/ui/stat";
+import { errorInfo, type ErrorInfo } from "@/lib/client";
 import { cn } from "@/lib/cn";
-import { duration, usdcStr } from "@/lib/format";
+import { duration, networkName, usdcStr } from "@/lib/format";
 import { useLatestFunding } from "@/lib/funding";
 import {
   ORIGINS,
   SLIPPAGE_BPS,
+  canSimulateSwaps,
+  ensureDeliverable,
   isFinished as fundingDone,
   originById,
   parseOriginAmount,
@@ -24,8 +29,29 @@ import {
   type QuoteView,
 } from "@/lib/oneclick";
 import type { Sale } from "@/lib/types";
+import { useWallet } from "@/lib/wallet";
 import { SwapProgress } from "./swap-progress";
 import { useDryQuote } from "./use-dry-quote";
+
+/** One-tap amounts per origin asset, so a judge gets a live quote in one click. */
+const QUICK: Record<OriginId, string[]> = {
+  "base-usdc": ["10", "25", "50"],
+  "arb-usdc": ["10", "25", "50"],
+  "eth-eth": ["0.005", "0.01", "0.02"],
+  "sol-sol": ["0.1", "0.3", "1"],
+  "btc-btc": ["0.0002", "0.0005", "0.001"],
+};
+
+const CHAINS = ORIGINS.map((o) => ({ value: o.id, label: o.chain }));
+const OUTCOMES: { value: "ok" | "fail"; label: string }[] = [
+  { value: "ok", label: "USDC arrives" },
+  { value: "fail", label: "Refunded" },
+];
+
+/** The label over a chip group, set like a Field label. */
+const GROUP_LABEL = "text-label font-[510] text-muted";
+/** Chips are 32px; on phones they grow to a 40px touch target. */
+const CHIPS = "mt-1.5 max-sm:[&>button]:h-10";
 
 /**
  * Fund from any chain (1Click). Live dry quotes; on testnet the swap itself is
@@ -36,8 +62,16 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
   const [originId, setOriginId] = useState<OriginId>("base-usdc");
   const [amount, setAmount] = useState("");
   const [refundTo, setRefundTo] = useState("");
+  const [refundOpen, setRefundOpen] = useState(false);
   const [fail, setFail] = useState(false);
   const [watchId, setWatchId] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<ErrorInfo | null>(null);
+  // Registering the account for USDC is normally paid by the relayer; when it cannot, the user is asked first.
+  const storage = usePaidFallback();
+  // A simulated swap ends by minting test USDC, which mainnet does not have.
+  const canSwap = canSimulateSwaps();
+  const { mode } = useWallet();
 
   useEffect(() => {
     if (account) resumeSimulatedSwaps(account);
@@ -51,29 +85,44 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
   );
 
   const showProgress = !!funding && (funding.id === watchId || !fundingDone(funding.status));
+  const refundError = q.errorField === "refundTo" ? (q.error ?? undefined) : undefined;
+  const showRefund = refundOpen || refundTo !== "" || !!refundError;
 
-  function confirm() {
-    if (!account || !q.quote || amountBase === null) return;
-    const rec = startSimulatedSwap({
-      account,
-      saleId: sale.id,
-      origin,
-      amountIn: formatUnits(amountBase, origin.decimals).replace(/,/g, ""),
-      amountOutUsdc: q.quote.amountOut,
-      refundTo,
-      fail,
-    });
-    setWatchId(rec.id);
+  async function confirm() {
+    if (!account || !q.quote || amountBase === null || starting) return;
+    const quote = q.quote;
+    setStarting(true);
+    setStartError(null);
+    try {
+      // USDC can only be delivered to an account registered on the USDC
+      // contract. The relayer registers it for free; on the simulated chain
+      // there is nothing to register and this returns at once.
+      await ensureDeliverable(account, { onPaidFallback: storage.onPaidFallback });
+      const rec = startSimulatedSwap({
+        account,
+        saleId: sale.id,
+        origin,
+        amountIn: formatUnits(amountBase, origin.decimals).replace(/,/g, ""),
+        amountOutUsdc: quote.amountOut,
+        refundTo,
+        fail,
+      });
+      setWatchId(rec.id);
+    } catch (e) {
+      setStartError(errorInfo(e));
+    } finally {
+      setStarting(false);
+    }
   }
 
   const shown = q.quote ?? (q.previous && q.previous.originId === originId && amountBase !== null ? q.previous : null);
 
   return (
     <Panel
+      id="fund"
       title="Fund from any chain"
-      subtitle="Swap to USDC on NEAR through 1Click."
-      icon={<Globe strokeWidth={1.75} />}
-      action={<Tag tone="warn">testnet</Tag>}
+      subtitle="Swaps to USDC through 1Click."
+      action={<Tag>{mode === "mock" ? "Simulated" : networkName()}</Tag>}
     >
       {showProgress && funding ? (
         <SwapProgress
@@ -82,61 +131,59 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
           onNewSwap={() => setWatchId(null)}
         />
       ) : (
-        <div className="space-y-4">
-          <div role="radiogroup" aria-label="Pay with" className="grid grid-cols-5 gap-1 sm:gap-1.5">
-            {ORIGINS.map((o) => {
-              const active = o.id === originId;
-              return (
-                <button
-                  key={o.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => setOriginId(o.id)}
-                  className={cn(
-                    "flex min-w-0 flex-col items-center gap-1.5 rounded-tile px-0.5 py-2.5 ring-1 transition-colors",
-                    active ? "bg-elev-2 ring-accent/60" : "ring-line hover:bg-hover",
-                  )}
-                >
-                  <TokenAvatar symbol={o.symbol} hue={o.hue} size={24} />
-                  <span className="w-full truncate text-center text-[10.5px] leading-none tracking-[-0.01em] text-fg sm:text-[11.5px]">{o.chain}</span>
-                  <span className="text-[10.5px] leading-none text-subtle">{o.symbol}</span>
-                </button>
-              );
-            })}
+        <div className="flex flex-col gap-5">
+          <div>
+            <div id="fund-origin-label" className={GROUP_LABEL}>
+              Pay with
+            </div>
+            <Segmented
+              value={originId}
+              onChange={setOriginId}
+              options={CHAINS}
+              labelledBy="fund-origin-label"
+              className={CHIPS}
+            />
           </div>
 
-          <Field
-            label={`Amount in ${origin.symbol} on ${origin.chain}`}
-            suffix={origin.symbol}
-            inputMode="decimal"
-            autoComplete="off"
-            placeholder={origin.placeholder}
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            error={parsed && "error" in parsed ? parsed.error : undefined}
-            hint={
-              shown?.amountInUsd != null ? (
-                <>
-                  About <span className="num">{usdcStr(shown.amountInUsd)}</span> USD
-                </>
-              ) : undefined
-            }
-          />
+          <div>
+            <Field
+              label={`Amount in ${origin.symbol} on ${origin.chain}`}
+              suffix={origin.symbol}
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder={origin.placeholder}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              error={parsed && "error" in parsed ? parsed.error : undefined}
+              hint={
+                shown?.amountInUsd != null ? (
+                  <>
+                    About <span className="num">{usdcStr(shown.amountInUsd)}</span> USD
+                  </>
+                ) : undefined
+              }
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Quick amounts">
+              {QUICK[originId].map((v) => {
+                const active = amount.trim() === v;
+                return (
+                  <Button
+                    key={v}
+                    size="sm"
+                    variant={active ? "tactile" : "outline"}
+                    aria-pressed={active}
+                    onClick={() => setAmount(v)}
+                    className="gap-1.5 max-sm:h-10"
+                  >
+                    <span className="num">{v}</span>
+                    <span className="font-normal text-muted">{origin.symbol}</span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
 
-          <Field
-            label="Refund address (optional)"
-            placeholder={origin.refundHint}
-            autoComplete="off"
-            spellCheck={false}
-            value={refundTo}
-            onChange={(e) => setRefundTo(e.target.value)}
-            inputClassName="text-[13px]"
-            error={q.errorField === "refundTo" ? q.error ?? undefined : undefined}
-            hint="Where 1Click returns funds if the swap fails. Left empty, a sample address prices the dry quote."
-          />
-
-          <QuoteBox
+          <Quote
             quote={shown}
             loading={q.loading}
             error={q.errorField === "refundTo" ? null : q.error}
@@ -144,40 +191,90 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
             onRefresh={q.refresh}
           />
 
-          <label className="flex cursor-pointer items-center gap-2.5 text-[12.5px] text-muted select-none">
-            <input type="checkbox" checked={fail} onChange={(e) => setFail(e.target.checked)} className="peer sr-only" />
-            <span
-              aria-hidden
-              className="relative h-[18px] w-[30px] shrink-0 rounded-full bg-inset ring-1 ring-line-strong transition-colors peer-checked:bg-bad/70 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent after:absolute after:top-[2px] after:left-[2px] after:size-[14px] after:rounded-full after:bg-fg/85 after:transition-transform peer-checked:after:translate-x-[12px]"
-            />
-            Simulate a failed swap (ends in REFUNDED)
-          </label>
-
-          {account ? (
-            <Button
-              variant="tactile"
-              size="md"
-              className="w-full"
-              disabled={!q.quote || q.loading}
-              onClick={confirm}
-            >
-              Confirm on testnet (simulated)
-            </Button>
+          {showRefund ? (
+            <div id="fund-refund" className="anim-fade">
+              <Field
+                label={`Refund address on ${origin.chain}`}
+                labelAside={<span className="text-label text-subtle">Optional</span>}
+                placeholder={origin.refundHint}
+                autoComplete="off"
+                spellCheck={false}
+                autoFocus={refundOpen && refundTo === ""}
+                value={refundTo}
+                onChange={(e) => setRefundTo(e.target.value)}
+                error={refundError}
+                hint="Where 1Click returns funds if the swap fails."
+              />
+            </div>
           ) : (
-            <p className="flex items-center gap-2 text-[12.5px] text-muted">
-              <Wallet className="size-4 shrink-0 text-subtle" strokeWidth={1.75} aria-hidden />
-              Connect a wallet (top right) to fund from another chain.
-            </p>
+            <button
+              type="button"
+              onClick={() => setRefundOpen(true)}
+              className="-my-2 inline-flex min-h-8 items-center self-start rounded-sm text-small text-muted underline decoration-line-strong underline-offset-4 transition-colors duration-[120ms] hover:text-fg max-sm:min-h-10"
+            >
+              Add a refund address
+            </button>
           )}
 
-          <SimulatedNote>There is no Intents testnet. Quotes are live (dry); the swap itself is simulated on testnet.</SimulatedNote>
+          {canSwap && (
+            <div>
+              <div id="fund-outcome-label" className={GROUP_LABEL}>
+                Simulated outcome
+              </div>
+              <Segmented
+                value={fail ? "fail" : "ok"}
+                onChange={(v) => setFail(v === "fail")}
+                options={OUTCOMES}
+                labelledBy="fund-outcome-label"
+                className={CHIPS}
+              />
+            </div>
+          )}
+
+          <PaidFallbackPrompt
+            fallback={storage}
+            acceptLabel="Pay 0.00125 NEAR and continue"
+            copy={(reason) => ({
+              title: "Your account must be registered to hold USDC",
+              body: `It is a one-time 0.00125 NEAR storage deposit on the USDC contract. The gas relayer normally pays it, but ${RELAYER_CANNOT[reason]}. Your wallet will ask you to pay it; then the swap starts.`,
+            })}
+          />
+          <ActionError info={startError} what="registration" />
+
+          {!canSwap ? (
+            <p className="text-small text-muted">
+              Quotes are live, but this build cannot start a swap on mainnet. Bring USDC to your NEAR account another
+              way.
+            </p>
+          ) : account ? (
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full max-sm:h-10"
+                disabled={!q.quote || q.loading || !!startError?.maybeSubmitted}
+                loading={starting}
+                onClick={() => void confirm()}
+              >
+                Simulate swap
+              </Button>
+              {mode === "near" && (
+                <p className="text-label text-subtle">It ends by minting test USDC, a transaction your wallet signs.</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-small text-muted">Connect a wallet to simulate a swap.</p>
+          )}
         </div>
       )}
     </Panel>
   );
 }
 
-function QuoteBox({
+/**
+ * The dry quote as plain content under a hairline: what arrives, then a small
+ * ledger of the terms. One slot for every state (no amount, loading, error,
+ * quote), so the form below it does not jump more than it must.
+ */
+function Quote({
   quote,
   loading,
   error,
@@ -190,26 +287,31 @@ function QuoteBox({
   empty: boolean;
   onRefresh: () => void;
 }) {
-  if (empty) {
-    return (
-      <div className="hatch rounded-tile border border-dashed border-line-dashed px-4 py-5 text-center text-[12.5px] text-subtle">
-        Enter an amount for a live dry quote.
-      </div>
-    );
-  }
+  const frame = "border-t border-line pt-4";
+  if (empty) return <p className={cn(frame, "text-small text-subtle")}>Enter an amount for a live dry quote.</p>;
   if (error && !quote) {
     return (
-      <div className="rounded-tile border border-bad/25 bg-bad-soft px-3.5 py-3 text-[12.5px] text-bad" role="alert">
+      <p className={cn(frame, "text-small text-bad")} role="alert">
         {error}
-      </div>
+      </p>
     );
   }
   if (!quote) {
     return (
-      <div className="inset space-y-2.5 p-4" aria-busy>
-        <div className="shimmer h-3 w-24 rounded bg-elev-2" />
-        <div className="shimmer h-7 w-40 rounded bg-elev-2" />
-        <div className="shimmer h-16 rounded bg-elev-2" />
+      <div className={frame} aria-busy>
+        <span className="sr-only">Fetching a dry quote</span>
+        <div className="flex h-8 items-center">
+          <Skeleton className="h-3 w-32" rounded="sm" />
+        </div>
+        <Skeleton className="mt-1 h-[31px] w-36" />
+        <div className="mt-3 border-t border-line">
+          {["w-12", "w-20", "w-28", "w-10"].map((w) => (
+            <div key={w} className="flex h-[37px] items-center justify-between border-b border-line last:border-b-0">
+              <Skeleton className="h-3 w-24" rounded="sm" />
+              <Skeleton className={`h-3 ${w}`} rounded="sm" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -218,25 +320,33 @@ function QuoteBox({
   const feeBps = quote.fee !== null && quote.amountInUsd ? (quote.fee * 10_000n) / quote.amountInUsd : null;
 
   return (
-    <div className={cn("inset p-4 transition-opacity", loading && "opacity-60")} aria-live="polite">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[12px] text-subtle">You receive on NEAR</span>
-        <span className="flex items-center gap-1.5">
-          {loading ? (
-            <Loader2 className="size-3.5 animate-spin text-subtle" />
-          ) : (
-            <button type="button" onClick={onRefresh} className="text-subtle hover:text-fg" aria-label="Refresh quote">
-              <RefreshCw className="size-3.5" strokeWidth={1.75} />
-            </button>
-          )}
+    <div className={cn(frame, "transition-opacity duration-200", loading && "opacity-60")} aria-live="polite">
+      <div className="flex h-8 items-center justify-between gap-2">
+        <span className="text-label text-subtle">You receive on NEAR</span>
+        <span className="flex items-center gap-1">
           {live ? <Tag tone="ok">live dry quote</Tag> : <Tag tone="warn">estimate</Tag>}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onRefresh}
+            loading={loading}
+            aria-label={loading ? "Refreshing quote" : "Refresh quote"}
+            className="-mr-2 w-8 px-0 max-sm:size-10"
+            icon={<RefreshCw className="size-3.5" strokeWidth={1.75} />}
+          />
         </span>
       </div>
-      <div className="num mt-1 text-[26px] leading-tight tracking-[-0.02em] text-fg">
-        {usdcStr(quote.amountOut)} <span className="font-sans text-[12px] text-muted">USDC</span>
+      <div className="num mt-1 flex items-baseline gap-1.5 text-num-lg text-fg">
+        {usdcStr(quote.amountOut)}
+        <span className="text-label font-normal tracking-normal text-subtle">USDC</span>
       </div>
-      <dl className="mt-2 [&>div]:py-1.5">
-        <KV k={`Minimum (${SLIPPAGE_BPS / 100}% slippage)`} v={`${usdcStr(quote.minAmountOut)} USDC`} />
+
+      <dl className="mt-3 divide-y divide-line border-t border-line">
+        <KV
+          k={live ? "Quote expires in" : "Estimate refreshes in"}
+          v={<Countdown to={quote.expiresAt} />}
+        />
+        <KV k={`Minimum, ${SLIPPAGE_BPS / 100}% slippage`} v={`${usdcStr(quote.minAmountOut)} USDC`} />
         <KV
           k="Fees"
           v={
@@ -248,25 +358,12 @@ function QuoteBox({
           }
         />
         <KV k="Estimated time" v={`~${duration(quote.timeEstimateSec * 1000)}`} />
-        <KV
-          k={live ? "Quote expires" : "Estimate refreshes"}
-          v={
-            <>
-              in <Countdown to={quote.expiresAt} />
-            </>
-          }
-        />
       </dl>
-      {quote.notes.length > 0 && (
-        <div className="mt-2 space-y-1.5 border-t border-dashed border-line-dashed pt-2.5">
-          {quote.notes.map((n, i) => (
-            <p key={i} className="flex items-start gap-1.5 text-[11.5px] leading-snug text-subtle">
-              <span className={cn("mt-[5px] size-1 shrink-0 rounded-full", live ? "bg-subtle" : "bg-warn")} />
-              <span>{n}</span>
-            </p>
-          ))}
-        </div>
-      )}
+      {quote.notes.map((n, i) => (
+        <p key={i} className={cn("mt-2 text-label", live ? "text-subtle" : "text-warn")}>
+          {n}
+        </p>
+      ))}
     </div>
   );
 }

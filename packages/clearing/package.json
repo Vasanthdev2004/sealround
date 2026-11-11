@@ -10,9 +10,15 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vectors": "tsx scripts/vectors.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0"
   },
   "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   }

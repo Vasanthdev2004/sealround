@@ -45,7 +45,7 @@ export const EMPTY_COPY: Record<SaleFilter, { title: string; body: string }> = {
   },
   refunding: {
     title: "No sales are refunding",
-    body: "A sale lands here if it misses its minimum raise or the enclave times out. Every bidder can then claim a full refund.",
+    body: "A sale lands here if it misses its minimum raise or the enclave times out. Every bidder can then claim their deposit back.",
   },
 };
 

@@ -27,13 +27,34 @@ export const VOID_LONG: Record<InvalidReason, string> = {
   zero_spend: "The sealed max spend was zero, so the bid counts as zero.",
 };
 
+/** The invalid-bid penalty kept from a fill's deposit (0 for a valid bid). Already taken out of `refund`. */
+export const penaltyOf = (f: Pick<ResultFill, "penalty">): bigint => f.penalty ?? 0n;
+
+/** True when the bid lost the 1 % penalty: a trusted clearing found it void. */
+export const isPenalized = (f: Pick<ResultFill, "penalty">) => penaltyOf(f) > 0n;
+
 /**
  * Fills as the bidder experiences them. On a failed sale nobody gets tokens
- * and every deposit comes back, whatever the enclave computed.
+ * and every deposit comes back, whatever the enclave computed. A bid that a
+ * trusted clearing found void still loses its penalty: the contract charges
+ * it whether the sale then settles or fails.
  */
 export function effectiveFills(result: SaleResult): ResultFill[] {
   if (result.status !== "failed") return result.fills;
-  return result.fills.map((f) => ({ ...f, tokens: 0n, spent: 0n, refund: f.deposit }));
+  return result.fills.map((f) => ({ ...f, tokens: 0n, spent: 0n, refund: f.deposit - penaltyOf(f) }));
+}
+
+/** Why a void bid is void, in a few words, or null when the chain does not say (a real contract only stores which bids pay). */
+export function voidLabel(f: ResultFill): string | null {
+  // An unrevealed commit-reveal bid has no terms at all; say that, not "could not be decrypted".
+  if (f.revealed === false) return "Not revealed";
+  return f.invalidReason ? VOID_TEXT[f.invalidReason] : null;
+}
+
+/** The same, as a full sentence. */
+export function voidSentence(f: ResultFill): string {
+  if (f.revealed === false) return "This bid was not revealed in the reveal window, so it counts as zero.";
+  return f.invalidReason ? VOID_LONG[f.invalidReason] : "This bid broke a bid rule, so it counts as zero.";
 }
 
 export type FillStatus = "filled" | "partial" | "refunded" | "void";
@@ -45,7 +66,17 @@ export function fillStatus(f: ResultFill): FillStatus {
 }
 
 export const isBot = (f: Pick<ResultFill, "tag">) => f.tag === "bot";
-export const isYou = (f: Pick<ResultFill, "tag" | "bidder">, account: string | null) =>
+
+/**
+ * True when the fills carry demo labels, so "bot" and "person" are facts and
+ * not guesses. Only the simulated chain tags its seeded bidders ("bot",
+ * "sim"). A real contract stores no roles, and there the page must not split
+ * winners into bots and people.
+ */
+export const rolesKnown = (fills: Pick<ResultFill, "tag">[]) =>
+  fills.some((f) => f.tag === "bot" || f.tag === "sim");
+
+export const isYou =(f: Pick<ResultFill, "tag" | "bidder">, account: string | null) =>
   f.tag === "you" || (!!account && f.bidder === account);
 
 export type GroupStats = {
@@ -121,30 +152,55 @@ export function topShare(fills: ResultFill[], k: number, total: bigint): number 
   return pct(top, total);
 }
 
-/** Plain-words explanation for a failed sale. */
+/**
+ * An illustrative row of `n` markers for "everyone sits on the one price
+ * line": how many are bots follows the bots' share of winners (at least one
+ * when any bot won). Decoration only; built from counts, never from prices.
+ * The first bot marker lands at position 2 so it survives a phone crop.
+ */
+export function lineDots(fills: ResultFill[], n = 14): ("person" | "bot")[] {
+  const winners = fills.filter((f) => f.tokens > 0n);
+  if (winners.length === 0) return [];
+  const count = Math.min(n, winners.length);
+  const bots = winners.filter(isBot).length;
+  const nb = bots === 0 ? 0 : Math.max(1, Math.round((bots / winners.length) * count));
+  const order = [2, 9, 5, 12, 7, 0, 11, 4, 13, 1, 8, 3, 10, 6];
+  const botAt = new Set(order.filter((i) => i < count).slice(0, nb));
+  return Array.from({ length: count }, (_, i) => (botAt.has(i) ? "bot" : "person"));
+}
+
+/** Sum of deposits of the bids the enclave found valid. */
+export function validDeposits(fills: ResultFill[]): bigint {
+  return fills.reduce((a, f) => (f.valid ? a + f.deposit : a), 0n);
+}
+
+/** Plain-words explanation for a failed sale: a short title and one sentence. */
 export function failText(result: SaleResult, sale: Sale): { title: string; body: string } {
   switch (result.failReason) {
     case "below_min_raise":
       return {
         title: "Minimum raise not met",
-        body: "The valid sealed bids did not add up to the minimum raise the creator locked at launch, so the sale did not go ahead. No tokens were sold.",
+        body: "The valid bids did not add up to the minimum raise locked at launch, so no tokens were sold.",
       };
     case "no_valid_bids":
       return {
         title: "No valid bids",
-        body: "None of the sealed bids could be used: each one failed to decrypt, was below the floor, or broke a rule. Nothing was sold.",
+        body:
+          sale.config.revealMode === "commit_reveal"
+            ? "Every bid was unrevealed, below the floor or broke a rule, so no tokens were sold."
+            : "Every sealed bid failed to decrypt, was below the floor or broke a rule, so no tokens were sold.",
       };
     case "settle_timeout":
       return {
         title: "The enclave never answered",
         body: `No clearing result arrived within the ${Math.round(
           sale.config.settleTimeoutMs / 3_600_000,
-        )}-hour settle timeout. After that anyone can switch the sale to refunds, and someone did. Sealed bids were never opened.`,
+        )}-hour settle timeout, so the sale was switched to refunds. Sealed bids were never opened.`,
       };
     default:
       return {
         title: "A contract check failed",
-        body: "The enclave returned a result, but the contract's own checks rejected it, so the sale moved to refunds instead of settling.",
+        body: "The contract's own checks rejected the enclave's result, so the sale moved to refunds instead of settling.",
       };
   }
 }
@@ -153,10 +209,15 @@ export const STATUS_BADGE: Record<FillStatus, { label: string; tone: Tone; title
   filled: { label: "Filled", tone: "ok", title: "Got tokens and spent the whole deposit." },
   partial: {
     label: "Partly filled",
-    tone: "accent",
+    // Green like Filled: it got tokens. Blue stays for live state, the price and the main action.
+    tone: "ok",
     title:
       "Got tokens and some USDC back: the bid was pro-rated at the clearing price, or its max spend was below the deposit.",
   },
   refunded: { label: "Refunded", tone: "neutral", title: "No tokens. The whole deposit comes back." },
-  void: { label: "Void", tone: "bad", title: "The bid could not be used. The whole deposit comes back." },
+  void: {
+    label: "Void",
+    tone: "bad",
+    title: "The bid could not be used. The deposit comes back less the 1 % invalid-bid penalty.",
+  },
 };

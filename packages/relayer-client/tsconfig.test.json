@@ -1,0 +1,11 @@
+{
+  // Tests run in Node and import the relayer service itself (@fairground/relayer),
+  // whose sources use .ts import extensions and Node types.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["src", "test"]
+}

@@ -1,23 +1,22 @@
 "use client";
 
-import { ArrowRight, Lock } from "lucide-react";
-import { Tag } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { ArrowRight } from "lucide-react";
 import { SimulatedNote } from "@/components/ui/bits";
-import { Rule } from "@/components/ui/panel";
-import { Note } from "./form-kit";
-import { CostPreview, LockStatement, RulesIdentity, RulesList } from "./rules";
+import { Button } from "@/components/ui/button";
+import { SectionProgress, type SectionStatuses } from "./progress";
+import { CostRow, SummaryTerms, TokenMark } from "./rules";
 import type { Derived, Draft } from "./model";
 
 /**
- * "Rules locked forever": every parameter in plain words, the cost preview
- * and the one main action. Sticky beside the form on wide screens, below it
- * on narrow ones.
+ * The sale as it stands while the creator fills in the form: the token, its
+ * terms as a ledger, the cost, how much of the form is ready, and the one
+ * action. Sticky beside the form on wide screens, after it on phones.
  */
 export function SummaryCard({
   draft,
   derived,
-  account,
+  mode,
+  statuses,
   errorCount,
   attempted,
   reviewError,
@@ -25,7 +24,9 @@ export function SummaryCard({
 }: {
   draft: Draft;
   derived: Derived;
-  account: string | null;
+  /** The chain the sale will be created on. */
+  mode: "mock" | "near";
+  statuses: SectionStatuses;
   errorCount: number;
   attempted: boolean;
   reviewError: string | null;
@@ -33,45 +34,38 @@ export function SummaryCard({
 }) {
   return (
     <section
-      aria-label="Rules summary"
-      className="panel flex flex-col overflow-hidden xl:max-h-[calc(100dvh-104px)]"
+      aria-label="Sale summary"
+      className="panel flex flex-col overflow-hidden lg:max-h-[calc(100dvh-88px)]"
     >
-      <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
-        <div className="flex items-center gap-2">
-          <Lock className="size-4 text-muted" strokeWidth={1.75} aria-hidden />
-          <h2 className="text-[14px] font-medium tracking-[-0.01em] text-fg">Rules locked forever</h2>
-        </div>
-        <Tag>testnet</Tag>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-5">
-        <RulesIdentity draft={draft} account={account} />
-        <Rule className="mt-4" />
-        <RulesList draft={draft} derived={derived} />
-        <LockStatement className="mt-4" />
-        <Rule className="my-4" />
-        <CostPreview />
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <TokenMark draft={draft} />
+        <SummaryTerms draft={draft} derived={derived} className="mt-4 border-t border-line" />
+        <CostRow mode={mode} tee={draft.revealMode === "tee"} className="border-t border-line" />
       </div>
 
-      <footer className="flex flex-col gap-3 border-t border-line bg-elev px-5 py-4">
-        {derived.insights.impossible && <Note tone="bad">This sale can never succeed. Fix the minimum raise first.</Note>}
+      <div className="flex shrink-0 flex-col gap-4 border-t border-line p-5">
+        <SectionProgress statuses={statuses} />
         {attempted && errorCount > 0 && (
-          <p role="alert" className="text-[12.5px] text-bad">
+          <p role="alert" className="text-label text-bad">
             Fix {errorCount} {errorCount === 1 ? "field" : "fields"} to continue.
           </p>
         )}
         {reviewError && (
-          <p role="alert" className="text-[12.5px] text-bad">
+          <p role="alert" className="text-label text-bad">
             {reviewError}
           </p>
         )}
-        <Button variant="primary" size="lg" className="w-full" onClick={onReview}>
-          Review rules <ArrowRight className="size-4" />
+        <Button
+          variant="primary"
+          size="lg"
+          className="w-full"
+          onClick={onReview}
+          icon={<ArrowRight className="order-last size-4" strokeWidth={1.75} aria-hidden />}
+        >
+          Review
         </Button>
-        <SimulatedNote>
-          Creation runs on a mock chain until the contract is on testnet. No NEAR is charged today.
-        </SimulatedNote>
-      </footer>
+        {mode === "mock" && <SimulatedNote>Simulated chain. Creating a sale here charges no NEAR.</SimulatedNote>}
+      </div>
     </section>
   );
 }

@@ -1,25 +1,25 @@
-# Fairground — Project Requirements (NEAR HACKATHON)
+# Sealround — Project Requirements (NEAR HACKATHON)
 
 Nov 9, 2026 · @Vasanth
 
 ## Summary
 
-Fairground is a sealed-bid, single-price sale protocol on NEAR. Bids stay hidden inside a TEE until the sale closes, everyone pays one clearing price, and buyers can pay from any chain. One line: **bots and you pay the same price.**
+Sealround is a sealed-bid, single-price sale protocol on NEAR. Bids stay hidden inside a TEE until the sale closes, everyone pays one clearing price, and buyers can pay from any chain. One line: **bots and you pay the same price.**
 
 - **Hackathon goal:** 1st place in Memecoins With Mechanics, while contending in Unstoppable DeFi, Privacy & Private AI and Open Innovation.
 - **What ships by Saturday:** a working fair launch on NEAR testnet, one capped mainnet pilot with real cross-chain bids, and a Bot Arena that proves snipers gain nothing.
 - **What we pitch:** fair-sale infrastructure for anything scarce. Token launches come first; NFT drops, tickets and GPU slots are roadmap.
 - **Track ids for the submission:** `memecoins`, `defi`, `privacy`, `open`.
 - **Deadline:** 14 Nov 2026, 23:59 UTC (15 Nov, 05:29 IST). Internal submit target: 14 Nov, 18:00 UTC (23:30 IST). Judging runs 16 to 18 Nov ([HACKATHON.md](https://nearhackathon.com/HACKATHON.md)).
-- **Name:** Fairground is a working name. Check availability before the first public post.
+- **Name:** Sealround is a working name. Check availability before the first public post.
 
 ## Problem and users
 
 First-come launches reward speed, not demand. Sniper bots buy in the first block, insiders front-run, and regular buyers become exit liquidity. NFT mints and ticket drops have the same problem.
 
-Token sales are a real market: Coinbase bought Echo, whose Sonar product runs public token sales, for about $375M in October 2025, after Echo handled $200M+ across roughly 300 deals ([Decrypt](https://decrypt.co/345168/coinbase-acquires-echo-375-million)). Fairground's angle is permissionless, any chain, private bids and no speed advantage.
+Token sales are a real market: Coinbase bought Echo, whose Sonar product runs public token sales, for about $375M in October 2025, after Echo handled $200M+ across roughly 300 deals ([Decrypt](https://decrypt.co/345168/coinbase-acquires-echo-375-million)). Sealround's angle is permissionless, any chain, private bids and no speed advantage.
 
-| User | What they want | What Fairground gives them | Phase |
+| User | What they want | What Sealround gives them | Phase |
 | --- | --- | --- | --- |
 | Buyer | The same price insiders get, paying from the chain they already use | Sealed bids, one clearing price, funding from any chain via NEAR Intents | P0 |
 | Creator | Real holders, not bot wallets; a launch nobody can rig | Rules locked at launch, no admin key, public result with proof | P0 |
@@ -28,9 +28,9 @@ Token sales are a real market: Coinbase bought Echo, whose Sonar product runs pu
 
 ## How it works
 
-Fairground runs a uniform-price, sealed-bid batch auction: nobody sees bids until the window closes, and every winner pays the same clearing price.
+Sealround runs a uniform-price, sealed-bid batch auction: nobody sees bids until the window closes, and every winner pays the same clearing price.
 
-1. **Creator sets the sale.** Supply for sale, floor price, minimum raise, bid window and caps. Fairground deploys the token with a fixed supply. Every parameter is locked; there is no admin key.
+1. **Creator sets the sale.** Supply for sale, floor price, minimum raise, bid window and caps. Sealround deploys the token with a fixed supply. Every parameter is locked; there is no admin key.
 2. **Bidder gets USDC on NEAR.** Either they already hold it, or they fund from SOL, ETH, BTC or USDC on another chain through 1Click.
 3. **Bidder submits a sealed bid.** A public USDC deposit plus an encrypted payload (max price, max spend, salt) that only the sale's enclave can open. Encryption happens in the browser.
 4. **Window closes.** Anyone can call close. The bid set is frozen on-chain.
@@ -53,7 +53,7 @@ Every bid with max price above P\* is filled in full at P\*. Bids exactly at P\*
 | Clearing price, each fill, each refund | Not known | Public |
 | Anonymized demand curve | Not known | Optional, chosen at launch (P1) |
 
-**Honest limits.** Fairground removes the speed advantage and the information advantage. It does not remove the capital advantage: a whale can still buy a large share at P\*. Sybil wallets gain nothing on price but can dodge per-wallet caps. Privacy depends on the OutLayer TEE. Trading after the sale is out of scope.
+**Honest limits.** Sealround removes the speed advantage and the information advantage. It does not remove the capital advantage: a whale can still buy a large share at P\*. Sybil wallets gain nothing on price but can dodge per-wallet caps. Privacy depends on the OutLayer TEE. Trading after the sale is out of scope.
 
 ## Scope
 
@@ -94,7 +94,7 @@ P0 is the whole submission: if it works end to end, we are competitive. P1 is ad
 
 The contract is the centre: it holds the money, deploys tokens and checks every clearing result, while OutLayer only sees and sorts the hidden prices.
 
-&#91;embedded content: Fairground architecture · 8 components\]
+&#91;embedded content: Sealround architecture · 8 components\]
 
 Funding goes through 1Click to the buyer's own NEAR account; the bid and its USDC go to the contract in one transfer; at close the contract sends the sealed bids to OutLayer and checks what comes back.
 
@@ -203,13 +203,13 @@ API flow: `GET /v0/tokens` → `POST /v0/quote` (dry) → `POST /v0/quote` (real
 
 **Fees.** Without an API key, 1Click adds 0.2 to 0.25% (HACKATHON.md and the fee page disagree). With a key from partners.near-intents.org, stablecoin pairs drop to 0.01% ([fee page](https://docs.near-intents.org/resources/fees)). Get a key on day 1.
 
-**Gas relayer (P0).** A small Node service relays NEP-366 meta transactions and pays gas only for calls to the Fairground contract and USDC transfers into it. It also covers the one-time USDC storage deposit for a new bidder. The 1 yoctoNEAR that `ft_transfer_call` needs still comes from the bidder's account. Rate-limited per account; stores nothing else.
+**Gas relayer (P0).** A small Node service relays NEP-366 meta transactions and pays gas only for calls to the Sealround contract and USDC transfers into it. It also covers the one-time USDC storage deposit for a new bidder. The 1 yoctoNEAR that `ft_transfer_call` needs still comes from the bidder's account. Rate-limited per account; stores nothing else.
 
 **Withdraw.** After claiming, unspent USDC can go back to any chain through a 1Click quote in the other direction.
 
 **Confidential funding (P1).** Add the 1Click `confidentiality` option so a buyer's origin wallet cannot be linked on-chain to their NEAR bid account. This uses NEAR's Confidential Intents, a product the judges know.
 
-**Delivery to Base via chain signatures (P1).** The contract derives an EVM address through the MPC signer (`v1.signer-prod.testnet`, secp256k1 domain 0). That address holds the sale tokens on Base; after settlement the contract signs ERC-20 transfers to winners' Base addresses, and a relayer broadcasts them. Each signature needs at least 1 yoctoNEAR and about 250 Tgas, and returns asynchronously ([chain signatures reference](https://github.com/near/agent-skills/blob/main/skills/near-smart-contracts/rules/chain-signatures.md)). This is what turns Fairground into a fair mode for openlaunch on Base, with NEAR as the logic layer.
+**Delivery to Base via chain signatures (P1).** The contract derives an EVM address through the MPC signer (`v1.signer-prod.testnet`, secp256k1 domain 0). That address holds the sale tokens on Base; after settlement the contract signs ERC-20 transfers to winners' Base addresses, and a relayer broadcasts them. Each signature needs at least 1 yoctoNEAR and about 250 Tgas, and returns asynchronously ([chain signatures reference](https://github.com/near/agent-skills/blob/main/skills/near-smart-contracts/rules/chain-signatures.md)). This is what turns Sealround into a fair mode for openlaunch on Base, with NEAR as the logic layer.
 
 ## Frontend
 
@@ -232,7 +232,7 @@ A Next.js and TypeScript app on Vercel, with every screen built so a judge can r
 - Result's bid-set hash equals the contract's stored hash
 - All contract-side checks passed (listed by name)
 
-**Where's-my-money panel** (sale and result pages). One row per hop, with a status and an explorer link: origin chain → 1Click deposit address → your NEAR account → Fairground contract → tokens and refund claimed. REFUNDED and FAILED states are shown in plain words.
+**Where's-my-money panel** (sale and result pages). One row per hop, with a status and an explorer link: origin chain → 1Click deposit address → your NEAR account → Sealround contract → tokens and refund claimed. REFUNDED and FAILED states are shown in plain words.
 
 **Judge mode.** A seeded testnet sale and a "run it" button that adds 50 simulated bidders and 3 sniper bots, closes the sale, clears it and opens the result. Funding shows live dry quotes.
 
@@ -244,7 +244,7 @@ The Bot Arena turns "bots gain nothing" from a claim into numbers a judge can re
 
 **1. Simulator (TypeScript, deterministic, seeded, no LLM calls)**
 
-- The same crowd goes through three launch types: a bonding-curve launch (constant-product with virtual reserves, as on popular meme launchpads), a first-come fixed-price sale, and Fairground.
+- The same crowd goes through three launch types: a bonding-curve launch (constant-product with virtual reserves, as on popular meme launchpads), a first-come fixed-price sale, and Sealround.
 - Crowd per run: 200 humans with private valuations and random arrival times, plus 5 sniper bots that buy at second 0 and sell into the first human demand.
 - 60 runs with different demand levels, which also meets the memecoin brief's "simulate first" requirement.
 - One command rebuilds every chart: `pnpm arena`.
@@ -290,9 +290,9 @@ One small mainnet sale with real people and real cross-chain bids is the evidenc
 
 ## Track requirements checklist
 
-Each track brief lists what its judges expect; this table maps every item to the part of Fairground that answers it. Briefs: [memecoins](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/11-memecoins.md), [DeFi](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/01-defi.md), [privacy](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/03-privacy.md), [open](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/13-open.md).
+Each track brief lists what its judges expect; this table maps every item to the part of Sealround that answers it. Briefs: [memecoins](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/11-memecoins.md), [DeFi](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/01-defi.md), [privacy](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/03-privacy.md), [open](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/13-open.md).
 
-| Track | The brief asks for | How Fairground meets it |
+| Track | The brief asks for | How Sealround meets it |
 | --- | --- | --- |
 | Memecoins | The mechanic in the contract, not a backend someone could switch off | Clearing checks and payouts live in the contract; only hidden prices live in the TEE |
 | Memecoins | All parameters set at launch, readable, no admin key | Immutable sale parameters, view methods, no owner methods |
@@ -311,7 +311,7 @@ Each track brief lists what its judges expect; this table maps every item to the
 | Open | Testnet demo with timers shortened to minutes | 30-minute judge-mode sale |
 | Open | A failure-cases section; argue against the idea first | README sections drafted in Submission package |
 
-The privacy brief centres on NEAR AI Cloud. Fairground uses OutLayer's TEE instead; the rules call hints "hints, not requirements", but say so in the README.
+The privacy brief centres on NEAR AI Cloud. Sealround uses OutLayer's TEE instead; the rules call hints "hints, not requirements", but say so in the README.
 
 **Rules for every entry** ([HACKATHON.md](https://nearhackathon.com/HACKATHON.md)):
 
@@ -389,7 +389,7 @@ The biggest risk is the OutLayer integration; every other risk has a cheap fallb
 | Chain-signature Base delivery takes too long | Lose the openlaunch-on-Base story | Leave it as P1 and show it in the roadmap | Thu 12 Nov |
 | Scope creep | Nothing works fully | P0 only until the Wednesday gate; feature freeze Fri 18:00 UTC | Daily |
 | A look-alike project appears | Less novelty | Check the directory daily (its open `/api/projects` endpoint); sharpen the pitch | Daily |
-| "Fairground" is taken | Rename late | Check X, GitHub and domains before the first public post | Wed 11 Nov |
+| "Sealround" is taken | Rename late | Check X, GitHub and domains before the first public post | Wed 11 Nov |
 
 **Unknowns to verify on day 1**
 
@@ -406,7 +406,7 @@ The repo is what judges review, and Claude Code and Codex screen it first, so th
 
 **README outline**
 
-1. What Fairground is, in two lines, plus the 90-second video
+1. What Sealround is, in two lines, plus the 90-second video
 2. Try it in 2 minutes with no funds: "do X → see Y" steps for judge mode
 3. How the auction works: the rule and the clearing formula
 4. What NEAR does here: OutLayer TEE, NEAR Intents funding, contract-side checks, chain signatures if shipped
@@ -430,7 +430,7 @@ Sealed-bid, single-price auctions are not new; batch auctions have run on Ethere
 | Time | On screen | Voice-over |
 | --- | --- | --- |
 | 0 to 8 s | A bonding-curve launch: bots buy in the first block | "Every launch, bots buy first and dump on you." |
-| 8 to 20 s | Sale page with sealed bids | "On Fairground, bids are sealed until close, and everyone pays one price." |
+| 8 to 20 s | Sale page with sealed bids | "On Sealround, bids are sealed until close, and everyone pays one price." |
 | 20 to 45 s | Live bot bids at second 0, a human at the last minute; the sale clears; both pay the same price; Verified panel goes green | "The bot was faster. It didn't matter." |
 | 45 to 60 s | An openlaunch user funds with USDC on Base; where's-my-money panel | "Pay from any chain through NEAR Intents." |
 | 60 to 75 s | Bot Arena chart from the simulator | Read the real numbers from the chart |
@@ -441,7 +441,7 @@ Sealed-bid, single-price auctions are not new; batch auctions have run on Ethere
 ```markdown
 Every token launch, bots buy in the first block and dump on you.
 
-Fairground fixes it: sealed bids, one clearing price. Bot or human, everyone pays the same.
+Sealround fixes it: sealed bids, one clearing price. Bot or human, everyone pays the same.
 
 Bids stay sealed inside a TEE on NEAR until the sale closes. Pay from any chain through NEAR Intents.
 
@@ -466,7 +466,7 @@ What would you launch with it?
 
 ## Definition of done and success metrics
 
-Fairground is done when a judge with no funds can run a sale end to end from the README, and the pilot has real numbers behind it.
+Sealround is done when a judge with no funds can run a sale end to end from the README, and the pilot has real numbers behind it.
 
 - [ ] A fresh clone plus the README commands reproduces judge mode with no errors
 - [ ] A testnet sale goes create → bids → close → clear → claim, with tokens and refunds correct to the smallest unit
@@ -480,7 +480,7 @@ Fairground is done when a judge with no funds can run a sale end to end from the
 | Metric | Target | Source |
 | --- | --- | --- |
 | Judge-mode time to a result | Under 2 minutes | Timed from the README |
-| Bot advantage in Fairground | Zero price advantage over humans | Live bot and simulator |
+| Bot advantage in Sealround | Zero price advantage over humans | Live bot and simulator |
 | Pilot bidders | 20 or more | Contract events |
 | Chains used to fund the pilot | 2 or more | 1Click statuses |
 | Close to settlement time | Under 2 minutes | Contract events |

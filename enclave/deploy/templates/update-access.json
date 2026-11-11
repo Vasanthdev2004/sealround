@@ -1,0 +1,31 @@
+{
+  "accessor": {
+    "Project": {
+      "project_id": "{{PROJECT_ID}}"
+    }
+  },
+  "profile": "{{PROFILE}}",
+  "new_access": {
+    "Logic": {
+      "operator": "And",
+      "conditions": [
+        {
+          "WasmHash": {
+            "hash": "{{SHA256}}"
+          }
+        },
+        {
+          "Predecessor": {
+            "condition": {
+              "Whitelist": {
+                "accounts": [
+                  "{{CALLER}}"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowDown, RotateCcw } from "lucide-react";
 import { Tag } from "@/components/ui/badge";
 import { CheckRow, type CheckState } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
+import { KV } from "@/components/ui/stat";
 import { dateTime, shortHash, usdcStr } from "@/lib/format";
 import { ONECLICK_STATUS_TEXT, type FundingRecord, type OneClickStatus } from "@/lib/funding";
 import { DEPOSIT_WINDOW_MS, SIM_PATH, isFinished } from "@/lib/oneclick";
+import { focusEl, scrollToEl } from "@/lib/scroll";
 
 const FAIL_END: OneClickStatus[] = ["REFUNDED", "FAILED", "INCOMPLETE_DEPOSIT"];
 const FAIL_LEAD: Partial<Record<OneClickStatus, string>> = {
@@ -15,7 +16,10 @@ const FAIL_LEAD: Partial<Record<OneClickStatus, string>> = {
   INCOMPLETE_DEPOSIT: "Deposit was less than quoted.",
 };
 
-/** Every 1Click status of one funding swap, in order, with the outcome in plain words. */
+/**
+ * One funding swap: what goes in and what comes out as a small ledger, every
+ * 1Click status in order, and the outcome in plain words.
+ */
 export function SwapProgress({
   funding,
   canBid,
@@ -40,74 +44,62 @@ export function SwapProgress({
 
   const goBid = () => {
     const el = document.getElementById("bid");
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
-    el?.querySelector("input")?.focus({ preventScroll: true });
+    scrollToEl(el);
+    focusEl(el?.querySelector("input"));
   };
 
   return (
-    <div className="space-y-4">
-      <div className="inset p-4">
-        <div className="flex items-center justify-between gap-2 text-[12px] text-subtle">
-          <span>
-            From {funding.originChain}
-          </span>
-          {funding.simulated && <Tag tone="warn">simulated</Tag>}
-        </div>
-        <div className="num mt-1 text-[18px] text-fg">
-          {funding.amountIn} <span className="font-sans text-[12px] text-muted">{funding.originAsset}</span>
-        </div>
-        <ArrowDown className="my-1 size-3.5 text-subtle" strokeWidth={1.75} />
-        <div className="num text-[18px] text-fg">
-          {usdcStr(funding.amountOutUsdc)} <span className="font-sans text-[12px] text-muted">USDC on NEAR</span>
-        </div>
-        <div className="mt-3 border-t border-dashed border-line-dashed pt-3 text-[12px] leading-relaxed text-subtle">
-          1Click deposit address{funding.simulated && " (simulated)"}:{" "}
-          <span className="num text-muted" title={funding.depositAddress}>
-            {shortHash(funding.depositAddress, 8)}
-          </span>
-          {!done && (
-            <>
-              <br />
-              Send before <span className="num text-muted" suppressHydrationWarning>{dateTime(funding.createdAt + DEPOSIT_WINDOW_MS)}</span>.
-            </>
-          )}
-        </div>
-      </div>
+    <div className="flex flex-col gap-4">
+      <dl className="-mt-2 divide-y divide-line border-b border-line">
+        <KV k={`From ${funding.originChain}`} v={`${funding.amountIn} ${funding.originAsset}`} />
+        <KV k="To NEAR" v={`${usdcStr(funding.amountOutUsdc)} USDC`} />
+        <KV
+          k={
+            <span className="inline-flex items-center gap-1.5">
+              1Click address {funding.simulated && <Tag>simulated</Tag>}
+            </span>
+          }
+          v={<span title={funding.depositAddress}>{shortHash(funding.depositAddress, 6)}</span>}
+        />
+        {!done && (
+          <KV k="Send before" v={<span suppressHydrationWarning>{dateTime(funding.createdAt + DEPOSIT_WINDOW_MS)}</span>} />
+        )}
+      </dl>
 
-      <div className="divide-y divide-line" aria-live="polite">
+      <div className="-my-1.5 divide-y divide-line" aria-live="polite">
         {path.map((s, i) => (
-          <CheckRow key={s} state={state(i)} label={ONECLICK_STATUS_TEXT[s]} detail={s} className="py-2" />
+          <CheckRow key={s} state={state(i)} label={ONECLICK_STATUS_TEXT[s]} detail={s} className="py-2.5" />
         ))}
       </div>
 
       {funding.status === "SUCCESS" && (
-        <div className="rounded-card border border-ok/25 bg-ok-soft p-3.5">
-          <p className="text-[13px] text-fg">
-            <span className="num">{usdcStr(funding.amountOutUsdc)}</span> test USDC arrived in{" "}
-            <span className="num">{funding.account}</span>.
+        <div className="anim-rise border-t border-line pt-4">
+          <p className="text-small text-muted [overflow-wrap:anywhere]">
+            <span className="font-[510] text-ok">Arrived.</span>{" "}
+            <span className="num text-fg">{usdcStr(funding.amountOutUsdc)}</span> test USDC is in{" "}
+            <span className="num text-fg">{funding.account}</span>
+            {canBid ? "." : ". It stays there until you use it."}
           </p>
-          {canBid ? (
-            <Button variant="tactile" size="sm" onClick={goBid} className="mt-2.5 w-full">
+          {canBid && (
+            <Button onClick={goBid} className="mt-3 w-full max-sm:h-10">
               Place your sealed bid
             </Button>
-          ) : (
-            <p className="mt-1 text-[12.5px] text-muted">It stays in your account until you use it.</p>
           )}
         </div>
       )}
       {failedEnd && (
-        <div className="rounded-card border border-bad/25 bg-bad-soft p-3.5 text-[13px] text-fg">
-          {FAIL_LEAD[funding.status]}{" "}
-          <span className="num">
+        <p className="anim-rise border-t border-line pt-4 text-small text-muted">
+          <span className="font-[510] text-bad">{FAIL_LEAD[funding.status]}</span>{" "}
+          <span className="num text-fg">
             {funding.amountIn} {funding.originAsset}
           </span>{" "}
-          goes back to <span className="num">{shortHash(funding.refundTo, 6)}</span> on {funding.originChain}. No USDC was
-          credited.
-        </div>
+          goes back to <span className="num text-fg">{shortHash(funding.refundTo, 6)}</span> on {funding.originChain}. No
+          USDC was credited.
+        </p>
       )}
 
       {done && (
-        <Button variant="ghost" size="sm" onClick={onNewSwap} icon={<RotateCcw className="size-3.5" />} className="w-full">
+        <Button variant="ghost" size="sm" onClick={onNewSwap} className="-ml-3 self-start max-sm:h-10">
           New swap
         </Button>
       )}

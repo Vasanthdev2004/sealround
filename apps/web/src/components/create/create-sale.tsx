@@ -6,13 +6,16 @@ import { PageHeader } from "@/components/ui/panel";
 import { getClient } from "@/lib/client";
 import { validateConfig } from "@/lib/client/mock";
 import { useClientQuery } from "@/lib/hooks";
+import { focusEl, scrollToEl } from "@/lib/scroll";
 import { useWallet } from "@/lib/wallet";
 import { AllocationSection } from "./allocation-section";
 import { Insights } from "./insights";
 import { LimitsSection } from "./limits-section";
-import { ModeSection } from "./mode-section";
+import { FixedRules, ModeSection } from "./mode-section";
+import { CreateSteps, sectionStatuses } from "./progress";
 import { PriceSection } from "./price-section";
 import { Review } from "./review";
+import type { CreateCost, EditTarget } from "./rules";
 import { SummaryCard } from "./summary-card";
 import { TokenSection } from "./token-section";
 import { WindowSection } from "./window-section";
@@ -27,18 +30,41 @@ import {
   sectionDomId,
   type Draft,
   type FieldKey,
+  type SectionId,
 } from "./model";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function scrollToSection(k: FieldKey) {
-  document.getElementById(sectionDomId(SECTION_OF[k]))?.scrollIntoView({ behavior: "smooth", block: "start" });
+const sectionOf = (k: EditTarget): SectionId => (k === "mode" ? "mode" : SECTION_OF[k]);
+
+function scrollToSection(k: EditTarget) {
+  scrollToEl(document.getElementById(sectionDomId(sectionOf(k))));
 }
 
-/** /create: sectioned form with a sticky locked-rules summary, then a review step. */
+/**
+ * After the section has rendered: focus the first field marked invalid in it,
+ * or else its first control, so keyboard and screen-reader users land where
+ * the fix is (not on the button they pressed at the bottom of the summary).
+ */
+function focusSection(k: EditTarget) {
+  window.setTimeout(() => {
+    const sec = document.getElementById(sectionDomId(sectionOf(k)));
+    focusEl(
+      sec?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+        sec?.querySelector<HTMLElement>("input, textarea, select, [role=radio][tabindex='0']"),
+    );
+  }, 80);
+}
+
+/** Focus the page's h1 (PageHeader makes it focusable) once the new step has rendered. */
+function focusHeading() {
+  window.setTimeout(() => focusEl(document.querySelector<HTMLElement>("main h1")), 60);
+}
+
+/** /create: a sectioned form beside a sticky summary of the sale, then a review step. */
 export function CreateSale() {
   const router = useRouter();
-  const { account, connect, connecting } = useWallet();
+  const { account, connect, connecting, mode } = useWallet();
   // Existing sales, to catch a taken symbol while typing. Updates on any change; no polling needed.
   const salesQ = useClientQuery(() => getClient().listSales(), ["create:sales"], 0);
   const sales = salesQ.data;
@@ -51,11 +77,25 @@ export function CreateSale() {
   const [step, setStep] = useState<"edit" | "review">("edit");
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // The sale exists and its page is loading: the review step shows that until the route changes.
+  const [created, setCreated] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // NEAR mode: what the contract says these parameters cost (it validates them too).
+  const [cost, setCost] = useState<CreateCost>({ state: "idle" });
 
   const taken = new Set((sales ?? []).map((s) => s.config.tokenSymbol));
   const derived = derive(draft, taken, now);
   const errorCount = Object.keys(derived.errors).length;
+
+  /** Whether field k's error is on screen: live errors at once, the rest after blur or a review attempt. */
+  const shown = (key: FieldKey) => {
+    const e = derived.errors[key];
+    return !!e && (!!e.live || !!touched[key] || attempted);
+  };
+  const error = (key: FieldKey) => (shown(key) ? derived.errors[key]?.msg : undefined);
+  // Computed before the handlers below: the React Compiler lint otherwise assumes this
+  // call could run them during render (they read the clock).
+  const statuses = sectionStatuses(derived, shown);
 
   const set: SectionProps["set"] = (key, value) => {
     setDraft((p) => ({ ...p, [key]: value }));
@@ -63,11 +103,6 @@ export function CreateSale() {
     setReviewError(null);
   };
   const touch = (key: FieldKey) => setTouched((t) => (t[key] ? t : { ...t, [key]: true }));
-  const error = (key: FieldKey) => {
-    const e = derived.errors[key];
-    if (!e) return undefined;
-    return e.live || touched[key] || attempted ? e.msg : undefined;
-  };
 
   const review = () => {
     const t = Date.now();
@@ -76,34 +111,51 @@ export function CreateSale() {
     if (!fresh.ready) {
       setAttempted(true);
       const first = FIELD_ORDER.find((k) => fresh.errors[k]);
-      if (first) scrollToSection(first);
+      if (first) {
+        scrollToSection(first);
+        focusSection(first);
+      }
       return;
     }
+    const client = getClient();
+    const config = buildConfig(draft, fresh.ready, t, client.usdcContract);
     try {
-      validateConfig(buildConfig(draft, fresh.ready, t), sales ?? []);
+      validateConfig(config, sales ?? []);
     } catch (e) {
       setReviewError(message(e));
       return;
     }
     setReviewError(null);
     setSubmitError(null);
+    if (client.mode === "near") {
+      // The contract checks the same parameters and names its price: the
+      // review step shows it, and Create stays off until it has answered.
+      setCost({ state: "loading" });
+      client.getCreateCost(account ?? client.contractId, config, buildMeta(draft)).then(
+        (yocto) => setCost({ state: "ready", yocto }),
+        (e: unknown) => setCost({ state: "error", message: message(e) }),
+      );
+    }
     setStep("review");
     window.scrollTo({ top: 0 });
+    focusHeading();
   };
 
-  const backToEdit = (focus?: FieldKey) => {
+  const backToEdit = (focus?: EditTarget) => {
     setStep("edit");
     setSubmitError(null);
     if (focus) {
-      setTouched((t) => ({ ...t, [focus]: true }));
+      if (focus !== "mode") setTouched((t) => ({ ...t, [focus]: true }));
       requestAnimationFrame(() => scrollToSection(focus));
+      focusSection(focus);
     } else {
       requestAnimationFrame(() => window.scrollTo({ top: 0 }));
+      focusHeading();
     }
   };
 
   const create = async () => {
-    if (!account || submitting) return;
+    if (!account || submitting || created) return;
     const t = Date.now();
     setNow(t);
     const fresh = derive(draft, taken, t);
@@ -114,8 +166,24 @@ export function CreateSale() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const sale = await getClient().createSale(account, buildConfig(draft, fresh.ready, t), buildMeta(draft));
+      const client = getClient();
+      const config = buildConfig(draft, fresh.ready, t, client.usdcContract);
+      const meta = buildMeta(draft);
+      if (client.mode === "near" && cost.state === "ready") {
+        // The wallet attaches what the contract asks at this moment. If that is
+        // no longer the figure on screen, show the new one and wait for a second
+        // confirmation. A failed read does not block: createSale reads it again
+        // and reports its own errors.
+        const latest = await client.getCreateCost(account, config, meta).catch(() => null);
+        if (latest !== null && latest !== cost.yocto) {
+          setCost({ state: "ready", yocto: latest, was: cost.yocto });
+          setSubmitting(false);
+          return;
+        }
+      }
+      const sale = await client.createSale(account, config, meta);
       // Stay in the pending state until the sale page takes over.
+      setCreated(true);
       router.push(`/sale/${sale.id}`);
     } catch (e) {
       setSubmitError(message(e));
@@ -129,13 +197,16 @@ export function CreateSale() {
         draft={draft}
         derived={derived}
         account={account}
+        mode={mode}
+        cost={cost}
         connect={() => void connect()}
         connecting={connecting}
         submitting={submitting}
+        created={created}
         submitError={submitError}
         onBack={() => backToEdit()}
         onCreate={() => void create()}
-        onEditField={(k) => backToEdit(k)}
+        onEdit={(k) => backToEdit(k)}
       />
     );
   }
@@ -143,29 +214,31 @@ export function CreateSale() {
   const sectionProps: SectionProps = { draft, set, error, touch, derived };
 
   return (
-    <div className="mx-auto flex max-w-[1180px] flex-col gap-6">
+    <div className="flex flex-col gap-8 lg:gap-10">
       <PageHeader
-        eyebrow="Step 1 of 2 · Set the rules"
-        title="Create a sale"
-        description="Buyers seal their bids, the sale clears at one price, and everyone who wins pays it. You set the rules once; after creation nobody can change them."
+        title="Launch a sale"
+        description="Every rule you set here locks when the sale is created."
+        aside={<CreateSteps at={0} />}
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
-        <div className="flex min-w-0 flex-col gap-4">
-          <TokenSection {...sectionProps} />
-          <AllocationSection {...sectionProps} />
-          <PriceSection {...sectionProps} />
-          <WindowSection {...sectionProps} />
-          <LimitsSection {...sectionProps} />
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start xl:gap-14">
+        <div className="flex min-w-0 flex-col gap-10 sm:gap-12">
+          <TokenSection {...sectionProps} status={statuses.token} />
+          <AllocationSection {...sectionProps} status={statuses.allocation} />
+          <PriceSection {...sectionProps} status={statuses.price} />
+          <WindowSection {...sectionProps} status={statuses.window} />
+          <LimitsSection {...sectionProps} status={statuses.limits} />
           <Insights derived={derived} />
-          <ModeSection {...sectionProps} />
+          <ModeSection {...sectionProps} status={statuses.mode} />
+          <FixedRules />
         </div>
 
-        <aside className="min-w-0 xl:sticky xl:top-[80px]">
+        <aside className="min-w-0 lg:sticky lg:top-[72px]">
           <SummaryCard
             draft={draft}
             derived={derived}
-            account={account}
+            mode={mode}
+            statuses={statuses}
             errorCount={errorCount}
             attempted={attempted}
             reviewError={reviewError}

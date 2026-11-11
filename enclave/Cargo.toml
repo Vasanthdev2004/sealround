@@ -1,0 +1,103 @@
+# Fairground's OutLayer job ("the enclave job") and the tools that test it.
+#
+# A workspace of its own: the root workspace excludes `enclave`, so the job has
+# its own Cargo.lock and target dir and its build never depends on the
+# contracts' dependency tree. The job's logic lives in ../crates/sealer
+# (fairground-sealer); `job` is only the WASI program around it.
+#
+#   job            fairground-sealer-job, bin `fairground-sealer`: what OutLayer runs
+#   tools/runner   fairground-runner: runs a module the way OutLayer's worker does
+#   tools/harness  fairground-harness: sealed-bid fixtures, the bid sealer for the
+#                  smoke tests (`fairground-seal`) and the wasm tests
+#
+# The module OutLayer runs, whose sha256 the contract and the secret pin, comes
+# ONLY from the Docker build: ..\scripts\build-enclave.ps1 -> res\fairground_sealer.wasm
+# (-Verify rebuilds and compares). A native build embeds this machine's source
+# paths and gives another hash; it is for tests and measurements only:
+#   cargo build --release --target wasm32-wasip1 -p fairground-sealer-job
+# Run either:     ..\scripts\run-enclave.ps1 (see PERF.md for the measurements)
+[workspace]
+resolver = "3"
+members = ["job", "tools/runner", "tools/harness"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Vasanthdev2004/fairground"
+
+[workspace.dependencies]
+fairground-clearing = { path = "../crates/clearing" }
+fairground-sealer = { path = "../crates/sealer" }
+fairground-harness = { path = "tools/harness" }
+fairground-runner = { path = "tools/runner" }
+# The crate the sealer seals with; the harness seals padded plaintexts itself.
+crypto_box = { version = "0.9.1", default-features = false, features = ["alloc", "rand_core", "salsa20", "seal", "getrandom"] }
+# The job's own pass over a request (repeated keys, `op`) uses serde's visitor API.
+serde = "1.0.228"
+serde_json = "1.0.149"
+# `alloc`: wipes the heap copy of the master's hex too.
+zeroize = { version = "1.8.2", default-features = false, features = ["alloc"] }
+
+# The job's profile: what OutLayer runs and what its wasm sha256 pins.
+# Chosen by measuring a 500-bid clear under the runner (PERF.md, "Choosing the
+# profile"): opt-level 3 used the fewest instructions (z +24 %, s +21 %,
+# 2 +0.2 %). Instructions are what OutLayer meters and limits. The size
+# difference (252 KB against 195-209 KB at s and z) does not matter: the worker
+# takes modules up to 10 MiB.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# A panic can only end the run. The job never panics on input (every problem
+# becomes an `"ok":false` answer), so unwinding would only add code.
+panic = "abort"
+overflow-checks = false
+debug = false
+strip = true
+incremental = false
+
+# Fail closed in Fairground's own code: an arithmetic overflow there aborts the
+# run instead of producing a wrong clearing result. The clearing crate uses
+# checked math throughout, so this only guards against bugs. Turned on for the
+# whole build it would also check every limb operation of the curve25519
+# arithmetic and cost 68 % more instructions (PERF.md).
+[profile.release.package.fairground-clearing]
+overflow-checks = true
+[profile.release.package.fairground-sealer]
+overflow-checks = true
+[profile.release.package.fairground-sealer-job]
+overflow-checks = true
+
+# The native tools (the runner embeds wasmtime and Cranelift), optimised for
+# speed. `cargo build --profile tools -p fairground-runner -p fairground-harness`
+[profile.tools]
+inherits = "release"
+opt-level = 3
+lto = false
+codegen-units = 16
+# Required on Windows: wasmtime 28 leaves a trap raised in a libcall (out of
+# fuel, the time limit) with longjmp, which on MSVC unwinds through Rust
+# `extern "C"` frames; with `unwind` those frames abort the whole process
+# ("panic in a function that cannot unwind"). With `abort` they have no
+# unwind guard and the trap is reported. Linux, where the worker runs, is not
+# affected.
+panic = "abort"
+overflow-checks = false
+strip = false
+incremental = true
+
+# Tests build wasmtime too. Unoptimised, or with debug assertions, Cranelift and
+# the WASI host run several times slower, which skews the perf test's timings.
+# This builds dependencies like release; our crates stay debuggable.
+[profile.dev.package."*"]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+# The job's logic keeps every check in tests.
+[profile.dev.package.fairground-clearing]
+debug-assertions = true
+overflow-checks = true
+[profile.dev.package.fairground-sealer]
+debug-assertions = true
+overflow-checks = true

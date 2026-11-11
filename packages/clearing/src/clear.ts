@@ -24,6 +24,13 @@
  *
  * Charge: spent = ceil(tokens * P* / ONE). Since tokens <= floor(maxSpend*ONE/P*),
  * spent <= maxSpend <= deposit always holds.
+ *
+ * Max price ceiling (optional): decrypted max prices above it are clamped to
+ * it before anything else, so P* never exceeds the ceiling.
+ *
+ * Every amount must fit in u128 (the Rust port's type). Params it cannot
+ * use, or amounts that would leave u128, throw a ClearingError whose `code`
+ * matches the Rust port's error.
  */
 
 export type Bid = {
@@ -49,9 +56,59 @@ export type SaleParams = {
   floorPrice: bigint;
   /** Minimum total raise, USDC base units. Below this the sale fails. */
   minRaise: bigint;
-  /** Token decimals. Default 18. */
+  /** Token decimals, 0..=24. Default 18. */
   decimals?: number;
+  /**
+   * Optional max price ceiling, USDC base units per whole token. Decrypted max
+   * prices above it are clamped to it. undefined or null = no ceiling.
+   */
+  maxPrice?: bigint | null;
 };
+
+/** Largest value of the Rust port's u128. */
+export const U128_MAX = (1n << 128n) - 1n;
+export const DEFAULT_DECIMALS = 18;
+/** Highest token decimals a sale may use. */
+export const MAX_DECIMALS = 24;
+
+export type ClearingErrorCode =
+  | "sale_supply_not_positive"
+  | "floor_price_not_positive"
+  | "decimals_out_of_range"
+  | "ceiling_below_floor"
+  | "overflow";
+
+/** Params clearing cannot use, or amounts that would leave u128. Same codes as the Rust port. */
+export class ClearingError extends Error {
+  readonly code: ClearingErrorCode;
+  constructor(code: ClearingErrorCode, message: string) {
+    super(message);
+    this.name = "ClearingError";
+    this.code = code;
+  }
+}
+
+/** Throws a ClearingError unless clearing can use these params. */
+export function validateParams(params: SaleParams): void {
+  const decimals = params.decimals ?? DEFAULT_DECIMALS;
+  if (params.saleSupply <= 0n) {
+    throw new ClearingError("sale_supply_not_positive", "saleSupply must be positive");
+  }
+  if (params.floorPrice <= 0n) {
+    throw new ClearingError("floor_price_not_positive", "floorPrice must be positive");
+  }
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_DECIMALS) {
+    throw new ClearingError("decimals_out_of_range", `decimals must be an integer in 0..=${MAX_DECIMALS}`);
+  }
+  if (params.maxPrice != null && params.maxPrice < params.floorPrice) {
+    throw new ClearingError("ceiling_below_floor", "maxPrice ceiling must be at least floorPrice");
+  }
+}
+
+/** 10^decimals: base units in one whole token. */
+export const oneToken = (decimals: number = DEFAULT_DECIMALS) => 10n ** BigInt(decimals);
+
+const overflow = () => new ClearingError("overflow", "amounts do not fit in u128");
 
 export type InvalidReason =
   | "decrypt_failed"
@@ -115,7 +172,8 @@ export function costOf(tokens: bigint, price: bigint, one: bigint): bigint {
   return ceilDiv(tokens * price, one);
 }
 
-type ValidBid = { i: number; maxPrice: bigint; maxSpend: bigint };
+/** A bid that passed validation, with its (clamped) decrypted terms. */
+export type ValidBid = { i: number; maxPrice: bigint; maxSpend: bigint };
 
 /** Aggregate demand at price P, token base units. */
 export function demandAt(valid: ValidBid[], price: bigint, one: bigint): bigint {
@@ -128,7 +186,8 @@ export function demandAt(valid: ValidBid[], price: bigint, one: bigint): bigint 
 
 /**
  * Split `amount` across `weights` pro rata (floor), then give leftover units
- * one at a time in array order. Requires amount <= sum(weights).
+ * one at a time in array order, skipping entries already at their weight.
+ * When amount >= sum(weights) every entry gets its full weight.
  */
 export function prorate(amount: bigint, weights: bigint[]): bigint[] {
   const total = weights.reduce((a, b) => a + b, 0n);
@@ -146,19 +205,28 @@ export function prorate(amount: bigint, weights: bigint[]): bigint[] {
 }
 
 export function clear(params: SaleParams, bids: Bid[]): ClearingResult {
-  const one = 10n ** BigInt(params.decimals ?? 18);
+  validateParams(params);
+  const one = oneToken(params.decimals);
   const S = params.saleSupply;
   const F = params.floorPrice;
-  if (S <= 0n) throw new Error("saleSupply must be positive");
-  if (F <= 0n) throw new Error("floorPrice must be positive");
+  const ceiling = params.maxPrice ?? null;
 
-  const reasons = bids.map((b) => validateBid(b, F));
+  // The ceiling applies before validation; it is >= the floor, so it never
+  // turns a valid bid invalid.
+  const clamped =
+    ceiling === null
+      ? bids
+      : bids.map((b) => (b.maxPrice !== null && b.maxPrice > ceiling ? { ...b, maxPrice: ceiling } : b));
+  const reasons = clamped.map((b) => validateBid(b, F));
   const valid: ValidBid[] = [];
-  bids.forEach((b, i) => {
+  clamped.forEach((b, i) => {
     if (reasons[i] === null) {
       valid.push({ i, maxPrice: b.maxPrice!, maxSpend: b.maxSpend! });
     }
   });
+  // Demand only falls as the price rises, so if each bid's demand at the floor
+  // fits u128, every later per-bid amount fits too.
+  if (valid.some((b) => tokensFor(b.maxSpend, F, one) > U128_MAX)) throw overflow();
 
   const tokens = bids.map(() => 0n);
   let price = F;
@@ -214,6 +282,7 @@ export function clear(params: SaleParams, bids: Bid[]): ClearingResult {
 
   const totalSold = fills.reduce((a, f) => a + f.tokens, 0n);
   const totalRaised = fills.reduce((a, f) => a + f.spent, 0n);
+  if (totalRaised > U128_MAX) throw overflow();
   const base = {
     clearingPrice: price,
     oversubscribed,
@@ -253,16 +322,21 @@ export function clear(params: SaleParams, bids: Bid[]): ClearingResult {
 
 /**
  * The checks the contract runs on an enclave result. The contract cannot see
- * prices, so it verifies only what public data allows. Returns failed check names.
+ * prices, so it verifies only what public data allows. Returns failed check
+ * names; throws a ClearingError only for unusable params.
  */
 export function contractChecks(
   params: SaleParams,
   bids: Pick<Bid, "bidder" | "deposit">[],
   result: Pick<ClearingResult, "clearingPrice" | "fills" | "totalRaised">,
 ): string[] {
-  const one = 10n ** BigInt(params.decimals ?? 18);
+  validateParams(params);
+  const one = oneToken(params.decimals);
   const failed: string[] = [];
   if (result.clearingPrice < params.floorPrice) failed.push("price_at_least_floor");
+  if (params.maxPrice != null && result.clearingPrice > params.maxPrice) {
+    failed.push("price_at_most_ceiling");
+  }
   const sold = result.fills.reduce((a, f) => a + f.tokens, 0n);
   if (sold > params.saleSupply) failed.push("sold_at_most_supply");
   if (result.fills.length !== bids.length) failed.push("one_fill_per_bid");

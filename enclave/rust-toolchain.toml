@@ -1,0 +1,5 @@
+# The job's wasm sha256 is pinned on chain, so the compiler is pinned too.
+[toolchain]
+channel = "1.97.1"
+targets = ["wasm32-wasip1"]
+profile = "minimal"

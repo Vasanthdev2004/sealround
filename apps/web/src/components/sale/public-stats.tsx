@@ -1,27 +1,55 @@
-import { EyeOff } from "lucide-react";
-import { Stat } from "@/components/ui/stat";
+import { Stat, StatRow } from "@/components/ui/stat";
 import { priceStr, tokenStr, usdcStr } from "@/lib/format";
-import type { Sale } from "@/lib/types";
+import type { Sale, SaleResult } from "@/lib/types";
 
-/** What anyone can read on-chain right now. Deposits yes, prices never. */
-export function PublicStats({ sale }: { sale: Sale }) {
+/**
+ * The status panel's last row: four public numbers divided by hairlines (two
+ * by two on phones). Always four cells, so the panel keeps one shape through
+ * every phase. Deposits yes, individual prices never.
+ *
+ * `revealed` (commit-reveal, after the close) replaces the bid count with
+ * "revealed of total". `result` (settled) swaps in what the clearing produced.
+ */
+export function PublicStats({
+  sale,
+  result,
+  revealed,
+  className,
+}: {
+  sale: Sale;
+  result?: SaleResult | null;
+  revealed?: number | null;
+  className?: string;
+}) {
   const c = sale.config;
-  // 2 columns on phones (last one full width), 3 + 2 from `sm` up. No empty cells.
-  const top = "sm:col-span-2";
-  const bottom = "sm:col-span-3";
+  const commit = c.revealMode === "commit_reveal";
+  const bids = sale.bidCount.toLocaleString("en-US");
+  const deposited = <Stat label="Deposited" value={usdcStr(sale.totalDeposits)} unit="USDC" />;
+
   return (
-    <section aria-label="Public sale stats">
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-card border border-line bg-line sm:grid-cols-6 [&>*]:bg-elev [&>*]:px-4 [&>*]:py-3.5">
-        <Stat className={top} label="Sealed bids" value={sale.bidCount.toLocaleString("en-US")} />
-        <Stat className={top} label="Total deposits" value={usdcStr(sale.totalDeposits)} unit="USDC" />
-        <Stat className={top} label="Floor, per token" value={priceStr(c.floorPrice)} unit="USDC" />
-        <Stat className={bottom} label="Sale supply" value={tokenStr(c.saleSupply, c.decimals)} unit={c.tokenSymbol} />
-        <Stat className={`col-span-2 ${bottom}`} label="Min raise" value={usdcStr(c.minRaise)} unit="USDC" />
-      </div>
-      <p className="mt-2.5 flex items-start gap-1.5 px-1 text-[12px] leading-snug text-subtle">
-        <EyeOff className="mt-px size-3.5 shrink-0" strokeWidth={1.75} />
-        Deposits are public on-chain. Max prices and max spends are sealed, and are never published.
-      </p>
+    // -mb-4 takes back the cells' bottom padding, so the row ends on the panel's own padding.
+    <section aria-label="Public sale numbers" className={className}>
+      <StatRow flush className="-mb-4 border-t border-line">
+        {sale.status === "settled" && result ? (
+          <>
+            <Stat label="Valid bids" value={result.nValid.toLocaleString("en-US")} unit={`of ${bids}`} />
+            {deposited}
+            <Stat label="Raised" value={usdcStr(result.totalRaised)} unit="USDC" />
+            <Stat label="Sold" value={tokenStr(result.totalSold, c.decimals)} unit={c.tokenSymbol} />
+          </>
+        ) : (
+          <>
+            {revealed !== undefined ? (
+              <Stat label="Revealed" value={revealed === null ? "–" : revealed.toLocaleString("en-US")} unit={`of ${bids}`} />
+            ) : (
+              <Stat label={commit ? "Committed bids" : "Sealed bids"} value={bids} />
+            )}
+            {deposited}
+            <Stat label="Floor price" value={priceStr(c.floorPrice)} unit="USDC" />
+            <Stat label="Min raise" value={usdcStr(c.minRaise)} unit="USDC" />
+          </>
+        )}
+      </StatRow>
     </section>
   );
 }

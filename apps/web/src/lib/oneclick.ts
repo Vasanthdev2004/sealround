@@ -6,6 +6,12 @@
  * Intents testnet, so on testnet the swap itself is simulated: a FundingRecord
  * walks through the real 1Click statuses and then test USDC is minted.
  *
+ * Delivery needs the recipient registered on the USDC contract (NEP-145): a
+ * transfer to an unregistered account fails. In NEAR mode `ensureDeliverable`
+ * has the relayer register the account for free before any USDC is sent
+ * (the wallet pays the 0.00125 NEAR itself only when the relayer's storage
+ * budget is used up). The simulated chain has no registration.
+ *
  * Money is bigint everywhere. USD values from 1Click arrive as decimal strings
  * and are parsed to micro-USD (6 dp), the same scale as USDC.
  */
@@ -14,6 +20,31 @@ import { parseUnits } from "@fairground/clearing";
 import { getClient } from "./client";
 import { fakeTxHash, randomHex } from "./crypto";
 import { getFundings, saveFunding, type FundingRecord, type OneClickStatus } from "./funding";
+import type { StorageResult, WriteOptions } from "./types";
+
+// ---------- delivery ----------
+
+/**
+ * Makes sure `account` can receive USDC, before a swap delivers to it:
+ * - already registered on the USDC contract: nothing happens;
+ * - otherwise the relayer registers it at its own cost (POST /storage); an
+ *   answer of already_registered, or rate_limited while the account turns out
+ *   to be registered, counts as success;
+ * - when the relayer's storage budget is used up for the day (or there is no
+ *   relayer), the connected wallet pays a storage_deposit of 0.00125 NEAR.
+ *   `opts.onPaidFallback` is awaited first, so the UI can say why the wallet
+ *   is about to ask; throwing there stops it.
+ *
+ * Returns how the account got registered. Always "already_registered" on the
+ * simulated chain. Throws a FairgroundError when the account could not be
+ * registered; no USDC must be sent to it then.
+ */
+export function ensureDeliverable(account: string, opts?: WriteOptions): Promise<StorageResult> {
+  return getClient().ensureUsdcStorage(account, opts);
+}
+
+/** Whether a swap can be simulated here: it ends by minting test USDC, which mainnet has not. */
+export const canSimulateSwaps = (): boolean => getClient().capabilities.faucet;
 
 // ---------- constants ----------
 
@@ -508,6 +539,10 @@ function advance(rec: FundingRecord, plan: SimPlan, delayMs: number) {
       if (!nextStatus) return stop();
       if (nextStatus === "SUCCESS") {
         try {
+          // The recipient must be registered on USDC before anything is
+          // delivered (a no-op on the simulated chain and for a registered
+          // account).
+          await ensureDeliverable(from.account);
           // Keyed on the funding id, so a second tab or a resume after a
           // reload never credits twice. Marked credited only once it landed.
           await withTabLock(`fairground:oneclick:${from.id}`, () =>
@@ -515,7 +550,7 @@ function advance(rec: FundingRecord, plan: SimPlan, delayMs: number) {
           );
           writePlan(from.id, { ...plan, credited: true });
         } catch {
-          // Faucet failed: say so instead of claiming the USDC arrived.
+          // Registration or the faucet failed: say so instead of claiming the USDC arrived.
           saveFunding({ ...from, status: "FAILED", updatedAt: Date.now() });
           return stop();
         }

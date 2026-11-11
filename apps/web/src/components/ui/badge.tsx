@@ -1,26 +1,41 @@
+import { CircleCheck, CircleDashed, CircleDot, Clock, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { STATUS_LABEL, STATUS_TONE, type Tone } from "@/lib/format";
+import { STATUS_LABEL, type Tone } from "@/lib/format";
 import type { SaleStatus } from "@/lib/types";
 
-const tones: Record<Tone, { box: string; dot: string }> = {
-  accent: { box: "bg-accent-soft text-accent", dot: "bg-accent" },
-  ok: { box: "bg-ok-soft text-ok", dot: "bg-ok" },
-  warn: { box: "bg-warn-soft text-warn", dot: "bg-warn" },
-  bad: { box: "bg-bad-soft text-bad", dot: "bg-bad" },
-  bot: { box: "bg-bot-soft text-bot", dot: "bg-bot" },
-  neutral: { box: "bg-hover text-muted", dot: "bg-subtle" },
+/**
+ * State is a dot and a word. The chip is always the same hairline outline, so
+ * a row of badges never turns into a row of coloured boxes. `text` is for the
+ * few places a tone colours the word itself (Tag).
+ */
+const tones: Record<Tone, { dot: string; text: string }> = {
+  accent: { dot: "bg-live", text: "text-accent-bright" },
+  ok: { dot: "bg-ok", text: "text-ok" },
+  warn: { dot: "bg-warn", text: "text-warn" },
+  bad: { dot: "bg-bad", text: "text-bad" },
+  bot: { dot: "bg-bot", text: "text-bot" },
+  neutral: { dot: "bg-subtle", text: "text-muted" },
 };
 
+/**
+ * Status pill. `dot` adds a state dot (only for real state, never decoration);
+ * `pulse` adds a soft ring leaving the dot, for live states.
+ * `size="lg"` for headers and hero cards.
+ */
 export function Badge({
   tone = "neutral",
   dot,
   pulse,
+  plain,
+  size = "md",
   className,
   children,
 }: {
   tone?: Tone;
   dot?: boolean;
   pulse?: boolean;
+  plain?: boolean;
+  size?: "md" | "lg";
   className?: string;
   children: React.ReactNode;
 }) {
@@ -28,34 +43,77 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex h-[22px] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap",
-        t.box,
+        "inline-flex items-center font-[510] whitespace-nowrap text-fg",
+        !plain && "rounded-full border border-line",
+        size === "md" ? "h-6 gap-1.5 text-[12.5px]" : "h-7 gap-2 text-label",
+        !plain && (size === "md" ? "px-2" : "px-2.5"),
         className,
       )}
     >
-      {dot && <span className={cn("size-1.5 rounded-full", t.dot, pulse && "pulse-dot")} />}
+      {dot && (
+        <span className="relative inline-flex size-1.5 shrink-0" aria-hidden>
+          {pulse && <span className={cn("ping-ring absolute inset-0 rounded-full", t.dot)} />}
+          <span className={cn("relative size-1.5 rounded-full", t.dot)} />
+        </span>
+      )}
       {children}
     </span>
   );
 }
 
-export function SaleStatusBadge({ status, className }: { status: SaleStatus; className?: string }) {
-  const live = status === "open" || status === "clearing";
+const SALE_STATUS_ICONS = {
+  upcoming: CircleDashed,
+  open: CircleDot,
+  awaiting_close: Clock,
+  clearing: LoaderCircle,
+  revealing: Eye,
+  settled: CircleCheck,
+  failed: RotateCcw,
+} satisfies Record<SaleStatus, typeof CircleDot>;
+
+export function SaleStatusBadge({
+  status,
+  className,
+  size,
+  plain,
+}: {
+  status: SaleStatus;
+  className?: string;
+  size?: "md" | "lg";
+  plain?: boolean;
+}) {
+  const Icon = SALE_STATUS_ICONS[status];
   return (
-    <Badge tone={STATUS_TONE[status]} dot pulse={live} className={className}>
+    <Badge plain={plain} size={size} className={className}>
+      <Icon className="size-3.5 shrink-0 text-muted" strokeWidth={1.75} aria-hidden />
       {STATUS_LABEL[status]}
     </Badge>
   );
 }
 
-/** Small mono tag, e.g. "simulated", "testnet", "bot". */
-export function Tag({ children, tone = "neutral" }: { children: React.ReactNode; tone?: Tone }) {
+/**
+ * Small tag for honest labels and kinds: "simulated", "testnet", "sim", "bot",
+ * "estimate". Sentence case, 12px, the tone colours the word only.
+ */
+export function Tag({
+  children,
+  tone = "neutral",
+  className,
+  title,
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+  className?: string;
+  title?: string;
+}) {
   const t = tones[tone];
   return (
     <span
+      title={title}
       className={cn(
-        "inline-flex h-[18px] items-center rounded-[5px] px-1.5 font-mono text-[10.5px] tracking-wide uppercase",
-        t.box,
+        "inline-flex h-5 shrink-0 items-center rounded-[5px] bg-wash px-1.5 text-tag font-[510] whitespace-nowrap",
+        t.text,
+        className,
       )}
     >
       {children}

@@ -1,59 +1,153 @@
 @import "tailwindcss";
 
 /*
- * Fairground design tokens.
- * Dark, quiet, tactile. Hairline dashed frame, skeuomorphic buttons,
- * one blue accent. Numbers are always mono + tabular.
+ * Sealround design tokens. See apps/web/UI-DIRECTION.md for how to use them.
+ *
+ * Dark (default): a neutral near-black canvas, hairline borders, flat controls
+ * and one accent, Base blue (#0052FF), for primary actions, selections, the
+ * clearing price, progress, links and focus. Light: the same blue on white.
  */
 :root {
-  --bg: #121212;
-  --bg-elev: #17171a;
-  --bg-elev-2: #1e1e22;
-  --bg-elev-hover: #1a1a1e;
-  --bg-inset: #0d0d0f;
-  --bg-hover: rgba(255, 255, 255, 0.04);
+  /* ---- Canvas and surfaces ---- */
+  --bg: #08090a;
+  --bg-inset: #050506;
+  --bg-elev: #0f1011;
+  --bg-elev-2: #17181a;
+  --bg-elev-3: #1f2023;
+  --wash-soft: rgba(255, 255, 255, 0.045);
+  --wash: rgba(255, 255, 255, 0.08);
+  --wash-strong: rgba(255, 255, 255, 0.12);
 
-  --line: rgba(255, 255, 255, 0.07);
-  --line-strong: rgba(255, 255, 255, 0.12);
-  --line-dashed: rgba(255, 255, 255, 0.16);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --line-hover: rgba(255, 255, 255, 0.22);
+  --control-line: #3b3e44;
+  --control-line-hover: #575b62;
 
-  --fg: #fafafa;
-  --fg-muted: #a8a8ad;
-  /* At least 4.5:1 on every surface up to bg-elev-2 (WCAG AA body text). */
-  --fg-subtle: #85858c;
+  /* ---- Ink ---- */
+  --fg: #f7f8f8;
+  --fg-muted: #9ea2aa;
+  --fg-subtle: #80848c;
 
-  --accent: #2b85ff;
-  --accent-strong: #0a62f0;
-  --accent-soft: rgba(43, 133, 255, 0.14);
+  /* ---- Accent and action colors (Base blue) ---- */
+  --accent: #3d7eff;
+  --accent-strong: #0052ff;
+  --accent-bright: #5b93ff;
+  --accent-soft: rgba(0, 82, 255, 0.18);
+  --action: #0052ff;
+  --action-hover: #1a63ff;
+  --action-pressed: #0046db;
+  --action-ink: #fff;
+  --danger-action: #c4293f;
+  --danger-hover: #d03149;
+  --danger-pressed: #ab2236;
+  --selection: rgba(0, 82, 255, 0.35);
 
-  --ok: #3ecf8e;
-  --ok-soft: rgba(62, 207, 142, 0.12);
-  --warn: #f5b341;
-  --warn-soft: rgba(245, 179, 65, 0.12);
-  --bad: #ff6161;
-  --bad-soft: rgba(255, 97, 97, 0.12);
-  --bot: #c084fc;
-  --bot-soft: rgba(192, 132, 252, 0.14);
+  /* ---- State: a dot or a word. Never a filled surface. ---- */
+  --live: #4cc38a;
+  --ok: #4cc38a;
+  --ok-soft: rgba(76, 195, 138, 0.12);
+  --warn: #e2a336;
+  --warn-soft: rgba(226, 163, 54, 0.12);
+  --bad: #f06a6a;
+  --bad-soft: rgba(240, 106, 106, 0.12);
+  --bot: #a78bfa;
+  --bot-soft: rgba(167, 139, 250, 0.13);
+
+  /* ---- Data viz (categorical; blue is always Sealround / the price) ---- */
+  --viz-fairground: #3d7eff;
+  --viz-bonding: #e2a336;
+  --viz-fixed: #4cc38a;
+  --viz-bot: #a78bfa;
+  --viz-people: #c9ccd1;
+  --viz-grid: var(--line);
+  --viz-axis: var(--fg-subtle);
+
+  /* ---- Depth: borders do the work; shadows only under things that float ---- */
+  --elev-pop: 0 0 0 1px var(--line), 0 4px 12px rgba(0, 0, 0, 0.4), 0 16px 40px -8px rgba(0, 0, 0, 0.6);
+
+  /* ---- Motion ---- */
+  --easing-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --easing-surface: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --easing-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 400ms;
 
   color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #fcfcfd;
+  --bg-inset: #f6f7f9;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #f6f7f9;
+  --bg-elev-3: #eef0f3;
+  --wash-soft: rgba(10, 11, 13, 0.035);
+  --wash: rgba(10, 11, 13, 0.06);
+  --wash-strong: rgba(10, 11, 13, 0.1);
+
+  --line: #e6e8ec;
+  --line-strong: #d2d6dc;
+  --line-hover: #b4bac4;
+  --control-line: #c5cad2;
+  --control-line-hover: #959ca8;
+
+  --fg: #0a0b0d;
+  --fg-muted: #555b66;
+  --fg-subtle: #646a75;
+
+  --accent: #0052ff;
+  --accent-strong: #0047e0;
+  --accent-bright: #0047e0;
+  --accent-soft: rgba(0, 82, 255, 0.08);
+  --action: #0052ff;
+  --action-hover: #0047e0;
+  --action-pressed: #003dc2;
+  --selection: rgba(0, 82, 255, 0.16);
+
+  --live: #11744e;
+  --ok: #11744e;
+  --ok-soft: rgba(17, 116, 78, 0.1);
+  --warn: #85500a;
+  --warn-soft: rgba(133, 80, 10, 0.1);
+  --bad: #b42335;
+  --bad-soft: rgba(180, 35, 53, 0.09);
+  --bot: #6142b3;
+  --bot-soft: rgba(97, 66, 179, 0.1);
+
+  --viz-fairground: #0052ff;
+  --viz-bonding: #9b570c;
+  --viz-fixed: #147653;
+  --viz-bot: #6948bb;
+  --viz-people: #5b616c;
+  --elev-pop: 0 0 0 1px var(--line), 0 4px 12px rgba(16, 24, 40, 0.08), 0 16px 40px -8px rgba(16, 24, 40, 0.16);
+
+  color-scheme: light;
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-elev: var(--bg-elev);
   --color-elev-2: var(--bg-elev-2);
-  --color-elev-hover: var(--bg-elev-hover);
+  --color-elev-3: var(--bg-elev-3);
   --color-inset: var(--bg-inset);
-  --color-hover: var(--bg-hover);
+  --color-hover: var(--wash-soft);
+  --color-wash-soft: var(--wash-soft);
+  --color-wash: var(--wash);
+  --color-wash-strong: var(--wash-strong);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
-  --color-line-dashed: var(--line-dashed);
+  --color-control: var(--control-line);
+  --color-control-hover: var(--control-line-hover);
   --color-fg: var(--fg);
   --color-muted: var(--fg-muted);
   --color-subtle: var(--fg-subtle);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
+  --color-accent-bright: var(--accent-bright);
   --color-accent-soft: var(--accent-soft);
+  --color-live: var(--live);
   --color-ok: var(--ok);
   --color-ok-soft: var(--ok-soft);
   --color-warn: var(--warn);
@@ -62,15 +156,99 @@
   --color-bad-soft: var(--bad-soft);
   --color-bot: var(--bot);
   --color-bot-soft: var(--bot-soft);
+  --color-viz-fairground: var(--viz-fairground);
+  --color-viz-bonding: var(--viz-bonding);
+  --color-viz-fixed: var(--viz-fixed);
+  --color-viz-bot: var(--viz-bot);
+  --color-viz-people: var(--viz-people);
 
-  --font-sans: var(--font-funnel-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-funnel-display), var(--font-funnel-sans), sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-  --radius-tile: 10px;
-  --radius-btn: 11px;
+  /* Shape: controls 8px, cards and panels 12px, chips fully round. Nothing else. */
+  --radius-tile: 8px;
+  --radius-btn: 8px;
   --radius-card: 12px;
-  --radius-panel: 14px;
+  --radius-media: 12px;
+  --radius-panel: 12px;
+
+  --shadow-pop: var(--elev-pop);
+
+  --ease-out: var(--easing-out);
+  --ease-in-out: var(--easing-in-out);
+  --ease-surface: var(--easing-surface);
+
+  /*
+   * Type scale. Each token sets size, line-height, tracking and weight, so
+   * `text-h1` is a complete heading. Weights are Inter's 510 (medium) and 590
+   * (semibold); display sizes track tight, as the optical size expects.
+   */
+  --text-display: clamp(2.5rem, 1.55rem + 3.2vw, 4rem);
+  --text-display--line-height: 1.03;
+  --text-display--letter-spacing: -0.024em;
+  --text-display--font-weight: 510;
+  --text-h1: clamp(2rem, 1.5rem + 1.7vw, 3rem);
+  --text-h1--line-height: 1.06;
+  --text-h1--letter-spacing: -0.022em;
+  --text-h1--font-weight: 510;
+  --text-h2: 1.5rem;
+  --text-h2--line-height: 1.25;
+  --text-h2--letter-spacing: -0.016em;
+  --text-h2--font-weight: 510;
+  --text-h3: 1rem;
+  --text-h3--line-height: 1.4;
+  --text-h3--letter-spacing: -0.011em;
+  --text-h3--font-weight: 590;
+  --text-lead: 1.0625rem;
+  --text-lead--line-height: 1.55;
+  --text-lead--letter-spacing: -0.011em;
+  --text-prose: 1rem;
+  --text-prose--line-height: 1.7;
+  --text-prose--letter-spacing: -0.011em;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.6;
+  --text-body--letter-spacing: -0.011em;
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.5;
+  --text-small--letter-spacing: -0.006em;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.4;
+  --text-label--letter-spacing: -0.003em;
+  --text-tag: 0.75rem;
+  --text-tag--line-height: 1;
+  --text-tag--letter-spacing: 0;
+
+  /* Number scale (use with .num). */
+  --text-num-hero: clamp(3rem, 2.1rem + 3vw, 4.5rem);
+  --text-num-hero--line-height: 1;
+  --text-num-hero--letter-spacing: -0.03em;
+  --text-num-hero--font-weight: 510;
+  --text-num-xl: 2.5rem;
+  --text-num-xl--line-height: 1;
+  --text-num-xl--letter-spacing: -0.028em;
+  --text-num-xl--font-weight: 510;
+  --text-num-lg: 1.75rem;
+  --text-num-lg--line-height: 1.1;
+  --text-num-lg--letter-spacing: -0.024em;
+  --text-num-lg--font-weight: 510;
+  --text-num-md: 1.375rem;
+  --text-num-md--line-height: 1.2;
+  --text-num-md--letter-spacing: -0.02em;
+  --text-num-md--font-weight: 510;
+  --text-num-sm: 1rem;
+  --text-num-sm--line-height: 1.4;
+  --text-num-sm--letter-spacing: -0.011em;
+  --text-num-sm--font-weight: 510;
+
+  --animate-rise: rise var(--dur-slow) var(--easing-out) both;
+  --animate-fade: fade var(--dur-slow) var(--easing-out) both;
+  --animate-pop: pop 320ms var(--easing-out) both;
+  --animate-draw-x: draw-x 450ms var(--easing-out) both;
+}
+
+html {
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 html,
@@ -81,14 +259,16 @@ body {
 
 body {
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: var(--accent-soft);
+  background: var(--selection);
   color: var(--fg);
 }
 
@@ -101,96 +281,163 @@ body {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
 }
 
 /*
- * Surfaces, tactile buttons and the shimmer skeleton live in the components
- * layer so Tailwind utilities (bg-*, border-*, focus:border-*, rounded-*)
- * placed next to them can override them.
+ * Surfaces, buttons and the shimmer skeleton live in the components layer so
+ * Tailwind utilities (bg-*, border-*, rounded-*, shadow-*, text-*) placed next
+ * to them can override them.
  */
 @layer components {
   /* ---------- Surfaces ---------- */
 
-  /* Diagonal hatch used in the outer gutters and empty states. */
-  .hatch {
-    background-image: repeating-linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.035) 0 1px,
-      transparent 1px 7px
-    );
-  }
-
+  /* A card: one step up from the canvas, a hairline border, no shadow. */
   .panel {
-    background: var(--bg-elev);
+    background-color: var(--bg-elev);
     border: 1px solid var(--line);
     border-radius: var(--radius-panel);
   }
 
+  /* Quiet grouping: the hairline only. */
+  .panel-outline {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+  }
+
+  /* Raised tile inside a card (option cards, popovers). */
   .tile {
-    background: var(--bg-elev-2);
+    background-color: var(--bg-elev-2);
     border: 1px solid var(--line);
     border-radius: var(--radius-tile);
   }
 
+  /* Recessed well: inputs, code, ciphertext. */
   .inset {
-    background: var(--bg-inset);
-    border: 1px solid var(--line);
+    background-color: var(--bg-inset);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius-tile);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
   }
 
-  /* ---------- Tactile buttons ---------- */
+  /* ---------- Buttons: flat. Hover changes the fill a step; press dims it. ---------- */
 
+  /* Secondary. */
   .btn-tactile {
-    background: linear-gradient(#2a2a2e, #1f1f22);
+    background-color: var(--wash-soft);
     border-radius: var(--radius-btn);
-    box-shadow:
-      inset -6px 0 6px rgba(0, 0, 0, 0.15),
-      inset 0 -6px 6px rgba(0, 0, 0, 0.25),
-      0 0 0 1px rgba(255, 255, 255, 0.1),
-      4px 10px 16px rgba(0, 0, 0, 0.5);
-    transition: filter 120ms ease, transform 120ms ease;
+    box-shadow: inset 0 0 0 1px var(--line);
+    transition:
+      background-color var(--dur-fast) var(--easing-surface),
+      box-shadow var(--dur-fast) var(--easing-surface),
+      color var(--dur-fast) var(--easing-surface);
   }
-  .btn-tactile:hover:not(:disabled) {
-    filter: brightness(1.12);
+  @media (hover: hover) {
+    .btn-tactile:hover:not(:disabled) {
+      background-color: var(--wash);
+      box-shadow: inset 0 0 0 1px var(--line-strong);
+    }
   }
-  .btn-tactile:active:not(:disabled) {
-    transform: translateY(1px);
-    box-shadow:
-      inset 0 2px 6px rgba(0, 0, 0, 0.45),
-      0 0 0 1px rgba(255, 255, 255, 0.08);
+  .btn-tactile:active:not(:disabled),
+  .btn-tactile[aria-pressed="true"] {
+    background-color: var(--wash-strong);
   }
 
+  /* Primary: blue in both themes. One per decision area. */
   .btn-primary {
-    background: linear-gradient(#3a90ff, #0a62f0);
+    background-color: var(--action);
     border-radius: var(--radius-btn);
-    color: #fff;
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.35),
-      inset 0 -4px 8px rgba(0, 0, 0, 0.18),
-      0 0 0 1px rgba(8, 72, 196, 0.9),
-      0 6px 16px rgba(10, 98, 240, 0.32);
-    transition: filter 120ms ease, transform 120ms ease;
+    color: var(--action-ink);
+    transition:
+      background-color var(--dur-fast) var(--easing-surface),
+      color var(--dur-fast) var(--easing-surface);
   }
-  .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.08);
+  @media (hover: hover) {
+    .btn-primary:hover:not(:disabled) {
+      background-color: var(--action-hover);
+    }
   }
   .btn-primary:active:not(:disabled) {
-    transform: translateY(1px);
-    box-shadow:
-      inset 0 2px 6px rgba(0, 0, 0, 0.35),
-      0 0 0 1px rgba(8, 72, 196, 0.9);
+    background-color: var(--action-pressed);
   }
 
   .btn-danger {
-    background: linear-gradient(#ff7373, #d93b3b);
+    background-color: var(--danger-action);
     border-radius: var(--radius-btn);
-    color: #fff;
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.3),
-      inset 0 -4px 8px rgba(0, 0, 0, 0.18),
-      0 0 0 1px rgba(150, 30, 30, 0.9),
-      0 6px 16px rgba(217, 59, 59, 0.28);
+    color: var(--action-ink);
+    transition: background-color var(--dur-fast) var(--easing-surface);
+  }
+  @media (hover: hover) {
+    .btn-danger:hover:not(:disabled) {
+      background-color: var(--danger-hover);
+    }
+  }
+  .btn-danger:active:not(:disabled) {
+    background-color: var(--danger-pressed);
+  }
+
+  /* ---------- Data ---------- */
+
+  /* Numbers: the same family, tabular. In a layer, so tracking-* / text-* utilities tune it. */
+  .num {
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Sealed ciphertext and hashes. */
+  .cipher {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--fg-muted);
+    word-break: break-all;
+    letter-spacing: 0;
+  }
+
+  /* Typeset math (the clearing formula): a math or serif face, lining figures.
+     Variables are <var> (italic); words like "max" stay upright in the sans. */
+  .math {
+    font-family: "STIX Two Math", "Cambria Math", Cambria, "Times New Roman", Times, serif;
+    font-variant-numeric: lining-nums;
+    letter-spacing: 0;
+  }
+  .math var {
+    font-style: italic;
+  }
+
+  /* A ledger: quiet header, even rows, hairlines. */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .data-table th {
+    height: 36px;
+    padding: 0 12px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--fg-subtle);
+    text-align: left;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--line);
+  }
+  .data-table td {
+    height: 44px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .data-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .data-table tbody tr {
+    transition: background-color var(--dur-fast) var(--easing-surface);
+  }
+  .data-table tbody tr:hover {
+    background-color: var(--wash-soft);
   }
 
   /*
@@ -198,20 +445,31 @@ body {
    * alongside it shows through as the skeleton's base.
    */
   .shimmer {
-    background-image: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 255, 255, 0.06) 50%,
-      transparent 100%
-    );
+    background-image: linear-gradient(90deg, transparent 0%, var(--wash) 50%, transparent 100%);
     background-size: 200% 100%;
     animation: shimmer 1.6s linear infinite;
   }
-}
 
-.rule-dashed {
-  border-color: var(--line-dashed);
-  border-style: dashed;
+  /* ---------- One-shot entrance helpers (CSS only, no JS needed) ---------- */
+  /* Stagger with style={{ "--i": n }} (50 ms per step). */
+  .anim-rise {
+    animation: rise var(--dur-slow) var(--easing-out) both;
+    animation-delay: calc(var(--i, 0) * 50ms);
+  }
+  .anim-fade {
+    animation: fade var(--dur-slow) var(--easing-out) both;
+    animation-delay: calc(var(--i, 0) * 50ms);
+  }
+  .anim-pop {
+    animation: pop 320ms var(--easing-out) both;
+    animation-delay: calc(var(--i, 0) * 50ms);
+  }
+  /* A price line drawing itself from the left. */
+  .anim-draw-x {
+    transform-origin: left center;
+    animation: draw-x 450ms var(--easing-out) both;
+    animation-delay: calc(var(--i, 0) * 50ms);
+  }
 }
 
 button:disabled,
@@ -220,36 +478,22 @@ button:disabled,
   cursor: not-allowed;
 }
 
-/* ---------- Numbers ---------- */
-
-.num {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-}
-
-/* Sealed ciphertext rendering. */
-.cipher {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-subtle);
-  word-break: break-all;
-  letter-spacing: 0.02em;
-}
-
 /* ---------- Motion ---------- */
 
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
+/* One soft ring leaving a live dot. */
+@keyframes ping-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
   }
-  50% {
-    opacity: 0.35;
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
   }
 }
-.pulse-dot {
-  animation: pulse-dot 1.6s ease-in-out infinite;
+.ping-ring {
+  animation: ping-ring 2s var(--easing-out) infinite;
 }
 
 @keyframes shimmer {
@@ -261,12 +505,54 @@ button:disabled,
   }
 }
 
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes draw-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
   }
 }

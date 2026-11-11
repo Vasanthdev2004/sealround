@@ -18,7 +18,7 @@ export const LAUNCH_TYPES: LaunchType[] = ["bonding_curve", "fixed_price", "fair
 export const LAUNCH_LABEL: Record<LaunchType, string> = {
   bonding_curve: "Bonding curve",
   fixed_price: "Fixed price, first come",
-  fairground: "Fairground",
+  fairground: "Sealround",
 };
 
 export type ArenaConfig = {

@@ -1,0 +1,18 @@
+{
+  "outlayer": "outlayer.testnet",
+  "sealer_source": {
+    "Project": {
+      "project_id": "{{PROJECT_ID}}",
+      "version_key": "{{SHA256}}"
+    }
+  },
+  "sealer_code_hash": "{{SHA256}}",
+  "sealer_secrets": {
+    "profile": "{{PROFILE}}",
+    "account_id": "{{OWNER}}"
+  },
+  "allowed_quote_tokens": [
+    "usdc.fakes.testnet",
+    "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"
+  ]
+}

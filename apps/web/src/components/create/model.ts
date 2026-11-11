@@ -10,7 +10,7 @@
  */
 
 import { parseUnits } from "@fairground/clearing";
-import { CONTRACT_ID, USDC_TOKEN } from "@/lib/client/mock";
+import { MIN_DEPOSIT_FLOOR, invalidBidPenalty, tokenAccountOf } from "@/lib/client/rules";
 import { priceStr, usdcStr } from "@/lib/format";
 import type { RevealMode, SaleConfig, SaleMeta } from "@/lib/types";
 
@@ -20,6 +20,22 @@ const U128_MAX = (1n << 128n) - 1n;
 const MINUTE = 60_000;
 export const SETTLE_TIMEOUT_MS = 120 * MINUTE;
 export const MAX_WINDOW_MINUTES = 30 * 24 * 60;
+/**
+ * Bid slots of a sale made with this form (the contract's `max_bids`, at most
+ * 500). The creator prepays storage for each slot and gets the unused ones
+ * back, so the form asks for a modest number and says so. 100 is also what
+ * the NEAR client sends when a config names none.
+ */
+export const BID_SLOTS = 100;
+
+/** Commit-reveal only: how long bidders have to reveal after the close (the contract takes 1 minute to 7 days). */
+export type RevealWindowPreset = "1" | "10" | "60" | "1440";
+export const REVEAL_WINDOW_PRESETS: { value: RevealWindowPreset; label: string; testnet?: boolean }[] = [
+  { value: "1", label: "1m", testnet: true },
+  { value: "10", label: "10m" },
+  { value: "60", label: "1h" },
+  { value: "1440", label: "24h" },
+];
 /** Creator share above this (basis points of total supply) gets a warning. */
 export const CREATOR_WARN_BPS = 2_000n;
 export const NAME_MAX = 32;
@@ -61,6 +77,8 @@ export type Draft = {
   minDeposit: string;
   maxDeposit: string;
   revealMode: RevealMode;
+  /** Minutes. Used only when `revealMode` is commit-reveal. */
+  revealWindow: RevealWindowPreset;
 };
 
 /** The spec demo values. Name and symbol stay empty: FAIRT is already taken. */
@@ -83,6 +101,7 @@ export const DEFAULT_DRAFT: Draft = {
   minDeposit: "1",
   maxDeposit: "10",
   revealMode: "tee",
+  revealWindow: "10",
 };
 
 export type FieldKey =
@@ -184,6 +203,14 @@ export type Insights = {
   impossible: boolean;
   /** Min raise above a sell-out at the floor: the price must clear higher. */
   needsAboveFloor: boolean;
+  /**
+   * What filling every bid slot with junk bids costs an attacker: the 1 %
+   * penalty on each (lost for good) and the deposits tied up until the sale
+   * ends. USDC base units. Grows with the minimum deposit: that is the
+   * creator's lever against it.
+   */
+  slotBlockLost: bigint | null;
+  slotBlockHeld: bigint | null;
 };
 
 /** Basis points of total supply. */
@@ -350,7 +377,10 @@ export function derive(d: Draft, taken: ReadonlySet<string>, now: number | null)
   // 5. Limits
   const minDep = usdcAmount(d.minDeposit, "Minimum deposit must be above zero.");
   if (minDep.e !== undefined) err("minDeposit", minDep.e);
-  else v.minDeposit = minDep.v;
+  else if (minDep.v < MIN_DEPOSIT_FLOOR) {
+    // The contract's floor (sale.rs MIN_DEPOSIT_FLOOR): below it a junk bid would cost next to nothing.
+    err("minDeposit", `At least ${usdcStr(MIN_DEPOSIT_FLOOR)} USDC. The contract refuses a lower minimum.`, true);
+  } else v.minDeposit = minDep.v;
 
   const maxDep = usdcAmount(d.maxDeposit, "The cap must be above zero.");
   if (maxDep.e !== undefined) err("maxDeposit", maxDep.e);
@@ -409,10 +439,11 @@ export function derive(d: Draft, taken: ReadonlySet<string>, now: number | null)
       id: "commit-reveal",
       tone: "warn",
       section: "mode",
-      text: "Commit-reveal is weaker: max prices become public when bidders reveal.",
+      text: "Commit-reveal is weaker: max prices become public when bidders reveal, and a bidder who misses the reveal window loses 1 % of their deposit.",
     });
   }
 
+  const slots = BigInt(BID_SLOTS);
   const insights: Insights = {
     raiseAtFloor,
     maxRaise,
@@ -422,6 +453,8 @@ export function derive(d: Draft, taken: ReadonlySet<string>, now: number | null)
     perAccountBps,
     impossible,
     needsAboveFloor,
+    slotBlockLost: v.minDeposit !== undefined ? slots * invalidBidPenalty(v.minDeposit) : null,
+    slotBlockHeld: v.minDeposit !== undefined ? slots * v.minDeposit : null,
   };
 
   const complete =
@@ -457,8 +490,12 @@ export function derive(d: Draft, taken: ReadonlySet<string>, now: number | null)
   return { values: v, errors, notices, insights, shares, ready };
 }
 
-/** The exact config sent to create_sale. `now` is used when the sale opens at creation. */
-export function buildConfig(d: Draft, r: Ready, now: number): SaleConfig {
+/**
+ * The exact config sent to create_sale. `now` is used when the sale opens at
+ * creation. `quoteToken` is the client's USDC contract (`getClient().usdcContract`):
+ * the only deposit token the sale takes.
+ */
+export function buildConfig(d: Draft, r: Ready, now: number, quoteToken: string): SaleConfig {
   const bidStart = r.startAt ?? now;
   return {
     tokenName: d.name.trim(),
@@ -478,7 +515,10 @@ export function buildConfig(d: Draft, r: Ready, now: number): SaleConfig {
     revealMode: d.revealMode,
     unsoldRule: "burn",
     settleTimeoutMs: SETTLE_TIMEOUT_MS,
-    quoteToken: USDC_TOKEN,
+    quoteToken,
+    maxBids: BID_SLOTS,
+    // The contract refuses a reveal window on a TEE sale.
+    ...(d.revealMode === "commit_reveal" ? { revealWindowMs: Number(d.revealWindow) * MINUTE } : {}),
   };
 }
 
@@ -523,8 +563,13 @@ export function suggestedStart(now: number): string {
   return toLocalInput(Math.ceil((now + 60 * MINUTE) / step) * step);
 }
 
-/** Token account the factory deploys: `<symbol>.fairground.testnet`. */
-export const tokenAccountFor = (symbol: string) => `${(symbol || "symbol").toLowerCase()}.${CONTRACT_ID}`;
+/**
+ * The token account the contract deploys to: `<sale_id>.<contract>`. A sale
+ * made with this form takes its id from the symbol, in lower case.
+ * `contractId` is the client's (`getClient().contractId`).
+ */
+export const tokenAccountFor = (symbol: string, contractId: string) =>
+  tokenAccountOf((symbol || "symbol").toLowerCase(), contractId);
 
 export const REVEAL_LABEL: Record<RevealMode, string> = {
   tee: "Sealed in TEE",

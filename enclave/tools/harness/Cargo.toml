@@ -1,0 +1,30 @@
+[package]
+name = "fairground-harness"
+description = "Sealed-bid fixtures for the Fairground enclave job, and its wasm tests"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "fairground-fixtures"
+path = "src/main.rs"
+
+# Seals one bid for the command-line clear smoke test (enclave/deploy/7-smoke-clear.ps1).
+[[bin]]
+name = "fairground-seal"
+path = "src/seal.rs"
+
+[dependencies]
+base64 = "0.22.1"
+# Seals padded plaintexts (`seal_padded`) and draws the seal tool's salts.
+crypto_box.workspace = true
+fairground-clearing.workspace = true
+# `seal`: the fixtures seal bids the way the app does.
+fairground-sealer = { workspace = true, features = ["seal"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+fairground-runner.workspace = true

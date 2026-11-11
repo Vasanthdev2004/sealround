@@ -1,4 +1,5 @@
 import { formatUnits } from "@fairground/clearing";
+import { appConfig, type NearNetwork } from "./config";
 import type { SaleStatus } from "./types";
 
 /** "12.5" from USDC base units. */
@@ -60,9 +61,42 @@ export const dateTime = (at: number) =>
     timeZoneName: "short",
   });
 
+/** The network the mock pretends to be. In NEAR mode use networkName(). */
 export const NETWORK = "testnet" as const;
-export const txUrl = (hash: string) => `https://testnet.nearblocks.io/txns/${hash}`;
-export const accountUrl = (account: string) => `https://testnet.nearblocks.io/address/${account}`;
+
+/** The network the app talks to: the mock's "testnet", or NEXT_PUBLIC_NEAR_NETWORK in NEAR mode. */
+export function networkName(): NearNetwork {
+  try {
+    const c = appConfig();
+    return c.mode === "near" ? c.near.network : NETWORK;
+  } catch {
+    return NETWORK;
+  }
+}
+
+/** The block explorer for this network, or null when there is none (a local sandbox). */
+export function explorerBase(): string | null {
+  try {
+    const c = appConfig();
+    return c.mode === "near" ? c.near.explorerUrl : "https://testnet.nearblocks.io";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Explorer links. "#" when there is nothing to link to: a sandbox has no
+ * explorer, and in NEAR mode a transaction hash is "" unless this browser
+ * sent the transaction.
+ */
+export const txUrl = (hash: string) => {
+  const base = explorerBase();
+  return base && hash ? `${base}/txns/${hash}` : "#";
+};
+export const accountUrl = (account: string) => {
+  const base = explorerBase();
+  return base ? `${base}/address/${account}` : "#";
+};
 
 export const STATUS_LABEL: Record<SaleStatus, string> = {
   upcoming: "Upcoming",
@@ -75,12 +109,3 @@ export const STATUS_LABEL: Record<SaleStatus, string> = {
 };
 
 export type Tone = "accent" | "ok" | "warn" | "bad" | "neutral" | "bot";
-export const STATUS_TONE: Record<SaleStatus, Tone> = {
-  upcoming: "neutral",
-  open: "accent",
-  awaiting_close: "warn",
-  clearing: "warn",
-  revealing: "warn",
-  settled: "ok",
-  failed: "bad",
-};

@@ -2,9 +2,10 @@
 
 import { demandAt } from "@fairground/clearing";
 import {
+  Area,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
@@ -13,16 +14,22 @@ import {
   YAxis,
   type TooltipContentProps,
 } from "recharts";
+import {
+  CHART_CURSOR,
+  CHART_GRID,
+  CHART_SURFACE,
+  CHART_TICK,
+  PricePill,
+  TipCard,
+  useSeriesMotion,
+} from "@/components/visual/chart-bits";
 
 type Pt = { x: number; y: number };
 type CurveBid = { maxPrice: bigint; maxSpend: bigint };
 
-// Chart-only colours (SVG attributes cannot read Tailwind classes).
-const INK = "#fafafa";
-const MUTED = "#a8a8ad";
-const SUBTLE = "#85858c";
-const ACCENT = "#2b85ff";
-const SURFACE = "#17171a";
+// Series colours from the tokens: demand in the neutral "people" ink, the clearing price in blue.
+const INK = "var(--viz-people)";
+const ACCENT = "var(--viz-fairground)";
 
 /** Whole tokens as a float. Display only. */
 const whole = (v: bigint, decimals: number) => Number(v / 10n ** BigInt(Math.max(0, decimals - 6))) / 1e6;
@@ -68,6 +75,19 @@ export function demandCurve(bids: CurveBid[], floor: bigint, decimals: number): 
   return { points, hi };
 }
 
+/** A zero-based axis that ends on a round number: 3 to 5 even steps, the smallest top that holds `target`. */
+function niceAxis(target: number): { max: number; ticks: number[] } {
+  if (!(target > 0)) return { max: 1, ticks: [0, 1] };
+  let best = { max: Infinity, step: 1, n: 4 };
+  for (const n of [3, 4, 5]) {
+    const raw = target / n;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map((m) => m * mag).find((x) => x >= raw)!;
+    if (step * n < best.max) best = { max: step * n, step, n };
+  }
+  return { max: best.max, ticks: Array.from({ length: best.n + 1 }, (_, i) => i * best.step) };
+}
+
 const priceTick = (v: number) => v.toLocaleString("en-US", { maximumSignificantDigits: 3 });
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 
@@ -75,16 +95,19 @@ function Tip({ active, payload }: TooltipContentProps) {
   const pt = payload?.[0]?.payload as Pt | undefined;
   if (!active || !pt) return null;
   return (
-    <div className="rounded-tile border border-line-strong bg-elev-2 px-3 py-2 text-[12px] shadow-xl shadow-black/50">
-      <div className="text-subtle">
-        At <span className="num text-fg">{pt.x.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span> USDC
-        per token
+    <TipCard
+      title={
+        <>
+          At <span className="num text-fg">{pt.x.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span> USDC per
+          token
+        </>
+      }
+    >
+      <div className="text-label text-muted">
+        bids could buy <span className="num font-[510] text-fg">{pt.y.toLocaleString("en-US", { maximumFractionDigits: 0 })}</span>{" "}
+        tokens
       </div>
-      <div className="mt-0.5 text-subtle">
-        bids could buy{" "}
-        <span className="num text-fg">{pt.y.toLocaleString("en-US", { maximumFractionDigits: 0 })}</span> tokens
-      </div>
-    </div>
+    </TipCard>
   );
 }
 
@@ -107,15 +130,17 @@ export function DemandChart({
   const top = Math.max(s, ...points.map((p) => p.y));
   const maxBid = bids.reduce((m, b) => (b.maxPrice > m ? b.maxPrice : m), floor);
   const ticks = [...new Set([usd(floor), pStar, usd(maxBid)])].sort((a, b) => a - b);
+  const animate = useSeriesMotion();
+  const yAxis = niceAxis(top * 1.08);
 
   return (
     <div
       role="img"
       aria-label={`Demand curve. Supply is ${s.toLocaleString("en-US")} tokens. Demand meets supply at a clearing price of ${pStar} USDC per token.`}
     >
-      <ResponsiveContainer width="100%" height={250} initialDimension={{ width: 640, height: 250 }}>
-        <LineChart data={points} margin={{ top: 22, right: 18, bottom: 4, left: 0 }}>
-          <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+      <ResponsiveContainer width="100%" height={270} initialDimension={{ width: 640, height: 270 }}>
+        <ComposedChart data={points} margin={{ top: 40, right: 18, bottom: 4, left: 0 }}>
+          <CartesianGrid vertical={false} stroke={CHART_GRID} />
           <XAxis
             dataKey="x"
             type="number"
@@ -124,48 +149,58 @@ export function DemandChart({
             allowDataOverflow
             ticks={ticks}
             tickFormatter={priceTick}
-            tick={{ fill: SUBTLE, fontSize: 11, fontFamily: "var(--font-mono)" }}
+            tick={CHART_TICK}
             tickLine={false}
-            axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+            axisLine={false}
+            tickMargin={10}
           />
           <YAxis
             type="number"
-            domain={[0, Math.ceil(top * 1.12)]}
+            domain={[0, yAxis.max]}
+            ticks={yAxis.ticks}
             tickFormatter={(v: number) => compact.format(v)}
-            tick={{ fill: SUBTLE, fontSize: 11, fontFamily: "var(--font-mono)" }}
+            tick={CHART_TICK}
             tickLine={false}
             axisLine={false}
+            tickMargin={8}
             width={44}
           />
-          <Tooltip
-            content={Tip}
-            cursor={{ stroke: "rgba(255,255,255,0.2)", strokeWidth: 1 }}
-            isAnimationActive={false}
-          />
+          <Tooltip content={Tip} cursor={CHART_CURSOR} isAnimationActive={false} />
           <ReferenceLine
             y={s}
-            stroke="rgba(255,255,255,0.32)"
-            strokeDasharray="4 4"
-            label={{ value: "supply S", position: "insideTopRight", fill: MUTED, fontSize: 11 }}
+            stroke="var(--line-strong)"
+            label={<PricePill label="Supply" text={compact.format(s)} tone="neutral" />}
           />
-          <ReferenceLine
-            x={pStar}
-            stroke={ACCENT}
-            strokeWidth={1.5}
-            label={{ value: "P*", position: "top", fill: ACCENT, fontSize: 11 }}
+          <Area
+            type="linear"
+            dataKey="y"
+            stroke="none"
+            fill={INK}
+            fillOpacity={0.05}
+            isAnimationActive={animate}
+            animationDuration={450}
+            animationEasing="ease-out"
+            activeDot={false}
           />
           <Line
             type="linear"
             dataKey="y"
             stroke={INK}
-            strokeOpacity={0.85}
-            strokeWidth={2}
+            strokeWidth={1.75}
             dot={false}
-            activeDot={{ r: 4, fill: INK, stroke: SURFACE, strokeWidth: 2 }}
-            isAnimationActive={false}
+            activeDot={{ r: 4, fill: INK, stroke: CHART_SURFACE, strokeWidth: 2 }}
+            isAnimationActive={animate}
+            animationDuration={450}
+            animationEasing="ease-out"
           />
-          <ReferenceDot x={pStar} y={s} r={4.5} fill={ACCENT} stroke={SURFACE} strokeWidth={2} />
-        </LineChart>
+          <ReferenceLine
+            x={pStar}
+            stroke={ACCENT}
+            strokeWidth={1.5}
+            label={<PricePill label="P*" text={pStar.toLocaleString("en-US", { maximumFractionDigits: 6 })} at="top" />}
+          />
+          <ReferenceDot x={pStar} y={s} r={4} fill={ACCENT} stroke={CHART_SURFACE} strokeWidth={2} />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );

@@ -1,26 +1,36 @@
 "use client";
 
-import { Lock } from "lucide-react";
 import { Field } from "@/components/ui/field";
-import { TokenAvatar } from "@/components/ui/bits";
+import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
-import { tokenStr } from "@/lib/format";
-import { FormSection, Label, TextArea, type SectionProps } from "./form-kit";
+import { palette } from "@/lib/palette";
+import { FormSection, Label, TextArea, radioKeys, type SectionProps } from "./form-kit";
 import { DESCRIPTION_MAX, HUES, groupDigits, tokenAccountFor } from "./model";
 
-export function TokenSection({ draft, set, error, touch, derived }: SectionProps) {
-  const total = derived.values.total;
+export const HUE_NAME: Record<number, string> = {
+  214: "Blue",
+  192: "Cyan",
+  168: "Teal",
+  142: "Green",
+  48: "Amber",
+  26: "Orange",
+  6: "Red",
+  340: "Pink",
+};
+
+export function TokenSection({ draft, set, error, touch, status }: SectionProps) {
   return (
     <FormSection
       id="token"
       n={1}
       title="Token"
-      description="Deployed with a fixed supply. No mint function, no admin key."
+      description="Fixed supply. No mint function, no admin key."
+      status={status}
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Name"
-          placeholder="e.g. Night Market"
+          placeholder="Night Market"
           value={draft.name}
           maxLength={40}
           autoComplete="off"
@@ -31,7 +41,7 @@ export function TokenSection({ draft, set, error, touch, derived }: SectionProps
         />
         <Field
           label="Symbol"
-          placeholder="e.g. NIGHT"
+          placeholder="NIGHT"
           value={draft.symbol}
           autoComplete="off"
           autoCapitalize="characters"
@@ -40,9 +50,9 @@ export function TokenSection({ draft, set, error, touch, derived }: SectionProps
           onBlur={() => touch("symbol")}
           error={error("symbol")}
           hint={
-            <>
-              Token account <span className="num text-muted">{tokenAccountFor(draft.symbol)}</span>
-            </>
+            <span className="block truncate">
+              Token account <span className="num text-muted">{tokenAccountFor(draft.symbol, getClient().contractId)}</span>
+            </span>
           }
         />
         <Field
@@ -56,22 +66,18 @@ export function TokenSection({ draft, set, error, touch, derived }: SectionProps
             touch("totalSupply");
           }}
           error={error("totalSupply")}
-          hint={total !== undefined ? `${tokenStr(total)} tokens, minted once.` : "Whole tokens, minted once."}
+          hint="Minted once, with 18 decimals."
         />
-        <Field
-          label="Decimals"
-          value="18"
-          readOnly
-          tabIndex={-1}
-          inputClassName="text-muted"
-          suffix={<Lock className="size-3.5" strokeWidth={1.75} aria-label="Fixed" />}
-          hint="Fixed for every Fairground token."
-        />
+        <HuePicker value={draft.hue} onChange={(h) => set("hue", h)} />
       </div>
 
       <TextArea
-        label="Description"
-        placeholder="One or two plain sentences. What is this token for?"
+        label={
+          <>
+            Description <span className="font-normal text-subtle">optional</span>
+          </>
+        }
+        placeholder="What is this token for?"
         value={draft.description}
         maxLength={DESCRIPTION_MAX + 40}
         onChange={(e) => set("description", e.target.value)}
@@ -79,31 +85,46 @@ export function TokenSection({ draft, set, error, touch, derived }: SectionProps
         error={error("description")}
         counter={`${draft.description.length}/${DESCRIPTION_MAX}`}
       />
-
-      <div className="flex flex-col gap-2">
-        <Label>Avatar colour</Label>
-        <div role="radiogroup" aria-label="Avatar colour" className="flex flex-wrap gap-2.5">
-          {HUES.map((h) => {
-            const active = draft.hue === h;
-            return (
-              <button
-                key={h}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                aria-label={`Hue ${h}`}
-                onClick={() => set("hue", h)}
-                className={cn(
-                  "rounded-[30%] p-[3px] ring-1 transition-shadow",
-                  active ? "ring-2 ring-accent" : "ring-transparent hover:ring-line-strong",
-                )}
-              >
-                <TokenAvatar symbol={draft.symbol} hue={h} size={34} />
-              </button>
-            );
-          })}
-        </div>
-      </div>
     </FormSection>
+  );
+}
+
+/** The hue that tints the token's mark: a row of small discs, the chosen one ringed. */
+function HuePicker({ value, onChange }: { value: number; onChange: (h: number) => void }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <Label id="create-hue-label">Colour</Label>
+      <div
+        role="radiogroup"
+        aria-labelledby="create-hue-label"
+        onKeyDown={radioKeys(HUES, value as (typeof HUES)[number], onChange)}
+        className="-mx-[9px] flex flex-wrap"
+      >
+        {HUES.map((h) => {
+          const active = value === h;
+          return (
+            <button
+              key={h}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-label={HUE_NAME[h] ?? `Hue ${h}`}
+              title={HUE_NAME[h]}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onChange(h)}
+              className="group grid h-10 w-9 place-items-center rounded-full"
+            >
+              <span
+                className={cn(
+                  "size-[18px] rounded-full ring-1 ring-fg/20 ring-inset outline-offset-[3px] transition-[outline-color] duration-[120ms] ease-surface",
+                  active ? "outline-2 outline-fg" : "outline-1 outline-transparent group-hover:outline-line-strong",
+                )}
+                style={{ backgroundColor: palette(h).ground }}
+              />
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

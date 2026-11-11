@@ -1,57 +1,77 @@
 "use client";
 
-import Link from "next/link";
-import { ArrowRight, Play } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { SimulatedNote } from "@/components/ui/bits";
-import { Rule } from "@/components/ui/panel";
-import { KV } from "@/components/ui/stat";
-import { JUDGE_WINDOW_SECONDS } from "./judge-store";
+import { Button } from "@/components/ui/button";
+import { JudgeStepper } from "./judge-stepper";
+import type { RunState } from "./judge-store";
 
-/** The idle-state call to action: what you need (nothing) and the one button. */
-export function RunCard({ onRun, disabled }: { onRun: () => void; disabled?: boolean }) {
+/** What sits under the page title before a run: one sentence, the button, one disclosure. */
+export function RunIntro({ onRun }: { onRun: () => void }) {
   return (
-    <section className="panel">
-      <div className="p-5 sm:p-6">
-        <div className="text-[12px] text-subtle">One click. About 35 seconds.</div>
-        <h2 className="mt-2 font-display text-[20px] leading-snug font-medium tracking-[-0.02em] text-fg">
-          Bots and you pay the same price. Watch it happen.
-        </h2>
-        <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
-          This runs a whole sale in front of you. Every bid is sealed with real encryption and the clearing price
-          comes from the real clearing code. You can add your own bid while the window is open.
-        </p>
-
-        <Button
-          variant="primary"
-          size="lg"
-          className="mt-5 w-full"
-          onClick={onRun}
-          disabled={disabled}
-          icon={<Play className="size-4" strokeWidth={1.75} fill="currentColor" />}
-        >
-          Run it
+    <>
+      <p className="anim-rise mt-4 max-w-[52ch] text-lead text-muted" style={{ "--i": 1 } as React.CSSProperties}>
+        Watch a full sealed-bid sale: 50 people, 3 sniper bots and 1 copycat bid, and every winner pays one price.
+      </p>
+      <div
+        className="anim-rise mt-6 flex flex-wrap items-center gap-x-4 gap-y-3"
+        style={{ "--i": 2 } as React.CSSProperties}
+      >
+        <Button variant="primary" size="lg" className="max-sm:w-full" onClick={onRun}>
+          Run demo
         </Button>
+        <span className="text-small text-muted">About 35 seconds. No wallet, no funds.</span>
+      </div>
+      {/* From lg it sits on the block's bottom edge, level with the foot of the step list. */}
+      <SimulatedNote className="anim-fade mt-5 max-w-[58ch] lg:mt-auto lg:pt-8 lg:pb-1">
+        Simulated in your browser: the chain, the accounts, the enclave and the gas relayer. The encryption and the
+        clearing math are real.
+      </SimulatedNote>
+    </>
+  );
+}
 
-        <dl className="mt-4">
-          <KV k="Wallet" v="Not needed" mono={false} />
-          <KV k="Funds" v="Not needed" mono={false} />
-          <KV k="Bidders" v="50 people, 3 sniper bots, 1 copycat" mono={false} />
-          <KV k="Bid window" v={`${JUDGE_WINDOW_SECONDS} seconds`} />
-          <KV k="Goal" v="Result in under 2:00" mono={false} />
-        </dl>
+/** The run a judge is about to watch, as the same nine rows the timeline shows during it. */
+export function RunPlan({ run }: { run: RunState }) {
+  return (
+    <section className="panel anim-fade overflow-hidden" aria-labelledby="run-plan-title" style={{ "--i": 2 } as React.CSSProperties}>
+      <h2 id="run-plan-title" className="border-b border-line px-5 py-3.5 text-h3 text-fg">
+        The run in nine steps
+      </h2>
+      <JudgeStepper run={run} />
+    </section>
+  );
+}
 
-        <SimulatedNote className="mt-3" />
-        <Rule className="my-4" />
-        <p className="text-[12.5px] leading-relaxed text-muted">
-          Funding shows live dry quotes on any sale page.{" "}
-          <Link
-            href="/sale/fairt"
-            className="inline-flex items-center gap-1 text-fg underline decoration-line-strong underline-offset-2 hover:decoration-fg"
-          >
-            Try it on Fair Test <ArrowRight className="size-3.5" strokeWidth={1.75} />
-          </Link>
-        </p>
+/**
+ * A run that stopped, or a result that could not be read: what happened, the
+ * raw reason, and the way forward. The red is a dot, not a box.
+ */
+export function RunNotice({
+  badge = "Stopped",
+  title,
+  detail,
+  note,
+  actions,
+}: {
+  /** The state in a word or two, beside the red dot. */
+  badge?: string;
+  title: string;
+  detail?: React.ReactNode;
+  /** One quiet line beside the actions. */
+  note?: string;
+  actions: React.ReactNode;
+}) {
+  return (
+    <section role="alert" className="panel p-5 sm:p-8">
+      <Badge tone="bad" dot plain>
+        {badge}
+      </Badge>
+      <h2 className="mt-4 text-h2 text-fg">{title}</h2>
+      {detail && <p className="mt-2 max-w-[68ch] text-body break-words text-muted">{detail}</p>}
+      <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="flex flex-wrap items-center gap-2 max-sm:w-full max-sm:[&>*]:w-full">{actions}</div>
+        {note && <span className="text-small text-muted">{note}</span>}
       </div>
     </section>
   );

@@ -23,25 +23,19 @@ const AGAINST: { title: string; body: string }[] = [
 
 export function ArgueAgainst() {
   return (
-    <div className="flex flex-col gap-4">
-      <ol className="rounded-card border border-line bg-elev">
-        {AGAINST.map((a, i) => (
-          <li
-            key={a.title}
-            className="flex gap-4 border-dashed border-line-dashed px-4 py-3.5 sm:px-5 [&:not(:first-child)]:border-t"
-          >
-            <span className="num pt-px text-[12px] text-subtle">{String(i + 1).padStart(2, "0")}</span>
-            <div className="min-w-0">
-              <h3 className="text-[13.5px] font-medium text-fg">{a.title}</h3>
-              <p className="mt-0.5 text-[13px] leading-relaxed text-muted">{a.body}</p>
-            </div>
+    <div className="flex flex-col gap-8">
+      <ul className="divide-y divide-line border-y border-line">
+        {AGAINST.map((a) => (
+          <li key={a.title} className="grid gap-1 py-4 sm:grid-cols-[13rem_minmax(0,1fr)] sm:gap-6">
+            <h3 className="text-h3 text-fg">{a.title}</h3>
+            <p className="max-w-[68ch] text-body text-muted">{a.body}</p>
           </li>
         ))}
-      </ol>
+      </ul>
 
-      <div className="rounded-card border border-accent/25 bg-accent-soft p-5">
-        <h3 className="text-[13.5px] font-medium text-fg">Why we build it anyway</h3>
-        <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-muted">
+      <div>
+        <h3 className="text-h3 text-fg">Why we build it anyway</h3>
+        <p className="mt-2 max-w-[68ch] text-prose text-muted">
           The sniping problem is real at every launch. NEAR is the one stack with a TEE, cross-chain funding and chain
           signatures together. And the clearing checks live in a contract anyone can read.
         </p>

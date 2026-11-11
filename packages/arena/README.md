@@ -4,7 +4,7 @@ The Bot Arena simulator. It runs the same crowd through three launch types and m
 
 1. **Bonding curve**: constant product with virtual reserves, as on popular meme launchpads. Buyers move the price as they buy, in arrival order.
 2. **Fixed price, first come**: one price, first come first served until supply runs out.
-3. **Fairground**: sealed bids, one uniform clearing price, computed by `clear()` from `@fairground/clearing` (the same rule the enclave runs).
+3. **Sealround**: sealed bids, one uniform clearing price, computed by `clear()` from `@fairground/clearing` (the same rule the enclave runs).
 
 Deterministic and seeded. No LLM calls, no network, no randomness without a seed.
 
@@ -19,7 +19,7 @@ This runs 60 seeded runs (demand from 0.5x to 4x supply), prints a summary table
 Flags: `--seed <n>`, `--runs <n>`, `--out <path>`, `--no-write`. For example `pnpm arena --seed 5 --no-write` prints a table for another seed without touching the JSON.
 
 ```sh
-pnpm --filter @fairground/arena test       # determinism, Fairground invariants, curve monotonicity
+pnpm --filter @fairground/arena test       # determinism, clearing invariants, curve monotonicity
 pnpm --filter @fairground/arena typecheck
 ```
 
@@ -40,7 +40,7 @@ One run = one crowd + three launches + one shared post-launch market each.
 | --- | --- | --- |
 | Bonding curve | Buy with their whole budget at second 0. Sell back into the curve after each human buy. | Buy in arrival order until their budget runs out or the price reaches their valuation. |
 | Fixed price | Buy with their whole budget at second 0. | Buy in arrival order if their valuation is at least the price, until supply runs out. |
-| Fairground | Bid their whole budget with a max price of 100x the launch price. | Bid max price = valuation, max spend = whole budget, if their valuation is at or above the floor. |
+| Sealround | Bid their whole budget with a max price of 100x the launch price. | Bid max price = valuation, max spend = whole budget, if their valuation is at or above the floor. |
 
 The bonding curve uses pump.fun proportions (virtual token reserve = 1.353 × the curve supply). Its virtual USDC reserve is set so buying the whole curve raises exactly what the fixed-price sale raises when it sells out, so neither launch gets more money to work with.
 
@@ -84,7 +84,7 @@ const trace = priceTrace(run);                          // price path for charts
 - `src/config.ts`: every parameter
 - `src/crowd.ts`: humans and bots
 - `src/amm.ts`: constant-product math in integers
-- `src/launches.ts`: bonding curve, fixed price, Fairground
+- `src/launches.ts`: bonding curve, fixed price, Sealround
 - `src/market.ts`: the shared post-launch market
 - `src/metrics.ts`: the five metrics
 - `src/run.ts`: runs, summary, JSON report, price trace

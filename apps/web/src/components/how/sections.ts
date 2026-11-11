@@ -12,6 +12,3 @@ export const HOW_SECTIONS = [
 ] as const;
 
 export type HowSectionId = (typeof HOW_SECTIONS)[number]["id"];
-
-export const sectionNumber = (id: HowSectionId) =>
-  String(HOW_SECTIONS.findIndex((s) => s.id === id) + 1).padStart(2, "0");

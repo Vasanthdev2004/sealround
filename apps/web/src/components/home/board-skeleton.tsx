@@ -1,77 +1,125 @@
-import { cn } from "@/lib/cn";
+import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
 import { StatRow } from "@/components/ui/stat";
+import { cn } from "@/lib/cn";
+import { SALE_COLUMNS, SaleTableHead } from "./sale-row";
 
-/** A skeleton block: faint base plus the shimmer sweep on top. */
-export function Sk({ className }: { className?: string }) {
-  return (
-    <div className={cn("relative overflow-hidden rounded bg-white/[0.04]", className)} aria-hidden>
-      <div className="shimmer absolute inset-0" />
-    </div>
-  );
-}
-
-/** Placeholder for one counter cell. */
-export function CounterSkeleton() {
+/** One counter cell: a label, a 22px value, a hint (Stat size="md"). */
+function CounterSkeleton() {
   return (
     <div aria-hidden>
-      <Sk className="h-3 w-20" />
-      <Sk className="mt-2.5 h-[30px] w-16 rounded-md" />
-      <Sk className="mt-2 h-3 w-24" />
+      <div className="flex h-[18px] items-center">
+        <Skeleton className="h-3 w-20" rounded="sm" />
+      </div>
+      <div className="mt-1.5 flex h-[26px] items-center">
+        <Skeleton className="h-5 w-14" />
+      </div>
+      <div className="mt-1 flex h-[18px] items-center">
+        <Skeleton className="h-3 w-24" rounded="sm" />
+      </div>
     </div>
   );
 }
 
-export function CardSkeleton() {
+export function CountersSkeleton() {
   return (
-    <div className="flex flex-col gap-4 rounded-panel border border-line bg-elev p-4" aria-hidden>
-      <div className="flex items-center gap-3">
-        <Sk className="size-10 rounded-[28%]" />
-        <div className="flex-1">
-          <Sk className="h-3.5 w-28" />
-          <Sk className="mt-2 h-3 w-40" />
+    <StatRow>
+      {Array.from({ length: 4 }, (_, i) => (
+        <CounterSkeleton key={i} />
+      ))}
+    </StatRow>
+  );
+}
+
+/** Stands in for FeaturedSale: the same two halves at the same heights. */
+export function FeaturedSkeleton() {
+  return (
+    <div className="panel grid overflow-hidden lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]" aria-hidden>
+      <div className="p-5 sm:p-8">
+        <div className="flex items-center gap-3">
+          <Skeleton className="size-9" rounded="tile" />
+          <div className="space-y-2">
+            <Skeleton className="h-3.5 w-28" rounded="sm" />
+            <Skeleton className="h-3 w-14" rounded="sm" />
+          </div>
         </div>
-        <Sk className="h-[22px] w-16 rounded-full" />
+        <div className="mt-6 sm:mt-8">
+          <Skeleton className="h-3 w-16" rounded="sm" />
+          <Skeleton className="mt-3 h-12 w-56 sm:h-[72px] sm:w-72" />
+          <Skeleton className="mt-5 h-1 w-64 max-w-full" rounded="full" />
+        </div>
+        <Skeleton className="mt-5 h-11 w-44 sm:mt-6" rounded="tile" />
+        <div className="mt-6 grid grid-cols-3 gap-4 border-t border-line pt-3.5 sm:mt-8">
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="min-w-0 space-y-2">
+              <Skeleton className="h-3 w-16 max-w-full" rounded="sm" />
+              <Skeleton className="h-5 w-20 max-w-full" />
+            </div>
+          ))}
+        </div>
       </div>
-      <Sk className="h-11 rounded-tile" />
-      <div>
-        <Sk className="h-3 w-20" />
-        <Sk className="mt-2 h-[22px] w-28" />
-      </div>
-      <div className="border-t border-dashed border-line-dashed pt-3">
-        <Sk className="h-3 w-48" />
+      <div className="border-t border-line lg:border-t-0 lg:border-l">
+        <div className="flex h-[49px] items-center border-b border-line px-5 sm:px-6">
+          <Skeleton className="h-3 w-24" rounded="sm" />
+        </div>
+        {Array.from({ length: 7 }, (_, i) => (
+          <div key={i} className={cn("flex h-11 items-center gap-3 border-b border-line px-5 sm:px-6", i >= 3 && "max-lg:hidden")}>
+            <Skeleton className="h-3 w-28" rounded="sm" />
+            <Skeleton className="h-5 w-24 max-sm:hidden" rounded="sm" />
+            <Skeleton className="ml-auto h-3 w-16" rounded="sm" />
+          </div>
+        ))}
+        <div className="flex h-14 items-center justify-between px-5 sm:px-6">
+          <Skeleton className="h-3 w-20" rounded="sm" />
+          <Skeleton className="h-3 w-14" rounded="sm" />
+        </div>
       </div>
     </div>
   );
 }
 
-export function CardGridSkeleton({ count = 6 }: { count?: number }) {
+/** Stands in for the sales table: the same columns and row height. */
+export function SaleTableSkeleton({ rows = 6 }: { rows?: number }) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {Array.from({ length: count }, (_, i) => (
-        <CardSkeleton key={i} />
+    <div className="panel overflow-hidden" aria-hidden>
+      <SaleTableHead />
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className={cn(SALE_COLUMNS, "min-h-[68px] border-b border-line py-3 last:border-b-0")}>
+          <div className="min-w-0 space-y-2">
+            <Skeleton className="h-3.5 w-24 max-w-full" rounded="sm" />
+            <Skeleton className="h-3 w-12" rounded="sm" />
+          </div>
+          <Skeleton className="h-6 w-20 max-sm:hidden" rounded="full" />
+          <div className="space-y-2 max-sm:hidden">
+            <Skeleton className="h-3.5 w-32" rounded="sm" />
+            <Skeleton className="h-3 w-20" rounded="sm" />
+          </div>
+          <Skeleton className="h-3.5 w-8 justify-self-end max-lg:hidden" rounded="sm" />
+          <Skeleton className="h-3.5 w-20 justify-self-end max-lg:hidden" rounded="sm" />
+          <div className="space-y-2 justify-self-end">
+            <Skeleton className="ml-auto h-3.5 w-20" rounded="sm" />
+            <Skeleton className="ml-auto h-3 w-14" rounded="sm" />
+          </div>
+          <span />
+        </div>
       ))}
     </div>
   );
 }
 
-/** Suspense fallback for the whole sales board. */
+/** The whole live part of the home page while it loads. */
 export function BoardSkeleton() {
   return (
-    <div className="flex flex-col gap-10" aria-busy="true" aria-label="Loading sales">
-      <StatRow>
-        {Array.from({ length: 4 }, (_, i) => (
-          <CounterSkeleton key={i} />
-        ))}
-      </StatRow>
+    <LoadingRegion label="Loading sales" className="flex flex-col gap-10 sm:gap-14">
       <div className="flex flex-col gap-4">
-        <Sk className="h-5 w-24" />
-        <div className="flex flex-wrap gap-1">
-          {Array.from({ length: 7 }, (_, i) => (
-            <Sk key={i} className="h-8 w-20 rounded-full" />
-          ))}
-        </div>
-        <CardGridSkeleton />
+        <FeaturedSkeleton />
+        <CountersSkeleton />
       </div>
-    </div>
+      <div className="flex flex-col gap-4">
+        <div className="flex h-8 items-center">
+          <Skeleton className="h-6 w-20" />
+        </div>
+        <SaleTableSkeleton />
+      </div>
+    </LoadingRegion>
   );
 }

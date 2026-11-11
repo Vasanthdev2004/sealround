@@ -1,0 +1,29 @@
+[package]
+name = "fairground-sealer-job"
+description = "Fairground's OutLayer job: the WASI program around fairground-sealer"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+# No build script: the wasm sha256 is pinned on chain, so nothing may depend on
+# the build machine, its paths or the time.
+build = false
+
+[[bin]]
+name = "fairground-sealer"
+path = "src/main.rs"
+
+[dependencies]
+# Without the `seal` feature: the job only opens boxes.
+fairground-sealer.workspace = true
+# The pass over the request before `run` parses it (repeated keys, `op`).
+# Both are already in the sealer's dependency tree.
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+# `to_hex` for the tests' master values.
+fairground-clearing.workspace = true

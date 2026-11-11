@@ -1,0 +1,42 @@
+[package]
+name = "fairground-sealer"
+description = "Fairground sealer job logic: key derivation, sealed-box open, clearing"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+# Sealing bids (what the app does in the browser). Tests and the integration
+# tests use it; the enclave job only opens boxes and builds without it. It needs
+# an OS random source: native targets and wasm32-wasip1/wasip2 have one through
+# getrandom 0.2; wasm32-unknown-unknown has none and is not supported.
+seal = ["crypto_box/getrandom"]
+
+[dependencies]
+base64 = "0.22.1"
+# `seal` here is the sealed-box construction itself; opening a box needs it too.
+# crypto_box 0.9.1 does not compile `seal` without `rand_core` (the RNG trait
+# only; no random source unless our own `seal` feature adds getrandom).
+crypto_box = { version = "0.9.1", default-features = false, features = ["alloc", "rand_core", "salsa20", "seal"] }
+# Same version crypto_box uses; checks a sealed box's ephemeral key (see keys.rs).
+curve25519-dalek = { version = "4.1.3", default-features = false }
+fairground-clearing = { workspace = true, features = ["sha2"] }
+hkdf = "0.12.4"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sha2 = { version = "0.10.9", default-features = false }
+zeroize = { version = "1.8.2", default-features = false }
+
+[dev-dependencies]
+# Builds the sealed-box nonce for a hand-made box in a keys.rs test.
+blake2 = "0.10.6"
+# Turns on `seal` for this crate's own tests.
+fairground-sealer = { path = ".", features = ["seal"] }
+
+# Used by tests/fixtures/gen.mjs to check that libsodium opens our boxes.
+[[example]]
+name = "seal_bids"
+required-features = ["seal"]

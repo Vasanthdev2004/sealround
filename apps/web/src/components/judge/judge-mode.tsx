@@ -1,23 +1,29 @@
 "use client";
 
-import { RotateCcw, Timer, TriangleAlert } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { PageHeader, Panel } from "@/components/ui/panel";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/panel";
 import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
-import { useClientQuery, useNow } from "@/lib/hooks";
+import { priceStr } from "@/lib/format";
+import { useClientQuery, useResult } from "@/lib/hooks";
+import { focusEl, scrollToTop } from "@/lib/scroll";
 import type { Sale } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
-import { BidStream } from "./bid-stream";
-import { JudgeBidForm } from "./judge-bid-form";
-import { JudgeStepper } from "./judge-stepper";
+import { BidStream, BidStreamFrame } from "./bid-stream";
+import { JudgeBidForm, JudgeBidFormFrame } from "./judge-bid-form";
+import { JudgeNotes } from "./judge-notes";
+import { JudgeStepper, STEP_TITLE } from "./judge-stepper";
 import { JudgeSummary } from "./judge-summary";
-import { RunCard } from "./run-card";
-import { clock, startJudgeRun, useJudgeRun, type RunState } from "./judge-store";
+import { RunIntro, RunNotice, RunPlan } from "./run-card";
+import { RunStage } from "./run-stage";
+import { JUDGE_STEPS, clock, startJudgeRun, useJudgeRun, type RunState } from "./judge-store";
 
+const PAGE = "mx-auto flex max-w-[1180px] flex-col gap-14";
+
+/** Judge mode follows one sale from setup through settlement. */
 export function JudgeMode() {
   const run = useJudgeRun();
-  const { account } = useWallet();
+  const { account, mode } = useWallet();
   const saleId = run.saleId;
   const sale = useClientQuery<Sale | null>(
     () => (saleId ? getClient().getSale(saleId) : Promise.resolve(null)),
@@ -27,97 +33,146 @@ export function JudgeMode() {
   const idle = run.phase === "idle";
   const running = run.phase === "running";
 
-  const again = () => {
+  const start = () => {
     startJudgeRun();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollToTop();
+    // The button that started the run unmounts with its block (or the summary).
+    // Put focus on the live stage's title once it is there.
+    window.setTimeout(() => focusEl(document.getElementById("stage-title")), 60);
   };
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        eyebrow="Judge mode · no wallet, no funds"
-        title="A full sale, start to finish, in under two minutes"
-        description="Fictional people, sniper bots and a copycat all bid into one sealed-bid sale. Then the enclave opens every bid at once and finds a single clearing price."
-      />
-
-      {run.phase === "error" && <RunError run={run} onRetry={again} />}
-
-      {run.phase === "done" && saleId && (
-        <JudgeSummary
-          saleId={saleId}
-          sale={sale}
-          account={account}
-          elapsedMs={(run.endedAt ?? 0) - (run.startedAt ?? 0)}
-          onRunAgain={again}
+  // Judge mode invents a sale and its bidders, which only the simulated chain can do.
+  if (mode === "near") {
+    return (
+      <div className={PAGE}>
+        <PageHeader
+          title="Judge mode"
+          description="Judge mode runs on the simulated chain, and this app is connected to a real NEAR contract."
+          actions={
+            <>
+              <ButtonLink href="/" variant="primary" size="lg">
+                All sales
+              </ButtonLink>
+              <ButtonLink href="/how" variant="ghost" size="lg">
+                How it works
+              </ButtonLink>
+            </>
+          }
         />
-      )}
-
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-        <Panel
-          title={idle ? "What will happen" : "Progress"}
-          subtitle={idle ? "Each step lights up as it happens." : undefined}
-          action={!idle && <Elapsed run={run} />}
-        >
-          <JudgeStepper run={run} sale={sale} />
-        </Panel>
-
-        <div className={cn("min-w-0 space-y-5", idle && "order-first lg:order-none")}>
-          {idle && <RunCard onRun={startJudgeRun} />}
-
-          {running && sale && (
-            <div className={cn("rounded-panel", run.step === "window" && "ring-1 ring-accent/40")}>
-              <JudgeBidForm sale={sale} />
-            </div>
-          )}
-
-          {saleId ? (
-            <BidStream saleId={saleId} sale={sale} account={account} />
-          ) : (
-            running && <div className="panel shimmer h-64" aria-busy="true" aria-label="Creating the sale" />
-          )}
-        </div>
+        <JudgeNotes simulated={false} />
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-function Elapsed({ run }: { run: RunState }) {
-  if (run.startedAt === null) return null;
   return (
-    <div className="flex items-center gap-2.5 text-right">
-      <Timer className="size-4 text-subtle" strokeWidth={1.75} aria-hidden />
-      <div>
-        <div className="num text-[15px] leading-none text-fg">
-          {run.endedAt !== null ? clock(run.endedAt - run.startedAt) : <LiveClock since={run.startedAt} />}
+    <div className={PAGE}>
+      <RunAnnouncer run={run} />
+
+      <div className="flex flex-col gap-6 sm:gap-8">
+        {/*
+          Before a run the title leads a two-column block: the pitch and the
+          button on the left, with the disclosure on the block's bottom edge,
+          and the nine steps on the right. The title never moves between states.
+        */}
+        <div className={cn(idle && "grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)] lg:gap-16")}>
+          <div className="flex min-w-0 flex-col">
+            <h1 className="anim-rise text-h1 text-fg">Judge mode</h1>
+            {idle && <RunIntro onRun={start} />}
+          </div>
+          {idle && <RunPlan run={run} />}
         </div>
-        <div className="mt-1 text-[11px] text-subtle">goal: under 2:00</div>
+
+        {!idle && (
+          <div className="flex flex-col gap-4">
+            {run.phase === "done" && saleId && (
+              <JudgeSummary
+                saleId={saleId}
+                sale={sale}
+                account={account}
+                elapsedMs={(run.endedAt ?? 0) - (run.startedAt ?? 0)}
+                onRunAgain={start}
+              />
+            )}
+
+            {running && <RunStage run={run} sale={sale} saleId={saleId} account={account} />}
+
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="flex min-w-0 flex-col gap-4">
+                {run.phase === "error" && <RunError run={run} onRetry={start} />}
+
+                {/* Keep the form's place while the sale is created. */}
+                {running && (sale ? <JudgeBidForm sale={sale} /> : <JudgeBidFormFrame connected={!!account} />)}
+
+                {saleId ? <BidStream saleId={saleId} sale={sale} account={account} /> : running && <BidStreamFrame />}
+              </div>
+
+              <section className="panel overflow-hidden lg:sticky lg:top-[72px]" aria-labelledby="timeline-title">
+                <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+                  <h2 id="timeline-title" className="shrink-0 text-h3 text-fg">
+                    Timeline
+                  </h2>
+                  <span className="text-label text-subtle">From the start of the run</span>
+                </div>
+                <JudgeStepper run={run} />
+              </section>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Not during a run: the live stage is the one thing to watch then. */}
+      {!running && <JudgeNotes />}
     </div>
   );
 }
 
-function LiveClock({ since }: { since: number }) {
-  const now = useNow(250);
-  return <span suppressHydrationWarning>{clock(now - since)}</span>;
+/**
+ * One persistent, polite live region for the whole run. It speaks each step
+ * title, a bid count every ten bids (not every bid), and the outcome at the
+ * end, after the stage that held the visible messages has unmounted.
+ */
+function RunAnnouncer({ run }: { run: RunState }) {
+  const done = run.phase === "done" && !!run.saleId;
+  const result = useResult(done && run.saleId ? run.saleId : "").data;
+
+  let say = "";
+  if (run.phase === "running" && run.step) {
+    say = `${STEP_TITLE[run.step]}.`;
+    if (run.step === "crowd" && run.bidsPlaced >= 10) {
+      say += ` ${Math.floor(run.bidsPlaced / 10) * 10} sealed bids so far.`;
+    }
+  } else if (done) {
+    const took = clock((run.endedAt ?? 0) - (run.startedAt ?? 0));
+    say = result
+      ? result.status === "settled"
+        ? `Run finished in ${took}. Every winner paid ${priceStr(result.clearingPrice)} USDC per token.`
+        : `Run finished in ${took}. The sale did not settle; every bidder can claim their deposit back.`
+      : `Run finished in ${took}.`;
+  }
+
+  return (
+    <p className="sr-only" aria-live="polite" aria-atomic="true">
+      {say}
+    </p>
+  );
 }
 
 function RunError({ run, onRetry }: { run: RunState; onRetry: () => void }) {
+  const step = run.step ?? "create";
   return (
-    <div
-      role="alert"
-      className="flex flex-wrap items-start justify-between gap-4 rounded-panel border border-bad/30 bg-bad-soft p-5"
-    >
-      <div className="flex min-w-0 gap-3">
-        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-bad" strokeWidth={1.75} aria-hidden />
-        <div className="min-w-0">
-          <div className="text-[14px] font-medium text-fg">The run stopped. The failed step is marked below.</div>
-          <p className="mt-0.5 text-[13px] break-words text-bad">{run.error}</p>
-          <p className="mt-1 text-[12.5px] text-muted">Nothing is lost. Start a fresh run with a new sale.</p>
-        </div>
-      </div>
-      <Button variant="primary" onClick={onRetry} icon={<RotateCcw className="size-4" strokeWidth={1.75} />}>
-        Try again
-      </Button>
-    </div>
+    <RunNotice
+      title={`The run stopped at step ${JUDGE_STEPS.indexOf(step) + 1} of ${JUDGE_STEPS.length}`}
+      detail={
+        <>
+          {STEP_TITLE[step]}: {run.error}
+        </>
+      }
+      note="Nothing is lost. A new run starts a fresh sale."
+      actions={
+        <Button variant="primary" size="lg" onClick={onRetry}>
+          Try again
+        </Button>
+      }
+    />
   );
 }

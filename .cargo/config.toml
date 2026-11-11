@@ -1,0 +1,4 @@
+[env]
+# near-sdk's unit-testing feature pulls in aws-lc-sys, which needs NASM on Windows
+# unless it uses its prebuilt objects.
+AWS_LC_SYS_PREBUILT_NASM = "1"

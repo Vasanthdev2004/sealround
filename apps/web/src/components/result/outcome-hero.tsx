@@ -1,162 +1,285 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
 import { TxLink } from "@/components/ui/bits";
-import { Progress, Stat, StatRow } from "@/components/ui/stat";
+import { Progress } from "@/components/ui/stat";
 import { dateTime, duration, priceStr, tokenFull, tokenStr, usdcStr } from "@/lib/format";
 import type { Sale, SaleResult } from "@/lib/types";
-import { failText, floorMultiple, pct, pctStr, type ResultFill } from "./compute";
+import { failText, floorMultiple, pct, pctStr, validDeposits, type ResultFill } from "./compute";
 
+type FactItem = {
+  label: string;
+  value: React.ReactNode;
+  /** Quiet words after the value: a unit ("USDC") or the other half of a count ("of 49"). */
+  unit?: React.ReactNode;
+  title?: string;
+};
+
+/**
+ * The page's main block. A settled sale leads with the clearing price; a
+ * failed one, in the same frame, with what happens to the deposits. `aside`
+ * is the viewer's own result: the right half on wide screens, and on phones
+ * right under the headline, before the sale's totals.
+ */
 export function OutcomeHero({
   sale,
   result,
   fills,
+  aside,
 }: {
   sale: Sale;
   result: SaleResult;
   fills: ResultFill[];
+  aside?: React.ReactNode;
 }) {
   return result.status === "failed" ? (
-    <FailedHero sale={sale} result={result} fills={fills} />
+    <Failed sale={sale} result={result} fills={fills} aside={aside} />
   ) : (
-    <SettledHero sale={sale} result={result} />
+    <Settled sale={sale} result={result} fills={fills} aside={aside} />
   );
 }
 
-function CloseToSettle({ sale, result }: { sale: Sale; result: SaleResult }) {
-  const closed = sale.closedAt;
-  const settled = sale.settledAt;
+type Props = { sale: Sale; result: SaleResult; fills: ResultFill[]; aside?: React.ReactNode };
+
+function Settled({ sale, result, fills, aside }: Props) {
+  const c = sale.config;
+  const P = result.clearingPrice;
+  const soldPct = pct(result.totalSold, c.saleSupply);
+  const winners = fills.filter((f) => f.tokens > 0n).length;
+  const bids = result.nValid + result.nInvalid;
+  const penalties = result.totalPenalties ?? 0n;
+  const toBurn = !!result.proceeds && !result.proceeds.unsoldBurned && result.unsold > 0n;
+
   return (
-    <Stat
-      label={result.failReason === "settle_timeout" ? "Close to refunds" : "Close to settle"}
-      value={closed !== null && settled !== null ? duration(settled - closed) : "–"}
-      hint={closed !== null ? <span className="num">{dateTime(closed)}</span> : undefined}
+    <Frame
+      aside={aside}
+      head={
+        <>
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 id="outcome-title" className="text-label text-subtle">
+              Clearing price
+            </h2>
+            <span className="text-label text-subtle">{result.oversubscribed ? "Oversubscribed" : "Undersubscribed"}</span>
+          </div>
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="num min-w-0 text-num-hero text-fg [overflow-wrap:anywhere]">{priceStr(P)}</span>
+            <span className="text-body text-muted">USDC per token</span>
+          </div>
+          <p className="mt-3 text-small text-muted">
+            {P === c.floorPrice ? (
+              "At the floor of "
+            ) : (
+              <>
+                <span className="num text-fg">{floorMultiple(P, c.floorPrice)}</span> the floor of{" "}
+              </>
+            )}
+            <span className="num text-fg">{priceStr(c.floorPrice)} USDC</span>
+          </p>
+
+          <p className="mt-4 max-w-[56ch] text-body text-muted sm:mt-5">
+            <span className="text-fg">
+              {winners === 1 ? "The one winner paid this price" : `All ${winners} winners paid this price`}
+            </span>
+            {result.oversubscribed
+              ? ", the highest at which demand still covers every token."
+              : ". Demand did not cover the supply, so every valid bid filled in full at the floor."}
+          </p>
+
+          <div className="mt-5 sm:mt-6">
+            <Progress value={soldPct} max={100} label="Share of the sale supply sold" />
+            <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-small text-muted">
+              <span>
+                <span className="num text-fg">{tokenFull(result.totalSold, c.decimals)}</span> of{" "}
+                <span className="num text-fg">{tokenFull(c.saleSupply, c.decimals)}</span> {c.tokenSymbol} sold
+              </span>
+              <span className="num text-fg">{pctStr(soldPct)}</span>
+            </div>
+          </div>
+        </>
+      }
+      facts={[
+        { label: "Raised", value: usdcStr(result.totalRaised), unit: "USDC" },
+        {
+          label: toBurn ? "Unsold, to burn" : "Unsold, burned",
+          value: tokenStr(result.unsold, c.decimals),
+          unit: c.tokenSymbol,
+          title: toBurn ? "Burns with the creator payout." : undefined,
+        },
+        { label: "Valid bids", value: result.nValid, unit: `of ${bids}` },
+        closeFact(sale, result),
+      ]}
+      foot={
+        <>
+          <span>
+            {result.clearedBy === "onchain" ? (
+              <>
+                The contract cleared <span className="num text-muted">{bids}</span> revealed{" "}
+                {bids === 1 ? "bid" : "bids"}
+              </>
+            ) : (
+              <>
+                The enclave cleared <span className="num text-muted">{bids}</span> {bids === 1 ? "bid" : "bids"}
+                {/* A real contract does not record how long the enclave took. */}
+                {result.clearingMs > 0 && (
+                  <>
+                    {" "}
+                    in <span className="num text-muted">{(result.clearingMs / 1000).toFixed(1)}s</span>
+                  </>
+                )}
+              </>
+            )}
+          </span>
+          {penalties > 0n && (
+            <span title="A void bid loses 1 % of its deposit, rounded up. The contract keeps it locked for good.">
+              Void bids lost <span className="num text-fg">{usdcStr(penalties, 6)} USDC</span> in penalties
+            </span>
+          )}
+          <TxLink hash={result.settleTx} prefix="settle tx" className="sm:ml-auto" />
+        </>
+      }
     />
   );
 }
 
-function SettledHero({ sale, result }: { sale: Sale; result: SaleResult }) {
+function Failed({ sale, result, fills, aside }: Props) {
   const c = sale.config;
-  const soldPct = pct(result.totalSold, c.saleSupply);
+  const { title, body } = failText(result, sale);
+  // What bidders get back: every deposit, less the 1 % penalty of any bid a trusted clearing found void.
+  const refunds = fills.reduce((a, f) => a + f.refund, 0n);
+  const penalties = result.totalPenalties ?? fills.reduce((a, f) => a + (f.penalty ?? 0n), 0n);
+  const penalized = penalties > 0n;
+  const claimed = fills.filter((f) => f.claimed).length;
+  const valid = validDeposits(fills);
+  // Only draw the raise meter when it is plainly true that even every valid
+  // deposit together could not reach the minimum.
+  const showMeter = result.failReason === "below_min_raise" && c.minRaise > 0n && valid < c.minRaise;
+  const timedOut = result.failReason === "settle_timeout";
+
   return (
-    <section className="panel overflow-hidden">
-      <div className="p-5 sm:p-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[12px] text-subtle">Clearing price</span>
-          <Badge tone={result.oversubscribed ? "accent" : "neutral"} dot>
-            {result.oversubscribed ? "Oversubscribed" : "Undersubscribed"}
-          </Badge>
-        </div>
-        <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
-          <div className="num text-[40px] leading-none tracking-[-0.04em] text-fg sm:text-[52px]">
-            {priceStr(result.clearingPrice)}
-          </div>
-          <div className="pb-1.5 text-[13px] text-muted">USDC per token</div>
-          <div className="mb-1 ml-auto inline-flex items-center gap-2 rounded-full bg-elev-2 px-3 py-1 ring-1 ring-line">
-            <span className="num text-[13px] text-fg">{floorMultiple(result.clearingPrice, c.floorPrice)}</span>
-            <span className="text-[12px] text-subtle">
-              floor <span className="num">{priceStr(c.floorPrice)}</span>
-            </span>
-          </div>
-        </div>
-        <p className="mt-3 max-w-xl text-[13px] leading-relaxed text-muted">
-          {result.oversubscribed
-            ? "Demand at the floor was larger than the supply, so the price rose to the highest level where demand still covers every token. Every winner pays this one price."
-            : "Demand at the floor was smaller than the supply, so every valid bid was filled in full at the floor price."}
-        </p>
+    <Frame
+      aside={aside}
+      head={
+        <>
+          <div className="text-label text-subtle">{title}</div>
+          <h2 id="outcome-title" className="mt-2 text-h2 text-fg">
+            {penalized ? "Deposits come back, less the void-bid penalty" : "Every deposit comes back in full"}
+          </h2>
+          <p className="mt-3 max-w-[56ch] text-body text-muted">
+            {body}
+            {penalized && (
+              <>
+                {" "}
+                Void bids lose 1 % of their deposit,{" "}
+                <span className="num text-fg">{usdcStr(penalties, 6)} USDC</span> in all.
+              </>
+            )}
+          </p>
 
-        <div className="mt-6">
-          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-[12.5px]">
-            <span className="text-muted">
-              <span className="num text-fg">{tokenFull(result.totalSold, c.decimals).split(".")[0]}</span> of{" "}
-              <span className="num">{tokenStr(c.saleSupply, c.decimals)}</span> {c.tokenSymbol} sold
-            </span>
-            <span className="num text-subtle">{pctStr(soldPct)}</span>
-          </div>
-          <Progress value={soldPct} max={100} tone={soldPct >= 99.99 ? "ok" : "accent"} />
-        </div>
-      </div>
-
-      <StatRow className="rounded-none border-x-0 border-b-0">
-        <Stat
-          label="Total raised"
-          value={usdcStr(result.totalRaised)}
-          unit="USDC"
-          hint={
-            <span>
-              min <span className="num">{usdcStr(c.minRaise)}</span>
-            </span>
-          }
-        />
-        <Stat
-          label="Unsold, burned"
-          value={tokenStr(result.unsold, c.decimals)}
-          unit={c.tokenSymbol}
-          hint={result.unsold === 0n ? "Nothing left over" : "Burned at settlement"}
-        />
-        <Stat
-          label="Bids"
-          value={
-            <>
-              {result.nValid}
-              <span className="text-subtle"> / {result.nInvalid}</span>
-            </>
-          }
-          hint="valid / void"
-        />
-        <CloseToSettle sale={sale} result={result} />
-      </StatRow>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-dashed border-line-dashed px-5 py-2.5 text-[12px] text-subtle">
-        <span>
-          Enclave cleared <span className="num">{result.nValid + result.nInvalid}</span> sealed bids in{" "}
-          <span className="num">{(result.clearingMs / 1000).toFixed(1)}s</span>
-        </span>
-        <TxLink hash={result.settleTx} label="settle tx" />
-      </div>
-    </section>
+          {showMeter && (
+            <div className="mt-5 sm:mt-6">
+              <Progress
+                value={Number(valid)}
+                max={Number(c.minRaise)}
+                label="Valid deposits against the minimum raise"
+              />
+              <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-small text-muted">
+                <span>
+                  <span className="num text-fg">{usdcStr(valid)}</span> of the{" "}
+                  <span className="num text-fg">{usdcStr(c.minRaise)} USDC</span> minimum
+                </span>
+                <span className="num text-fg">{pctStr(pct(valid, c.minRaise))}</span>
+              </div>
+            </div>
+          )}
+        </>
+      }
+      facts={[
+        { label: penalized ? "Refunds, after penalties" : "Total refunds", value: usdcStr(refunds), unit: "USDC" },
+        { label: "Refunds claimed", value: claimed, unit: `of ${fills.length}` },
+        { label: "Bids", value: fills.length, unit: result.nInvalid > 0 ? `${result.nInvalid} void` : undefined },
+        closeFact(sale, result),
+      ]}
+      foot={
+        <>
+          <span>
+            {claimed === fills.length ? "Every refund has been claimed." : "Refunds can be claimed at any time."}
+          </span>
+          <TxLink hash={result.settleTx} prefix={timedOut ? "refund tx" : "settle tx"} className="sm:ml-auto" />
+        </>
+      }
+    />
   );
 }
 
-function FailedHero({ sale, result, fills }: { sale: Sale; result: SaleResult; fills: ResultFill[] }) {
-  const { title, body } = failText(result, sale);
-  const deposits = fills.reduce((a, f) => a + f.deposit, 0n);
-  const claimed = fills.filter((f) => f.claimed).length;
-  return (
-    <section className="panel overflow-hidden">
-      <div className="p-5 sm:p-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[12px] text-subtle">Outcome</span>
-          <Badge tone="bad" dot>
-            Refunding
-          </Badge>
-        </div>
-        <h2 className="mt-3 font-display text-[20px] leading-tight font-medium tracking-[-0.02em] text-fg sm:text-[22px]">
-          {title}
-        </h2>
-        <p className="mt-2 max-w-xl text-[13.5px] leading-relaxed text-muted">{body}</p>
-        <p className="mt-3 text-[13.5px] font-medium text-fg">Every bidder gets a full refund. Claim below.</p>
-      </div>
-      <StatRow className="rounded-none border-x-0 border-b-0">
-        <Stat label="Bids" value={fills.length} hint={result.nInvalid > 0 ? `${result.nInvalid} void` : "sealed"} />
-        <Stat label="Deposits to refund" value={usdcStr(deposits)} unit="USDC" />
-        <Stat
-          label="Refunds claimed"
-          value={
-            <>
-              {claimed}
-              <span className="text-subtle"> / {fills.length}</span>
-            </>
-          }
-          hint={claimed === fills.length ? "All done" : "Claim any time"}
-        />
-        <CloseToSettle sale={sale} result={result} />
-      </StatRow>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-dashed border-line-dashed px-5 py-2.5 text-[12px] text-subtle">
-        <span>
-          Minimum raise was <span className="num">{usdcStr(sale.config.minRaise)} USDC</span>. Tokens sold:{" "}
-          <span className="num">0</span>.
+/** How long the sale took from close to its end, or when it closed if the chain did not record the end. */
+function closeFact(sale: Sale, result: SaleResult): FactItem {
+  const closed = sale.closedAt;
+  const settled = sale.settledAt;
+  // A real contract's views do not record when the sale settled: show when it closed instead of a dash.
+  if (settled === null) {
+    const at = closed !== null ? new Date(closed) : null;
+    return {
+      label: "Closed",
+      value: at ? (
+        <span suppressHydrationWarning>{at.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>
+      ) : (
+        "–"
+      ),
+      unit: at ? (
+        <span className="num" suppressHydrationWarning>
+          {at.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
         </span>
-        <TxLink hash={result.settleTx} label={result.failReason === "settle_timeout" ? "refund tx" : "settle tx"} />
+      ) : undefined,
+    };
+  }
+  return {
+    label: result.failReason === "settle_timeout" ? "Close to refunds" : "Close to settle",
+    value: closed !== null ? duration(settled - closed) : "–",
+    title: closed !== null ? `Closed ${dateTime(closed)}` : undefined,
+  };
+}
+
+/**
+ * One card, divided by hairlines: the headline, the viewer's result beside
+ * it, then four facts and one quiet line. Source order is the phone order.
+ */
+function Frame({
+  head,
+  facts,
+  foot,
+  aside,
+}: {
+  head: React.ReactNode;
+  facts: FactItem[];
+  foot: React.ReactNode;
+  aside?: React.ReactNode;
+}) {
+  return (
+    <section
+      aria-labelledby="outcome-title"
+      className="panel grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[1fr_auto_auto]"
+    >
+      <div className="min-w-0 p-5 sm:p-8 lg:col-start-1">{head}</div>
+
+      {aside && (
+        <div className="min-w-0 border-t border-line bg-bg/60 lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:border-t-0 lg:border-l">
+          {aside}
+        </div>
+      )}
+
+      <dl className="grid min-w-0 grid-cols-2 border-t border-line [&>*]:border-line max-sm:[&>*:nth-child(even)]:border-l max-sm:[&>*:nth-child(n+3)]:border-t sm:grid-cols-4 sm:[&>*+*]:border-l lg:col-start-1">
+        {facts.map((f) => (
+          <div key={f.label} title={f.title} className="min-w-0 px-5 py-4 sm:px-6 sm:first:pl-8">
+            <dt className="text-label text-subtle">{f.label}</dt>
+            <dd className="num mt-1 flex flex-wrap items-baseline gap-x-1.5 text-num-md text-fg">
+              <span className="min-w-0 [overflow-wrap:anywhere]">{f.value}</span>
+              {f.unit && <span className="text-label font-normal tracking-normal text-muted">{f.unit}</span>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-line px-5 py-3 text-label text-subtle sm:px-8 lg:col-start-1">
+        {foot}
       </div>
     </section>
   );

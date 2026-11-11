@@ -1,12 +1,11 @@
-import { Check } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { SaleStatus } from "@/lib/types";
 
 const PHASES = [
-  { key: "bid", label: "Bid", sub: "Sealed in your browser" },
-  { key: "close", label: "Close", sub: "Anyone can call it" },
-  { key: "clear", label: "Clear", sub: "Enclave, one price" },
-  { key: "claim", label: "Claim", sub: "Tokens and refunds" },
+  { key: "bid", label: "Bid" },
+  { key: "close", label: "Close" },
+  { key: "clear", label: "Clear" },
+  { key: "claim", label: "Claim" },
 ] as const;
 
 /** Index of the current phase, and whether that phase has actually started. */
@@ -27,46 +26,44 @@ function phaseOf(status: SaleStatus): { index: number; started: boolean } {
   }
 }
 
-/** Bid -> Close -> Clear -> Claim, with the current phase highlighted. */
-export function PhaseTimeline({ status }: { status: SaleStatus }) {
+/**
+ * The four phases of a sale as one quiet row: a rule over each name, the
+ * current one in the accent (red when the sale is refunding or stalled).
+ * In a commit-reveal sale the third phase is the bidders' reveal.
+ */
+export function PhaseTimeline({
+  status,
+  stalled = false,
+  commit = false,
+}: {
+  status: SaleStatus;
+  stalled?: boolean;
+  commit?: boolean;
+}) {
   const { index, started } = phaseOf(status);
-  const failed = status === "failed";
+  // Refunding, or clearing past the settle timeout: the current step turns red.
+  const failed = status === "failed" || stalled;
   return (
-    <ol className="grid grid-cols-4 gap-2" aria-label="Sale phases">
+    <ol className="grid grid-cols-4 gap-1.5" aria-label="Sale phases">
       {PHASES.map((p, i) => {
         const done = i < index;
         const current = i === index && started;
-        const sub = p.key === "claim" && failed ? "Full refunds" : p.sub;
+        const label = p.key === "clear" && commit ? "Reveal" : p.key === "claim" && status === "failed" ? "Refund" : p.label;
         return (
-          <li key={p.key} className="min-w-0" aria-current={current ? "step" : undefined}>
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "relative flex size-5 shrink-0 items-center justify-center rounded-full ring-1",
-                  done && "bg-ok-soft ring-ok/30",
-                  current && (failed ? "bg-bad-soft ring-bad/40" : "bg-accent-soft ring-accent/50"),
-                  !done && !current && "bg-inset ring-line-strong",
-                )}
-              >
-                {done ? (
-                  <Check className="size-3 text-ok" strokeWidth={2.5} />
-                ) : current ? (
-                  <span className={cn("pulse-dot size-2 rounded-full", failed ? "bg-bad" : "bg-accent")} />
-                ) : (
-                  <span className="num text-[10px] text-subtle">{i + 1}</span>
-                )}
-              </span>
-              {i < PHASES.length - 1 && (
-                <span
-                  aria-hidden
-                  className={cn("h-px min-w-2 flex-1 border-t", done ? "border-ok/40" : "rule-dashed")}
-                />
-              )}
-            </div>
-            <div className={cn("mt-2 text-[12.5px] font-medium", current ? "text-fg" : done ? "text-muted" : "text-subtle")}>
-              {p.label}
-            </div>
-            <div className="mt-0.5 text-[11.5px] leading-snug text-subtle">{sub}</div>
+          <li
+            key={p.key}
+            className={cn(
+              "min-w-0 border-t-2 pt-2 text-label",
+              current
+                ? cn("font-[510] text-fg", failed ? "border-bad" : "border-accent")
+                : done
+                  ? "border-subtle text-muted"
+                  : "border-line-strong text-subtle",
+            )}
+            aria-current={current ? "step" : undefined}
+          >
+            {label}
+            <span className="sr-only">, {done ? "done" : current ? "now" : "next"}</span>
           </li>
         );
       })}

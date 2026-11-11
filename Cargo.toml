@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/clearing",
+    "crates/sealer",
+    "contracts/fairground",
+    "contracts/token",
+    "contracts/mock-ft",
+]
+# Integration tests have their own lockfile so near-workspaces never builds with the contracts.
+exclude = ["contracts/tests", "enclave"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Vasanthdev2004/fairground"
+
+[workspace.dependencies]
+near-sdk = "5.30.1"
+near-contract-standards = "5.30.1"
+fairground-clearing = { path = "crates/clearing" }
+fairground-sealer = { path = "crates/sealer" }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

@@ -1,0 +1,27 @@
+{
+  "name": "@fairground/relayer-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Client for the Sealround gas relayer: builds and signs NEP-366 delegates, and calls /relay, /storage and /policy.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-sandbox.ps1"
+  },
+  "dependencies": {
+    "near-api-js": "7.4.0"
+  },
+  "devDependencies": {
+    "@fairground/relayer": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

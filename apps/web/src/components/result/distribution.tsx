@@ -1,19 +1,32 @@
 "use client";
 
-import { Bar, BarChart, CartesianGrid, Rectangle, Tooltip, XAxis, YAxis, type BarShapeProps, type TooltipContentProps } from "recharts";
-import { Empty, Panel } from "@/components/ui/panel";
+import { useMemo, useState } from "react";
+import { useReducedMotion } from "motion/react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Rectangle,
+  Tooltip,
+  XAxis,
+  YAxis,
+  type BarShapeProps,
+  type TooltipContentProps,
+} from "recharts";
+import { Panel } from "@/components/ui/panel";
+import { TipCard, TipRow } from "@/components/visual/chart-bits";
 import { shortAccount, tokenStr, usdcStr } from "@/lib/format";
 import type { Sale } from "@/lib/types";
 import { gini, isBot, isYou, pct, pctStr, toFloat, topShare, type ResultFill } from "./compute";
 
 /*
- * Highlight scheme, validated against the panel surface (#17171a):
- * people are the recessive neutral (--fg-subtle, 3.4:1), bots carry the
- * --bot hue (CVD-safe against the neutral), and "you" is the accent with a
- * direct label, because accent vs bot is too close for protan readers.
- * Hex values mirror the tokens in globals.css (SVG fills cannot read vars reliably).
+ * Series colours are the viz tokens: people the neutral at half
+ * strength, bots the violet, and "you" the accent with a direct label (accent
+ * and violet are too close for protan readers to tell apart by colour alone).
  */
-const COLOR = { person: "#85858c", bot: "#c084fc", you: "#2b85ff" } as const;
+const COLOR = { person: "var(--viz-people)", bot: "var(--viz-bot)", you: "var(--viz-fairground)" } as const;
+const OPACITY = { person: 0.5, bot: 1, you: 1 } as const;
+const NAME = { person: "People", bot: "Bots", you: "You" } as const;
 type Kind = keyof typeof COLOR;
 
 type Datum = {
@@ -26,61 +39,69 @@ type Datum = {
   kind: Kind;
 };
 
-/** Tokens received by each winner, largest first. Bots in the bot colour. */
+/** Tokens received by each winner, largest first. The fills table above is its text equivalent. */
 export function Distribution({ sale, fills, account }: { sale: Sale; fills: ResultFill[]; account: string | null }) {
   const c = sale.config;
-  const winners = fills.filter((f) => f.tokens > 0n);
+  const reduce = useReducedMotion();
+  // The bars grow once, on first paint. Later data (a claim, a wallet switch)
+  // redraws them in place instead of replaying the animation.
+  const [grown, setGrown] = useState(false);
+  const winners = useMemo(() => fills.filter((f) => f.tokens > 0n), [fills]);
   const sold = winners.reduce((a, f) => a + f.tokens, 0n);
+
+  const data = useMemo<Datum[]>(
+    () =>
+      [...winners]
+        .sort((a, b) => (b.tokens > a.tokens ? 1 : b.tokens < a.tokens ? -1 : a.index - b.index))
+        .map((f) => ({
+          key: `${f.index}`,
+          bidder: f.bidder,
+          tokens: toFloat(f.tokens, c.decimals),
+          label: tokenStr(f.tokens, c.decimals),
+          spent: usdcStr(f.spent),
+          share: pctStr(pct(f.tokens, c.saleSupply)),
+          kind: isYou(f, account) ? "you" : isBot(f) ? "bot" : "person",
+        })),
+    [winners, account, c.decimals, c.saleSupply],
+  );
 
   if (winners.length === 0) {
     return (
-      <Panel title="Who got the tokens" className="h-full">
-        <Empty title="No tokens were distributed" body="Nothing was sold in this sale. Every deposit is refunded in full." />
+      <Panel title="Who got the tokens">
+        <p className="text-small text-muted">Nobody. Nothing was sold in this sale, and deposits go back to the bidders.</p>
       </Panel>
     );
   }
 
-  const data: Datum[] = [...winners]
-    .sort((a, b) => (b.tokens > a.tokens ? 1 : b.tokens < a.tokens ? -1 : a.index - b.index))
-    .map((f) => ({
-      key: `${f.index}`,
-      bidder: f.bidder,
-      tokens: toFloat(f.tokens, c.decimals),
-      label: tokenStr(f.tokens, c.decimals),
-      spent: usdcStr(f.spent),
-      share: pctStr(pct(f.tokens, c.saleSupply)),
-      kind: isYou(f, account) ? "you" : isBot(f) ? "bot" : "person",
-    }));
-
   const g = gini(winners.map((f) => toFloat(f.tokens, c.decimals)));
   const top10 = topShare(winners, 10, sold);
   const kinds = new Set(data.map((d) => d.kind));
-  const nothing = fills.length - winners.length;
 
   return (
     <Panel
       title="Who got the tokens"
-      subtitle={`${winners.length} winners, largest fill first.${nothing > 0 ? ` ${nothing} bids got nothing and are refunded.` : ""}`}
-      className="h-full"
+      subtitle={`${winners.length} ${winners.length === 1 ? "winner" : "winners"}, largest fill first. A bigger bar is a bigger budget, never a better price.`}
     >
-      <dl className="grid grid-cols-3 gap-3">
-        <Mini k="Top 10 share" v={pctStr(top10)} hint="of tokens sold" />
-        <Mini k="Gini" v={g.toFixed(2)} hint="0 = even, 1 = one holder" />
-        <Mini k="Deposit cap" v={usdcStr(c.maxDepositPerAccount)} hint="USDC per account" />
-      </dl>
-
-      <ul className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted" aria-label="Legend">
+      <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-label text-muted" aria-label="Legend">
         {(["person", "bot", "you"] as const)
           .filter((k) => kinds.has(k))
           .map((k) => (
             <li key={k} className="inline-flex items-center gap-1.5">
-              <span className="size-2.5 rounded-[3px]" style={{ background: COLOR[k] }} aria-hidden />
-              {k === "person" ? "People" : k === "bot" ? "Bots" : "You"}
+              <span
+                className="size-1.5 rounded-full"
+                style={{ background: COLOR[k], opacity: OPACITY[k] }}
+                aria-hidden
+              />
+              {NAME[k]}
             </li>
           ))}
       </ul>
 
-      <div className="mt-2 h-[240px] w-full font-mono" role="img" aria-label={`Bar chart of tokens received by ${winners.length} winners. The fills table lists every value.`}>
+      <div
+        className="mt-3 h-[240px] w-full"
+        role="img"
+        aria-label={`Bar chart of tokens received by ${winners.length} winners. The fills table lists every value.`}
+      >
         <BarChart
           responsive
           data={data}
@@ -88,23 +109,34 @@ export function Distribution({ sale, fills, account }: { sale: Sale; fills: Resu
           barCategoryGap={data.length > 40 ? 1 : "18%"}
           style={{ width: "100%", height: "100%" }}
         >
-          <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.06)" />
+          <CartesianGrid vertical={false} stroke="var(--viz-grid)" />
           <XAxis dataKey="key" hide />
           <YAxis
             width={44}
             tickLine={false}
             axisLine={false}
             tickCount={4}
-            tick={{ fill: "#85858c", fontSize: 11 }}
+            tick={{ fill: "var(--viz-axis)", fontSize: 12 }}
             tickFormatter={(v: number) => compact(v)}
           />
-          <Tooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} content={(p) => <Tip {...p} sym={c.tokenSymbol} />} isAnimationActive={false} />
-          <Bar dataKey="tokens" maxBarSize={24} isAnimationActive={false} shape={(p: BarShapeProps) => <BarShape {...p} />} />
+          <Tooltip cursor={false} content={(p) => <Tip {...p} sym={c.tokenSymbol} />} isAnimationActive={false} />
+          <Bar
+            dataKey="tokens"
+            maxBarSize={24}
+            isAnimationActive={!reduce && !grown}
+            animationDuration={450}
+            animationEasing="ease-out"
+            onAnimationEnd={() => setGrown(true)}
+            shape={(p: BarShapeProps) => <BarShape {...p} />}
+          />
         </BarChart>
       </div>
-      <p className="mt-2 text-[11.5px] text-subtle">
-        Every winner paid the same price per token. Bigger bars mean a bigger budget, never a faster bot.
-      </p>
+
+      <dl className="mt-5 grid grid-cols-3 border-t border-line [&>*]:min-w-0 [&>*]:pt-3.5 [&>*]:pr-3 [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-3 sm:[&>*+*]:pl-5">
+        <Fact k="Top 10 hold" v={pctStr(top10)} unit="of sold" />
+        <Fact k="Gini" v={g.toFixed(2)} unit="0 is even" />
+        <Fact k="Deposit cap" v={usdcStr(c.maxDepositPerAccount)} unit="USDC" />
+      </dl>
     </Panel>
   );
 }
@@ -112,6 +144,7 @@ export function Distribution({ sale, fills, account }: { sale: Sale; fills: Resu
 function BarShape(p: BarShapeProps) {
   const d = p.payload as Datum | undefined;
   const kind = d?.kind ?? "person";
+  const r = Math.min(2, p.width / 2);
   return (
     <g>
       <Rectangle
@@ -119,12 +152,12 @@ function BarShape(p: BarShapeProps) {
         y={p.y}
         width={p.width}
         height={p.height}
-        radius={[Math.min(4, p.width / 2), Math.min(4, p.width / 2), 0, 0]}
+        radius={[r, r, 0, 0]}
         fill={COLOR[kind]}
-        fillOpacity={p.isActive ? 1 : 0.88}
+        fillOpacity={p.isActive ? 1 : OPACITY[kind]}
       />
       {kind === "you" && (
-        <text x={p.x + p.width / 2} y={p.y - 6} textAnchor="middle" fontSize={11} fill="#fafafa" className="font-sans">
+        <text x={p.x + p.width / 2} y={p.y - 6} textAnchor="middle" fontSize={12} fill="var(--fg)">
           you
         </text>
       )}
@@ -136,27 +169,21 @@ function Tip({ active, payload, sym }: TooltipContentProps & { sym: string }) {
   const d = payload?.[0]?.payload as Datum | undefined;
   if (!active || !d) return null;
   return (
-    <div className="panel px-3 py-2 font-sans shadow-xl shadow-black/50">
-      <div className="num text-[14px] text-fg">
-        {d.label} <span className="font-sans text-[11.5px] text-muted">{sym}</span>
-      </div>
-      <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-muted">
-        <span className="h-0.5 w-3 rounded-full" style={{ background: COLOR[d.kind] }} aria-hidden />
-        <span className="num">{shortAccount(d.bidder, 26)}</span>
-      </div>
-      <div className="num mt-0.5 text-[11.5px] text-subtle">
-        {d.spent} USDC · {d.share} of supply
-      </div>
-    </div>
+    <TipCard title={shortAccount(d.bidder, 26)}>
+      <TipRow color={COLOR[d.kind]} value={`${d.label} ${sym}`} label={`${d.share} of supply`} />
+      <div className="num text-label text-muted">for {d.spent} USDC</div>
+    </TipCard>
   );
 }
 
-function Mini({ k, v, hint }: { k: string; v: string; hint: string }) {
+function Fact({ k, v, unit }: { k: string; v: string; unit?: string }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-[11.5px] text-subtle">{k}</dt>
-      <dd className="num mt-0.5 text-[17px] text-fg">{v}</dd>
-      <div className="truncate text-[11px] text-subtle">{hint}</div>
+    <div>
+      <dt className="text-label text-subtle">{k}</dt>
+      <dd className="num mt-1 flex flex-wrap items-baseline gap-x-1.5 text-num-md text-fg">
+        {v}
+        {unit && <span className="text-label font-normal tracking-normal text-muted">{unit}</span>}
+      </dd>
     </div>
   );
 }

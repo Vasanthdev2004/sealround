@@ -1,0 +1,21 @@
+{
+  "params": {
+    "sale_id": "{{SALE_ID}}",
+    "token_name": "Fairground Smoke Test",
+    "token_symbol": "SMOKE",
+    "decimals": 18,
+    "total_supply": "1000000000000000000000",
+    "sale_supply": "600000000000000000000",
+    "floor_price": "2000",
+    "min_raise": "0",
+    "bid_start": "{{BID_START_NS}}",
+    "bid_end": "{{BID_END_NS}}",
+    "min_deposit": "1000000",
+    "max_deposit_per_account": "2000000",
+    "max_bids": 2,
+    "reveal_mode": "Tee",
+    "settle_timeout": "3600000000000",
+    "quote_token": "{{QUOTE_TOKEN}}",
+    "description": "Deployment smoke test. Not a real sale."
+  }
+}

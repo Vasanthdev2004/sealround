@@ -1,0 +1,20 @@
+{
+  "testnet": {
+    "nearCliNetwork": "testnet",
+    "rpcUrl": "https://rpc.testnet.near.org",
+    "outlayerContract": "outlayer.testnet",
+    "outlayerApi": "https://testnet-api.outlayer.ai",
+    "fastfsHost": "test.fastfs.io",
+    "registerContract": "worker.outlayer.testnet",
+    "explorerTx": "https://testnet.nearblocks.io/txns/"
+  },
+  "mainnet": {
+    "nearCliNetwork": "mainnet",
+    "rpcUrl": "https://rpc.mainnet.near.org",
+    "outlayerContract": "outlayer.near",
+    "outlayerApi": "https://api.outlayer.ai",
+    "fastfsHost": "main.fastfs.io",
+    "registerContract": "worker.outlayer.near",
+    "explorerTx": "https://nearblocks.io/txns/"
+  }
+}

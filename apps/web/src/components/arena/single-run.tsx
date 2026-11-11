@@ -1,14 +1,11 @@
 "use client";
 
 import { useDeferredValue, useId, useMemo, useState } from "react";
-import { Shuffle } from "lucide-react";
 import { DEFAULT_SEED, priceTrace, simulateRun, toRow } from "@fairground/arena";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
-import { Panel } from "@/components/ui/panel";
-import { Stat, StatRow } from "@/components/ui/stat";
 import { cn } from "@/lib/cn";
-import { LAUNCHES, fmtMetric, fmtPrice, fmtSeconds, report } from "./data";
+import { BOT_COLOR, LAUNCHES, LAUNCH_COLOR, fmtMetric, fmtPrice, fmtSeconds, report } from "./data";
 import { MetricsTable, type MetricValues } from "./metrics-table";
 import { PriceChart } from "./price-chart";
 
@@ -23,7 +20,8 @@ function parseSeed(text: string): number | null {
 
 /**
  * One run, computed in this browser with the same simulator code that built
- * the charts above. Pick a seed and a demand level; everything recomputes.
+ * the charts above. The seed and the demand level sit beside the chart they
+ * drive, with the run's four prices under them; the metrics table follows.
  */
 export function SingleRun() {
   const sliderId = useId();
@@ -46,101 +44,134 @@ export function SingleRun() {
   }, [run]);
 
   const curve = run?.metrics.bonding_curve;
+  const ready = run && trace && values && curve;
+  const fade = cn("transition-opacity duration-150", stale && "opacity-60");
 
   return (
-    <Panel
-      title="Run one yourself"
-      subtitle="This runs the simulator in your browser: one crowd, three launches. Same seed, same result, every time."
-    >
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] sm:items-start">
-        <Field
-          label="Seed"
-          inputMode="numeric"
-          autoComplete="off"
-          spellCheck={false}
-          value={seedText}
-          onChange={(e) => setSeedText(e.target.value)}
-          error={seed === null ? "Use a whole number from 0 to 4,294,967,295." : undefined}
-        />
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-baseline justify-between gap-3">
-            <label htmlFor={sliderId} className="text-[12.5px] font-medium text-muted">
-              Demand
-            </label>
-            <span className="num text-[13px] text-fg">{demand.toFixed(2)}x supply</span>
-          </div>
-          <div className="inset flex h-10 items-center px-3">
-            <input
-              id={sliderId}
-              type="range"
-              min={report.demandMin}
-              max={report.demandMax}
-              step={0.05}
-              value={demand}
-              onChange={(e) => setDemand(Number(e.target.value))}
-              className="w-full accent-accent"
-              aria-valuetext={`${demand.toFixed(2)} times supply`}
+    <div className="panel overflow-hidden">
+      <div className="grid lg:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="flex flex-col gap-5 border-b border-line p-4 sm:p-5 lg:border-r lg:border-b-0">
+          {/* Side by side on a tablet, stacked in the narrow column beside the chart. */}
+          <div className="grid gap-5 sm:max-lg:grid-cols-2">
+            <Field
+              label="Seed"
+              labelAside={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-my-1 -mr-2 px-2 max-sm:h-10"
+                  onClick={() => setSeedText(String(Math.floor(Math.random() * 1_000_000_000)))}
+                >
+                  New seed
+                </Button>
+              }
+              inputMode="numeric"
+              autoComplete="off"
+              spellCheck={false}
+              value={seedText}
+              onChange={(e) => setSeedText(e.target.value)}
+              error={seed === null ? "Use a whole number from 0 to 4,294,967,295." : undefined}
             />
+            <div className="flex flex-col gap-1.5">
+              <div className="flex min-h-6 items-center justify-between gap-3">
+                <label htmlFor={sliderId} className="text-label font-[510] text-muted">
+                  Demand
+                </label>
+                <span className="num text-small font-[510] text-fg">{demand.toFixed(2)}× supply</span>
+              </div>
+              <input
+                id={sliderId}
+                type="range"
+                min={report.demandMin}
+                max={report.demandMax}
+                step={0.05}
+                value={demand}
+                onChange={(e) => setDemand(Number(e.target.value))}
+                className="h-10 w-full cursor-pointer accent-accent"
+                aria-valuetext={`${demand.toFixed(2)} times supply`}
+              />
+              <div aria-hidden className="num -mt-1.5 flex justify-between text-label text-subtle">
+                <span>{report.demandMin}×</span>
+                <span>{report.demandMax}×</span>
+              </div>
+            </div>
           </div>
-          <p className="text-[12px] text-subtle">Total human budget ÷ (supply × launch price).</p>
+
+          {ready && (
+            <dl className={cn("mt-auto divide-y divide-line border-t border-line", fade)} aria-busy={stale}>
+              <RunFact
+                color={LAUNCH_COLOR.fairground}
+                label="Sealround, everyone"
+                value={fmtPrice(trace.clearingPrice)}
+                unit="USDC"
+              />
+              <RunFact
+                color={BOT_COLOR}
+                label="Curve, bots"
+                value={curve.botPrice === null ? "n/a" : fmtPrice(curve.botPrice)}
+                unit={curve.botPrice === null ? undefined : "USDC"}
+              />
+              <RunFact
+                color={LAUNCH_COLOR.bonding_curve}
+                label="Curve, median human"
+                value={curve.humanPrice === null ? "n/a" : fmtPrice(curve.humanPrice)}
+                unit={curve.humanPrice === null ? undefined : "USDC"}
+                hint={curve.premium === null ? undefined : `${fmtMetric("ratio", curve.premium)} the bots' price`}
+              />
+              <RunFact
+                color={LAUNCH_COLOR.fixed_price}
+                label="Fixed price sold out"
+                value={trace.fixedSoldOutAt === null ? "Never" : `at ${fmtSeconds(trace.fixedSoldOutAt)}`}
+              />
+            </dl>
+          )}
         </div>
-        <div className="flex flex-col gap-1.5">
-          <span className="hidden text-[12.5px] select-none sm:block" aria-hidden>
-            &nbsp;
-          </span>
-          <Button
-            variant="tactile"
-            className="h-10"
-            icon={<Shuffle className="size-4" strokeWidth={1.75} />}
-            onClick={() => setSeedText(String(Math.floor(Math.random() * 1_000_000_000)))}
-          >
-            New seed
-          </Button>
+
+        <div className={cn("min-w-0 p-4 sm:p-5", fade)} aria-busy={stale}>
+          {ready ? (
+            <PriceChart trace={trace} />
+          ) : (
+            <p className="text-small text-muted">Enter a valid seed to run the simulation.</p>
+          )}
         </div>
       </div>
 
-      {!run || !trace || !values || !curve ? (
-        <p className="mt-6 text-[13px] text-bad">Enter a valid seed to run the simulator.</p>
-      ) : (
-        <div className={cn("mt-6 transition-opacity duration-150", stale && "opacity-60")} aria-busy={stale}>
-          <PriceChart trace={trace} />
-
-          <StatRow className="mt-5">
-            <Stat
-              label="Bots paid on the curve"
-              value={curve.botPrice === null ? "n/a" : fmtPrice(curve.botPrice)}
-              unit="USDC"
-              size="sm"
-            />
-            <Stat
-              label="Median human on the curve"
-              value={curve.humanPrice === null ? "n/a" : fmtPrice(curve.humanPrice)}
-              unit={curve.premium === null ? "USDC" : `USDC · ${fmtMetric("ratio", curve.premium)}`}
-              size="sm"
-            />
-            <Stat
-              label="Fairground, bots and humans"
-              value={fmtPrice(trace.clearingPrice)}
-              unit="USDC"
-              size="sm"
-            />
-            <Stat
-              label="Fixed price sold out"
-              value={trace.fixedSoldOutAt === null ? "Never" : `at ${fmtSeconds(trace.fixedSoldOutAt)}`}
-              size="sm"
-            />
-          </StatRow>
-
-          <div className="mt-6">
-            <h3 className="mb-3 text-[13px] font-medium text-fg">This run</h3>
-            <MetricsTable
-              values={values}
-              definitions={false}
-              caption={`Metrics for seed ${runSeed}, demand ${runDemand.toFixed(2)}x.`}
-            />
-          </div>
-        </div>
+      {ready && (
+        <MetricsTable
+          className={cn("border-t border-line", fade)}
+          values={values}
+          caption={`Metrics for seed ${runSeed}, demand ${runDemand.toFixed(2)}×.`}
+        />
       )}
-    </Panel>
+    </div>
+  );
+}
+
+/** One price of this run, keyed to its series in the chart by a 6px dot. Prices are USDC per token. */
+function RunFact({
+  color,
+  label,
+  value,
+  unit,
+  hint,
+}: {
+  color: string;
+  label: string;
+  value: string;
+  unit?: string;
+  hint?: string;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 py-2.5 last:pb-0">
+      <dt className="flex min-w-0 items-baseline gap-2 text-small text-muted">
+        <span aria-hidden className="size-1.5 shrink-0 -translate-y-0.5 rounded-full" style={{ background: color }} />
+        {label}
+      </dt>
+      <dd className="text-right">
+        <span className="num text-small font-[510] text-fg">{value}</span>
+        {unit && <span className="ml-1 text-label text-subtle">{unit}</span>}
+      </dd>
+      {hint && <dd className="num col-span-2 text-right text-label text-subtle">{hint}</dd>}
+    </div>
   );
 }

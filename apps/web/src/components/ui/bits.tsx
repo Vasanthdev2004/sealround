@@ -2,32 +2,53 @@
 
 import { ArrowUpRight, Check, Circle, Loader2, X } from "lucide-react";
 import { Tag } from "@/components/ui/badge";
+import { palette } from "@/lib/palette";
 import { cn } from "@/lib/cn";
+import { isNearMode } from "@/lib/config";
 import { duration, shortHash, txUrl } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 
-/** Glossy orb avatar for a token, coloured by hue. */
+/**
+ * A token's monogram on a quiet tint of its hue: the mark that stands in for a
+ * logo. `cut` wraps it in a collar of that background class (for
+ * example "bg-elev" or "bg-bg").
+ */
 export function TokenAvatar({
   symbol,
   hue,
   size = 36,
+  cut,
   className,
 }: {
   symbol: string;
   hue: number;
   size?: number;
+  cut?: string;
   className?: string;
 }) {
+  if (cut) {
+    return (
+      <span
+        className={cn("inline-flex shrink-0 rounded-[30%]", cut, className)}
+        style={{ padding: Math.max(3, Math.round(size * 0.075)) }}
+        aria-hidden
+      >
+        <TokenAvatar symbol={symbol} hue={hue} size={size} />
+      </span>
+    );
+  }
+  const tint = palette(hue).ground;
   return (
     <span
-      className={cn("relative inline-flex shrink-0 items-center justify-center rounded-[28%] font-semibold text-white", className)}
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center rounded-tile font-semibold tracking-[-0.02em] text-muted ring-1 ring-line ring-inset",
+        className,
+      )}
       style={{
         width: size,
         height: size,
-        fontSize: Math.round(size * 0.32),
-        background: `radial-gradient(120% 120% at 30% 20%, hsl(${hue} 90% 72%), hsl(${hue} 70% 45%) 55%, hsl(${(hue + 30) % 360} 60% 22%))`,
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,.45), inset 0 -3px 6px rgba(0,0,0,.25), 0 0 0 1px rgba(255,255,255,.08), 0 4px 10px rgba(0,0,0,.4)",
+        fontSize: Math.max(10, Math.round(size * 0.36)),
+        background: `color-mix(in srgb, ${tint} 6%, var(--bg-elev-2))`,
       }}
       aria-hidden
     >
@@ -52,28 +73,47 @@ export function Countdown({ to, className, prefix }: { to: number; className?: s
  * Explorer link for a tx. A simulated hash (mock chain) has no explorer page,
  * so it is plain text with a visible "sim" tag instead of a dead link. Pass
  * `tag={false}` where the surrounding table or panel already says so.
+ *
+ * `simulated` defaults to what the app runs on: true on the mock chain, false
+ * against a real contract. There a hash is "" unless this browser sent the
+ * transaction (the contract's views do not keep hashes): nothing is rendered
+ * then, and a sandbox, which has no explorer, shows the hash as plain text.
  */
 export function TxLink({
   hash,
-  simulated = true,
+  simulated = !isNearMode(),
   tag = true,
   className,
   label,
+  prefix,
 }: {
   hash: string;
   simulated?: boolean;
   tag?: boolean;
   className?: string;
+  /** Replaces the short hash. Prefer `prefix`, which keeps the hash visible. */
   label?: React.ReactNode;
+  /** Words before the short hash, for example "bid tx". */
+  prefix?: React.ReactNode;
 }) {
+  if (!hash) return null;
+  if (!simulated && txUrl(hash) === "#") {
+    return (
+      <span title={hash} className={cn("num inline-flex items-center gap-1.5 text-label whitespace-nowrap text-muted", className)}>
+        {prefix && <span className="font-sans text-subtle">{prefix}</span>}
+        {label ?? shortHash(hash, 5)}
+      </span>
+    );
+  }
   if (simulated) {
     return (
       <span
         title={`Simulated transaction on the mock chain: ${hash}. It has no explorer page.`}
-        className={cn("num inline-flex items-center gap-1.5 text-[12px] whitespace-nowrap text-muted", className)}
+        className={cn("num inline-flex items-center gap-1.5 text-label whitespace-nowrap text-muted", className)}
       >
+        {prefix && <span className="font-sans text-subtle">{prefix}</span>}
         {label ?? shortHash(hash, 5)}
-        {tag && <Tag tone="warn">sim</Tag>}
+        {tag && <Tag>sim</Tag>}
       </span>
     );
   }
@@ -84,10 +124,11 @@ export function TxLink({
       rel="noreferrer"
       title={hash}
       className={cn(
-        "num inline-flex items-center gap-0.5 text-[12px] text-muted underline decoration-line-strong underline-offset-2 hover:text-fg",
+        "num inline-flex items-center gap-0.5 text-label text-muted underline decoration-line-strong underline-offset-2 transition-colors hover:text-fg hover:decoration-fg/40",
         className,
       )}
     >
+      {prefix && <span className="mr-1 font-sans text-subtle">{prefix}</span>}
       {label ?? shortHash(hash, 5)}
       <ArrowUpRight className="size-3" aria-hidden />
     </a>
@@ -96,17 +137,23 @@ export function TxLink({
 
 export type CheckState = "pass" | "fail" | "pending" | "idle";
 
-/** One verification row: icon, label, optional detail and link. */
+/**
+ * One verification row: icon, label, optional detail and link. The detail
+ * wraps (hashes break anywhere); it is mono for proofs, or sans with
+ * `detailMono={false}` for sentences.
+ */
 export function CheckRow({
   state,
   label,
   detail,
+  detailMono = true,
   href,
   className,
 }: {
   state: CheckState;
   label: React.ReactNode;
   detail?: React.ReactNode;
+  detailMono?: boolean;
   href?: string;
   className?: string;
 }) {
@@ -116,18 +163,30 @@ export function CheckRow({
     pending: <Loader2 className="size-3.5 animate-spin text-warn" />,
     idle: <Circle className="size-3 text-subtle" />,
   }[state];
-  const ring = {
-    pass: "bg-ok-soft ring-ok/25",
-    fail: "bg-bad-soft ring-bad/25",
-    pending: "bg-warn-soft ring-warn/25",
-    idle: "bg-hover ring-line",
+  const stateText = {
+    pass: "Passed",
+    fail: "Failed",
+    pending: "In progress",
+    idle: "Waiting",
   }[state];
   return (
     <div className={cn("flex items-start gap-3 py-2.5", className)}>
-      <span className={cn("mt-px flex size-5 shrink-0 items-center justify-center rounded-full ring-1", ring)}>{icon}</span>
+      <span aria-hidden className="mt-px flex size-5 shrink-0 items-center justify-center">{icon}</span>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] text-fg">{label}</div>
-        {detail && <div className="num mt-0.5 truncate text-[11.5px] text-subtle">{detail}</div>}
+        <div className="text-body text-fg">
+          {label}
+          <span className="sr-only">{`, ${stateText}`}</span>
+        </div>
+        {detail && (
+          <div
+            className={cn(
+              "mt-0.5 text-label text-subtle [overflow-wrap:anywhere]",
+              detailMono ? "font-mono" : "leading-[1.45]",
+            )}
+          >
+            {detail}
+          </div>
+        )}
       </div>
       {href && (
         <a
@@ -144,12 +203,11 @@ export function CheckRow({
   );
 }
 
-/** Small "simulated" disclosure with a tooltip. */
+/** Quiet disclosure for views that show simulated data. */
 export function SimulatedNote({ children, className }: { children?: React.ReactNode; className?: string }) {
   return (
-    <p className={cn("flex items-start gap-1.5 text-[11.5px] leading-snug text-subtle", className)}>
-      <span className="mt-[5px] size-1 shrink-0 rounded-full bg-warn" />
-      <span>{children ?? "Simulated on a mock chain until the contract is on testnet. Encryption and clearing math are real."}</span>
+    <p className={cn("text-label text-subtle", className)}>
+      {children ?? "Simulated on a mock chain until the contract is on testnet. Encryption and clearing math are real."}
     </p>
   );
 }

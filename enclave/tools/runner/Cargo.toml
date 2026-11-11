@@ -1,0 +1,22 @@
+[package]
+name = "fairground-runner"
+description = "Runs a WASI P1 module the way OutLayer's worker does: wasmtime 28 with fuel, stdin, env, stdout"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "fairground-runner"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.100"
+# Exactly the worker's versions (worker/Cargo.lock in fastnear/near-outlayer
+# at 3079d756a0): wasmtime meters fuel per wasm operator, so the same version
+# counts the same instructions. Default features, as the worker has them.
+wasmtime = { version = "=28.0.1", features = ["async"] }
+wasmtime-wasi = "=28.0.1"
+tokio = { version = "1.47.1", features = ["rt", "time"] }

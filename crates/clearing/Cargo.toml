@@ -1,0 +1,22 @@
+[package]
+name = "fairground-clearing"
+description = "Uniform-price sealed-bid clearing rule shared by the contract and the enclave"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["sha2"]
+# sha2-backed hashing conveniences. The contract turns this off and hashes the
+# preimages with near's host sha256 instead.
+sha2 = ["dep:sha2"]
+
+[dependencies]
+# 256-bit intermediates for products that can exceed u128. No dependencies of its own.
+ethnum = { version = "1.5.3", default-features = false }
+sha2 = { version = "0.10.9", default-features = false, optional = true }
+
+[dev-dependencies]
+serde_json = "1.0.140"

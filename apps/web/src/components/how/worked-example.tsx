@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import { formatUnits, type ClearingResult } from "@fairground/clearing";
-import { Badge, Tag } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Segmented } from "@/components/ui/field";
 import { Stat, StatRow } from "@/components/ui/stat";
@@ -62,19 +62,24 @@ export function WorkedExample() {
   };
 
   return (
-    <div className="overflow-hidden rounded-panel border border-line bg-elev">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-dashed border-line-dashed px-4 py-3.5 sm:px-5">
+    <div className="panel overflow-hidden">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-4 py-3 sm:px-5">
+        <span className="text-label text-subtle" id="how-example-presets">
+          Start from
+        </span>
         <Segmented
           value={preset}
           onChange={load}
-          label="Example"
+          labelledBy="how-example-presets"
+          scroll
+          scrollClassName="-mx-4 px-4 max-sm:basis-full sm:mx-0 sm:px-0"
           options={PRESET_ORDER.map((id) => ({ value: id, label: PRESETS[id].label }))}
         />
-        {preset === "custom" && <Tag>edited</Tag>}
+        {preset === "custom" && <span className="ml-auto text-label text-subtle">Custom bids</span>}
       </div>
 
-      <div className="flex flex-col gap-5 p-4 sm:p-5">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <div className="flex flex-col">
+        <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
           <Field
             label="Tokens for sale (S)"
             value={supply}
@@ -99,20 +104,21 @@ export function WorkedExample() {
           />
         </div>
 
+        <BidCards rows={rows} run={run} onEdit={edit} onRemove={remove} />
         <BidTable rows={rows} run={run} onEdit={edit} onRemove={remove} />
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button size="sm" onClick={add} disabled={rows.length >= MAX_ROWS} icon={<Plus className="size-3.5" />}>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-line px-4 py-3.5 sm:px-5">
+          <Button className="max-sm:h-11" onClick={add} disabled={rows.length >= MAX_ROWS}>
             Add bid
           </Button>
-          <p className="max-w-md text-[12px] leading-snug text-subtle">
-            In a real sale nobody sees these prices; only the enclave does. Here you type them to watch the rule work.
-            Each deposit equals its max spend.
+          <p className="max-w-[58ch] flex-1 basis-64 text-small text-muted">
+            In a real sale only the enclave sees these prices. Prices are in USDC per token, and each deposit equals
+            its max spend.
           </p>
         </div>
       </div>
 
-      <div className="border-t border-dashed border-line-dashed p-4 sm:p-5">
+      <div className="border-t border-line" aria-live="polite">
         <Results run={run} />
       </div>
     </div>
@@ -141,10 +147,11 @@ function CellInput({
       title={error ?? undefined}
       inputMode={mono ? "decimal" : "text"}
       spellCheck={false}
+      // 16px below lg, so a phone does not zoom the page when the input takes focus.
       className={cn(
-        "h-8 w-full min-w-0 rounded-lg border bg-inset px-2 text-[13px] text-fg outline-none transition-colors focus:border-accent/60",
-        error ? "border-bad/60" : "border-line",
-        mono && "num",
+        "inset h-10 w-full min-w-0 border-control px-2.5 text-prose text-fg outline-none transition-[border-color,box-shadow] duration-[120ms] ease-surface hover:border-control-hover focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-soft)] hover:focus:border-accent lg:h-8 lg:text-small",
+        error && "border-bad",
+        mono && "num lg:text-right",
       )}
     />
   );
@@ -163,18 +170,33 @@ function BidTable({
 }) {
   const r = run.result;
   return (
-    <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-      <table className="w-full min-w-[780px] border-separate border-spacing-0 text-left text-[13px]">
+    <div className="hidden overflow-x-auto border-t border-line lg:block">
+      <table className="data-table min-w-[760px] [&_tbody_tr:hover]:bg-transparent">
+        <caption className="sr-only">Bids and their results. Prices in USDC per token, spend and refunds in USDC.</caption>
         <thead>
-          <tr className="text-[12px] text-subtle">
-            <th className="pb-2 font-normal">Bidder</th>
-            <th className="w-[118px] pb-2 pl-2 font-normal">Max price</th>
-            <th className="w-[96px] pb-2 pl-2 font-normal">Max spend</th>
-            <th className="pb-2 pl-3 text-right font-normal">Tokens</th>
-            <th className="pb-2 pl-3 text-right font-normal">Spent</th>
-            <th className="pb-2 pl-3 text-right font-normal">Refund</th>
-            <th className="pb-2 pl-4 font-normal">Outcome</th>
-            <th className="w-8 pb-2" aria-label="Remove" />
+          <tr>
+            <th scope="col" className="pl-5">
+              Bidder
+            </th>
+            <th scope="col" className="w-[120px] pr-6 text-right">
+              Max price
+            </th>
+            <th scope="col" className="w-[104px] pr-6 text-right">
+              Max spend
+            </th>
+            <th scope="col" className="text-right">
+              Tokens
+            </th>
+            <th scope="col" className="text-right">
+              Spent
+            </th>
+            <th scope="col" className="text-right">
+              Refund
+            </th>
+            <th scope="col">Outcome</th>
+            <th scope="col" className="w-12 pr-3 pl-0">
+              <span className="sr-only">Remove</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -184,8 +206,8 @@ function BidTable({
             const outcome = r && p.bidIndex !== null && p.maxPrice !== null ? outcomeOf(r, p.bidIndex, p.maxPrice) : null;
             const rowError = p.bidderError ?? p.priceError ?? p.spendError;
             return (
-              <tr key={row.key} className="[&>td]:border-t [&>td]:border-dashed [&>td]:border-line-dashed [&>td]:py-2">
-                <td className="min-w-[150px]">
+              <tr key={row.key}>
+                <td className="min-w-[150px] pl-5">
                   <CellInput
                     value={row.bidder}
                     onChange={(v) => onEdit(row.key, "bidder", v)}
@@ -194,7 +216,7 @@ function BidTable({
                     mono={false}
                   />
                 </td>
-                <td className="pl-2">
+                <td>
                   <CellInput
                     value={row.price}
                     onChange={(v) => onEdit(row.key, "price", v)}
@@ -202,7 +224,7 @@ function BidTable({
                     error={p.priceError}
                   />
                 </td>
-                <td className="pl-2">
+                <td>
                   <CellInput
                     value={row.spend}
                     onChange={(v) => onEdit(row.key, "spend", v)}
@@ -210,35 +232,44 @@ function BidTable({
                     error={p.spendError}
                   />
                 </td>
-                <td className="num pl-3 text-right text-fg">{fill ? tok(fill.tokens) : "–"}</td>
-                <td className="num pl-3 text-right text-fg">{fill ? usdc6(fill.spent) : "–"}</td>
-                <td className="num pl-3 text-right text-muted">{fill ? usdc6(fill.refund) : "–"}</td>
-                <td className="pl-4">
+                <td className="num text-right text-fg">{fill ? tok(fill.tokens) : "–"}</td>
+                <td className="num text-right text-fg">{fill ? usdc6(fill.spent) : "–"}</td>
+                <td className="num text-right text-fg">{fill ? usdc6(fill.refund) : "–"}</td>
+                <td>
                   {rowError ? (
-                    <span className="text-[12px] text-bad">{rowError}</span>
+                    <span className="text-label text-bad">{rowError}</span>
                   ) : outcome ? (
-                    <Badge tone={outcome.tone}>{outcome.label}</Badge>
+                    <Badge tone={outcome.tone} dot plain>
+                      {outcome.label}
+                    </Badge>
                   ) : (
                     <span className="text-subtle">–</span>
                   )}
                 </td>
-                <td className="pl-1 text-right">
-                  <button
-                    onClick={() => onRemove(row.key)}
-                    disabled={rows.length <= 1}
-                    aria-label={`Remove bid ${idx + 1}`}
-                    className="inline-flex size-7 items-center justify-center rounded-lg text-subtle transition-colors hover:bg-hover hover:text-fg"
-                  >
-                    <X className="size-3.5" strokeWidth={1.75} />
-                  </button>
+                <td className="pr-3 pl-0 text-right">
+                  <RemoveButton index={idx} disabled={rows.length <= 1} onClick={() => onRemove(row.key)} />
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
-      <p className="mt-2 text-[11.5px] text-subtle">Prices in USDC per token, spend and refunds in USDC.</p>
     </div>
+  );
+}
+
+/** Icon-only ghost button. 32px in the table, 44px on the phone cards. */
+function RemoveButton({ index, disabled, onClick }: { index: number; disabled: boolean; onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="w-8 shrink-0 px-0 max-lg:h-11 max-lg:w-11"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={`Remove bid ${index + 1}`}
+      icon={<X className="size-4" strokeWidth={1.75} aria-hidden />}
+    />
   );
 }
 
@@ -246,7 +277,7 @@ function Results({ run }: { run: ExampleRun }) {
   const r = run.result;
   if (!r || run.supply === null || run.floor === null) {
     const why = run.supplyError || run.floorError ? "Fix the supply and floor above to run the clearing." : "Add at least one complete bid to run the clearing.";
-    return <p className="text-[13px] text-bad">{why}</p>;
+    return <p className="p-4 text-body text-bad sm:p-5">{why}</p>;
   }
 
   const atFloor = r.clearingPrice === run.floor;
@@ -254,16 +285,13 @@ function Results({ run }: { run: ExampleRun }) {
   const curveBids = run.bids.filter((_, i) => r.fills[i].valid).map((b) => ({ maxPrice: b.maxPrice!, maxSpend: b.maxSpend! }));
 
   return (
-    <div className="flex flex-col gap-5">
-      <StatRow>
+    <div className="flex flex-col">
+      <StatRow flush className="px-4 sm:px-5">
         <Stat
-          label={
-            <>
-              Clearing price P<sup>*</sup>
-            </>
-          }
+          label="Clearing price (P*)"
           value={priceStr(r.clearingPrice)}
           unit="USDC"
+          tone="accent"
           hint={atFloor ? "equals the floor" : `${multiple(r.clearingPrice, run.floor)}× floor`}
         />
         <Stat label="Tokens sold" value={tok(r.totalSold)} hint={`of ${tok(run.supply)}`} />
@@ -271,28 +299,31 @@ function Results({ run }: { run: ExampleRun }) {
         <Stat label="Unsold, burned" value={tok(r.unsold)} hint={r.oversubscribed ? "oversubscribed" : "undersubscribed"} />
       </StatRow>
 
-      {r.status === "failed" ? (
-        <p className="text-[13px] text-bad">No valid bids, so the sale fails and every deposit is refunded in full.</p>
-      ) : (
-        <Insight run={run} result={r} />
-      )}
+      <div className="border-t border-line p-4 sm:p-5">
+        {r.status === "failed" ? (
+          <p className="text-body text-bad">
+            No valid bids, so the sale fails. Every deposit is refunded, less the 1 % a void bid loses.
+          </p>
+        ) : (
+          <Insight run={run} result={r} />
+        )}
+      </div>
 
-      <div className={cn(r.status === "failed" && "hidden")}>
-        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-[13px] font-medium text-fg">Demand at each price</h3>
-          <span className="text-[11.5px] text-subtle">D(P), tokens · price on a log scale</span>
-        </div>
-        <DemandChart
-          bids={curveBids}
-          floor={run.floor}
-          supply={run.supply}
-          clearingPrice={r.clearingPrice}
-          decimals={DECIMALS}
-        />
-        <p className="mt-1 text-[11.5px] leading-snug text-subtle">
-          The line is how many tokens the bids could buy at each price. It drops wherever a bid’s max price is passed.
-          P<sup>*</sup> is the last price where it still reaches the supply.
+      <div className={cn("border-t border-line p-4 sm:p-5", r.status === "failed" && "hidden")}>
+        <h3 className="text-h3 text-fg">Demand at each price</h3>
+        <p className="mt-1 max-w-[68ch] text-small text-muted">
+          The tokens the bids could buy at each price, on a log scale. The line drops wherever a bid’s max price is
+          passed, and P* is the last price where it still reaches the supply.
         </p>
+        <div className="mt-2">
+          <DemandChart
+            bids={curveBids}
+            floor={run.floor}
+            supply={run.supply}
+            clearingPrice={r.clearingPrice}
+            decimals={DECIMALS}
+          />
+        </div>
       </div>
     </div>
   );
@@ -331,7 +362,7 @@ function Insight({ run, result: r }: { run: ExampleRun; result: ClearingResult }
     const left = ties.reduce((a, t) => a + t.f.tokens, 0n);
     text = (
       <>
-        {ties.length === 1 ? "One bid sits" : `${ties.length} bids sit`} exactly at P<sup>*</sup>. After the bids above
+        {ties.length === 1 ? "One bid sits" : `${ties.length} bids sit`} exactly at P*. After the bids above
         it fill in full, {ties.length === 1 ? "it gets" : "they share"} the{" "}
         <span className="num text-fg">{tok(left)}</span> tokens left
         {ties.length > 1 && (
@@ -351,14 +382,100 @@ function Insight({ run, result: r }: { run: ExampleRun; result: ClearingResult }
   } else {
     text = (
       <>
-        Every bid above P<sup>*</sup> fills in full at the same price.
+        Every bid above P* fills in full at the same price.
       </>
     );
   }
 
   return (
-    <p className="rounded-tile border border-accent/25 bg-accent-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-muted">
-      {text}
-    </p>
+    <p className="max-w-[68ch] text-body text-muted">{text}</p>
+  );
+}
+
+/** Phones: one card per bid, the same inputs and results as a table row. */
+function BidCards({
+  rows,
+  run,
+  onEdit,
+  onRemove,
+}: {
+  rows: Row[];
+  run: ExampleRun;
+  onEdit: (key: number, field: "bidder" | "price" | "spend", v: string) => void;
+  onRemove: (key: number) => void;
+}) {
+  const r = run.result;
+  return (
+    <div className="border-t border-line px-4 sm:px-5 lg:hidden">
+      <ol className="divide-y divide-line">
+        {rows.map((row, idx) => {
+          const p = run.rows[idx];
+          const fill = r && p.bidIndex !== null ? r.fills[p.bidIndex] : null;
+          const outcome = r && p.bidIndex !== null && p.maxPrice !== null ? outcomeOf(r, p.bidIndex, p.maxPrice) : null;
+          const rowError = p.bidderError ?? p.priceError ?? p.spendError;
+          return (
+            <li key={row.key} className="py-4">
+              <div className="flex items-center gap-2">
+                <CellInput
+                  value={row.bidder}
+                  onChange={(v) => onEdit(row.key, "bidder", v)}
+                  label={`Bidder ${idx + 1}`}
+                  error={p.bidderError}
+                  mono={false}
+                />
+                <RemoveButton index={idx} disabled={rows.length <= 1} onClick={() => onRemove(row.key)} />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <span className="text-label text-subtle" aria-hidden>
+                    Max price
+                  </span>
+                  <CellInput
+                    value={row.price}
+                    onChange={(v) => onEdit(row.key, "price", v)}
+                    label={`Max price, bid ${idx + 1}, USDC per token`}
+                    error={p.priceError}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-label text-subtle" aria-hidden>
+                    Max spend
+                  </span>
+                  <CellInput
+                    value={row.spend}
+                    onChange={(v) => onEdit(row.key, "spend", v)}
+                    label={`Max spend, bid ${idx + 1}, USDC`}
+                    error={p.spendError}
+                  />
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                <dl className="flex flex-wrap gap-x-3 gap-y-1 text-label">
+                  <div className="flex gap-1">
+                    <dt className="text-subtle">Tokens</dt>
+                    <dd className="num text-fg">{fill ? tok(fill.tokens) : "–"}</dd>
+                  </div>
+                  <div className="flex gap-1">
+                    <dt className="text-subtle">Spent</dt>
+                    <dd className="num text-fg">{fill ? usdc6(fill.spent) : "–"}</dd>
+                  </div>
+                  <div className="flex gap-1">
+                    <dt className="text-subtle">Refund</dt>
+                    <dd className="num text-fg">{fill ? usdc6(fill.refund) : "–"}</dd>
+                  </div>
+                </dl>
+                {rowError ? (
+                  <span className="text-label text-bad">{rowError}</span>
+                ) : outcome ? (
+                  <Badge tone={outcome.tone} dot plain>
+                    {outcome.label}
+                  </Badge>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

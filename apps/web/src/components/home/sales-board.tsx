@@ -1,19 +1,24 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { RotateCw } from "lucide-react";
+import { SimulatedNote } from "@/components/ui/bits";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/field";
 import { Empty } from "@/components/ui/panel";
-import { SimulatedNote } from "@/components/ui/bits";
 import { Stat, StatRow } from "@/components/ui/stat";
+import { isNearMode } from "@/lib/config";
 import { usdcStr } from "@/lib/format";
 import { useNow, useSales } from "@/lib/hooks";
 import type { Sale } from "@/lib/types";
-import { CardGridSkeleton, CounterSkeleton } from "./board-skeleton";
-import { SaleCard } from "./sale-card";
+import { CountersSkeleton, FeaturedSkeleton, SaleTableSkeleton } from "./board-skeleton";
+import { FeaturedSale } from "./featured-sale";
 import { EMPTY_COPY, FILTERS, matchesFilter, sortSales, type SaleFilter } from "./sale-filters";
+import { SaleRow, SaleTableHead } from "./sale-row";
 
+/**
+ * Everything on the home page that reads live data: the featured sale, the
+ * totals and the sales table. The layout matches BoardSkeleton box for box.
+ */
 export function SalesBoard() {
   const { data: sales, loading, error, refetch } = useSales();
   const now = useNow(1000);
@@ -26,46 +31,60 @@ export function SalesBoard() {
     label: f.label,
     count: sales ? sales.filter((s) => matchesFilter(f.value, s.status)).length : undefined,
   }));
+  // Live first (sortSales), so the first sale is the one to look at now.
+  const featured = sorted[0];
 
   return (
-    <div className="flex flex-col gap-10">
-      <div className="flex flex-col gap-3">
-        <Counters sales={sales} />
-        <SimulatedNote />
-      </div>
+    <div className="flex flex-col gap-10 sm:gap-14">
+      {(sales || !error) && (
+        <div className="flex flex-col gap-4">
+          {featured ? <FeaturedSale sale={featured} now={now} /> : loading || !sales ? <FeaturedSkeleton /> : null}
+          <Counters sales={sales} />
+          {!isNearMode() && <SimulatedNote />}
+        </div>
+      )}
 
       <section aria-labelledby="sales-heading" className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
-          <h2 id="sales-heading" className="font-display text-[18px] font-medium tracking-[-0.015em] text-fg">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 id="sales-heading" className="text-h2 text-fg">
             Sales
           </h2>
-          <p className="text-[12.5px] text-subtle">Live first. Numbers update as bids land.</p>
+          {/* One scrolling row on phones, wrapping from sm. Padding keeps focus rings unclipped. */}
+          <div className="-mx-4 -my-1 overflow-x-auto px-4 py-1 [scrollbar-width:none] max-sm:[mask-image:linear-gradient(90deg,transparent,#000_14px,#000_calc(100%-28px),transparent)] sm:mx-0 sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden">
+            <Segmented
+              value={filter}
+              onChange={setFilter}
+              options={options}
+              label="Filter sales by status"
+              className="max-sm:w-max max-sm:flex-nowrap sm:justify-end"
+            />
+          </div>
         </div>
 
-        <Segmented value={filter} onChange={setFilter} options={options} label="Filter sales" />
-
         {error && !sales ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-bad/30 bg-bad-soft px-4 py-3">
-            <p className="text-[13px] text-fg">
+          <div role="alert" className="panel flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+            <p className="text-small text-fg">
               Could not load sales. <span className="text-muted">{error.message}</span>
             </p>
-            <Button size="sm" onClick={refetch} icon={<RotateCw className="size-3.5" />}>
+            <Button size="sm" onClick={refetch}>
               Try again
             </Button>
           </div>
         ) : loading || !sales ? (
-          <CardGridSkeleton />
+          <SaleTableSkeleton />
         ) : visible.length === 0 ? (
           <Empty
             title={EMPTY_COPY[filter].title}
             body={EMPTY_COPY[filter].body}
             action={
               <div className="flex flex-wrap justify-center gap-2">
-                <ButtonLink href="/judge" variant="primary" size="sm">
-                  Run judge mode
-                </ButtonLink>
+                {!isNearMode() && (
+                  <ButtonLink href="/judge" size="sm">
+                    Run the demo
+                  </ButtonLink>
+                )}
                 {filter !== "all" && (
-                  <Button size="sm" onClick={() => setFilter("all")}>
+                  <Button size="sm" variant="ghost" onClick={() => setFilter("all")}>
                     Show all sales
                   </Button>
                 )}
@@ -73,9 +92,10 @@ export function SalesBoard() {
             }
           />
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="panel overflow-hidden">
+            <SaleTableHead />
             {visible.map((s) => (
-              <SaleCard key={s.id} sale={s} now={now} />
+              <SaleRow key={s.id} sale={s} now={now} />
             ))}
           </div>
         )}
@@ -85,39 +105,23 @@ export function SalesBoard() {
 }
 
 function Counters({ sales }: { sales: Sale[] | undefined }) {
-  if (!sales) {
-    return (
-      <StatRow>
-        {Array.from({ length: 4 }, (_, i) => (
-          <CounterSkeleton key={i} />
-        ))}
-      </StatRow>
-    );
-  }
+  if (!sales) return <CountersSkeleton />;
 
   const count = (st: Sale["status"]) => sales.filter((s) => s.status === st).length;
   const live = count("open");
   const bids = sales.reduce((a, s) => a + s.bidCount, 0);
   const deposited = sales.reduce((a, s) => a + s.totalDeposits, 0n);
-  const settled = count("settled");
-  const refunding = count("failed");
 
   return (
     <StatRow>
+      <Stat label="Live sales" value={live} hint={`${count("upcoming")} upcoming`} />
       <Stat
-        size="lg"
-        label={
-          <span className="inline-flex items-center gap-1.5">
-            <span className={live > 0 ? "pulse-dot size-1.5 rounded-full bg-accent" : "size-1.5 rounded-full bg-subtle"} />
-            Live sales
-          </span>
-        }
-        value={live}
-        hint={`${count("upcoming")} upcoming`}
+        label="Sealed bids"
+        value={bids.toLocaleString("en-US")}
+        hint={`across ${sales.length} ${sales.length === 1 ? "sale" : "sales"}`}
       />
-      <Stat size="lg" label="Sealed bids" value={bids.toLocaleString("en-US")} hint={`across ${sales.length} sales`} />
-      <Stat size="lg" label="Deposited" value={usdcStr(deposited, 0)} unit="USDC" hint="public on-chain" />
-      <Stat size="lg" label="Sales settled" value={settled} hint={`${refunding} refunding`} />
+      <Stat label="Deposited" value={usdcStr(deposited, 0)} unit="USDC" hint="Public on chain" />
+      <Stat label="Settled" value={count("settled")} hint={`${count("failed")} refunding`} />
     </StatRow>
   );
 }

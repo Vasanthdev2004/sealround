@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ClearingError,
   clear,
   contractChecks,
   costOf,
@@ -121,6 +122,64 @@ describe("clear: hand-checked cases", () => {
     expect(human.tokens).toBeGreaterThan(0n);
     expect(bot.spent).toBe(costOf(bot.tokens, r.clearingPrice, ONE));
     expect(human.spent).toBe(costOf(human.tokens, r.clearingPrice, ONE));
+  });
+});
+
+describe("clear: max price ceiling", () => {
+  const sale = { ...params, saleSupply: tokens(1000), minRaise: 0n };
+  const bids = [bid("a", 100, "0.05", 100), bid("b", 100, "0.003", 2), bid("c", 100, "0.0015", 1)];
+
+  it("is optional: undefined and null mean no ceiling", () => {
+    const r = clear(sale, bids);
+    expect(clear({ ...sale, maxPrice: undefined }, bids)).toEqual(r);
+    expect(clear({ ...sale, maxPrice: null }, bids)).toEqual(r);
+    // a alone still wants 2,000 tokens at its own max price, so P* is that price.
+    expect(r.clearingPrice).toBe(usdc("0.05"));
+  });
+
+  it("clamps decrypted prices before clearing, so P* never exceeds it", () => {
+    const ceiling = usdc("0.002");
+    const r = clear({ ...sale, maxPrice: ceiling }, bids);
+    expect(r.clearingPrice).toBe(ceiling);
+    // a and b are both clamped to the ceiling and tie there; c is below it.
+    expect(r.fills[2].tokens).toBe(0n);
+    expect(r.totalSold).toBe(sale.saleSupply);
+    expect(contractChecks({ ...sale, maxPrice: ceiling }, bids, r)).toEqual([]);
+  });
+
+  it("is rejected below the floor", () => {
+    expect(() => clear({ ...sale, maxPrice: sale.floorPrice - 1n }, bids)).toThrow(
+      expect.objectContaining({ code: "ceiling_below_floor" }),
+    );
+  });
+
+  it("is checked by the contract", () => {
+    const r = clear(sale, bids);
+    expect(contractChecks({ ...sale, maxPrice: usdc("0.002") }, bids, r)).toContain("price_at_most_ceiling");
+  });
+});
+
+describe("clear: unusable params throw ClearingError", () => {
+  const one = [bid("a", 1, "0.01", 1)];
+  const cases: [string, SaleParams, string][] = [
+    ["zero supply", { ...params, saleSupply: 0n }, "sale_supply_not_positive"],
+    ["zero floor", { ...params, floorPrice: 0n }, "floor_price_not_positive"],
+    ["decimals 25", { ...params, decimals: 25 }, "decimals_out_of_range"],
+    ["fractional decimals", { ...params, decimals: 1.5 }, "decimals_out_of_range"],
+    ["ceiling below floor", { ...params, maxPrice: 1n }, "ceiling_below_floor"],
+  ];
+  for (const [name, p, code] of cases) {
+    it(name, () => {
+      expect(() => clear(p, one)).toThrow(ClearingError);
+      expect(() => clear(p, one)).toThrow(expect.objectContaining({ code }));
+    });
+  }
+
+  it("amounts beyond u128 throw overflow", () => {
+    const huge = { bidder: "a", deposit: 10n ** 15n, maxPrice: 2n, maxSpend: 10n ** 15n };
+    expect(() => clear({ saleSupply: 1n, floorPrice: 1n, minRaise: 0n, decimals: 24 }, [huge])).toThrow(
+      expect.objectContaining({ code: "overflow" }),
+    );
   });
 });
 

@@ -1,0 +1,20 @@
+{
+  "source": {
+    "Project": {
+      "project_id": "{{PROJECT_ID}}",
+      "version_key": "{{SHA256}}"
+    }
+  },
+  "resource_limits": {
+    "max_instructions": 50000000000,
+    "max_execution_seconds": 60
+  },
+  "input_data": "{\"v\":1,\"op\":\"pubkey\",\"contract\":\"{{CALLER}}\",\"sale_id\":\"{{SALE_ID}}\"}",
+  "secrets_ref": {
+    "profile": "{{PROFILE}}",
+    "account_id": "{{OWNER}}"
+  },
+  "response_format": "Text",
+  "payer_account_id": null,
+  "params": null
+}

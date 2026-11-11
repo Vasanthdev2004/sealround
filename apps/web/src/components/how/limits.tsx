@@ -1,11 +1,15 @@
-const LIMITS: { title: string; body: string }[] = [
+const LIMITS = [
   {
     title: "Money still talks",
-    body: "Fairground removes the speed advantage and the information advantage. It does not remove the capital advantage: a whale can still buy a large share at the clearing price.",
+    body: "Sealround removes the speed advantage and the information advantage. It does not remove the capital advantage: a whale can still buy a large share at the clearing price.",
   },
   {
     title: "Sybils dodge caps, not prices",
     body: "Per-account deposit caps are demo-grade. Splitting money across many wallets gets around the cap, but every wallet still pays the same clearing price, so there is nothing to gain on price.",
+  },
+  {
+    title: "Bid slots can be squatted",
+    body: "A sale takes a fixed number of bids, first come, first served, and the contract cannot read a sealed bid. Someone can fill the slots with junk and block real bidders. A void bid loses 1 % of its deposit, at least 0.01 USDC, so it costs them, but not much. The creator’s lever is a higher minimum deposit.",
   },
   {
     title: "Privacy depends on the TEE",
@@ -17,21 +21,21 @@ const LIMITS: { title: string; body: string }[] = [
   },
   {
     title: "After the sale is out of scope",
-    body: "A fair price at launch does not stop a dump later. Trading after settlement is not something Fairground controls.",
+    body: "A fair price at launch does not stop a dump later. Trading after settlement is not something Sealround controls.",
   },
   {
-    title: "Unaudited, on testnet",
-    body: "The contract has not been audited. This app runs on NEAR testnet with test USDC.",
+    title: "The contract is unaudited",
+    body: "The Sealround contract has not been audited. The demo uses simulated USDC.",
   },
 ];
 
 export function HonestLimits() {
   return (
-    <ul className="grid gap-px overflow-hidden rounded-card border border-line bg-line sm:grid-cols-2">
+    <ul className="divide-y divide-line border-y border-line">
       {LIMITS.map((l) => (
-        <li key={l.title} className="bg-elev p-4 sm:p-5">
-          <h3 className="text-[13.5px] font-medium text-fg">{l.title}</h3>
-          <p className="mt-1 text-[13px] leading-relaxed text-muted">{l.body}</p>
+        <li key={l.title} className="grid gap-1 py-4 sm:grid-cols-[13rem_minmax(0,1fr)] sm:gap-6">
+          <h3 className="text-h3 text-fg">{l.title}</h3>
+          <p className="max-w-[68ch] text-body text-muted">{l.body}</p>
         </li>
       ))}
     </ul>

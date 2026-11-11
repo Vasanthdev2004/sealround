@@ -2,11 +2,11 @@
 
 import { Field } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
-import { tokenFull, tokenStr } from "@/lib/format";
+import { tokenFull } from "@/lib/format";
 import { FormSection, SectionNotices, type SectionProps } from "./form-kit";
 import { CREATOR_WARN_BPS, groupDigits, pctStr, type Shares } from "./model";
 
-export function AllocationSection({ draft, set, error, touch, derived }: SectionProps) {
+export function AllocationSection({ draft, set, error, touch, derived, status }: SectionProps) {
   const { values, shares, notices } = derived;
   const blurWhole = (k: "saleSupply" | "creatorAllocation") => () => {
     set(k, groupDigits(draft[k]));
@@ -17,9 +17,10 @@ export function AllocationSection({ draft, set, error, touch, derived }: Section
       id="allocation"
       n={2}
       title="Allocation"
-      description="Who holds the supply. Buyers see this split before they bid."
+      description="Buyers see this split before they bid."
+      status={status}
     >
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="For sale"
           inputMode="numeric"
@@ -28,7 +29,6 @@ export function AllocationSection({ draft, set, error, touch, derived }: Section
           onChange={(e) => set("saleSupply", e.target.value)}
           onBlur={blurWhole("saleSupply")}
           error={error("saleSupply")}
-          hint="Sold at the clearing price."
         />
         <Field
           label="Creator allocation"
@@ -38,30 +38,17 @@ export function AllocationSection({ draft, set, error, touch, derived }: Section
           onChange={(e) => set("creatorAllocation", e.target.value)}
           onBlur={blurWhole("creatorAllocation")}
           error={error("creatorAllocation")}
-          hint="Sent to you at settlement."
-        />
-        <Field
-          label="LP reserve"
-          value={values.lp !== undefined ? tokenFull(values.lp) : "—"}
-          readOnly
-          tabIndex={-1}
-          inputClassName="text-muted"
-          suffix="tokens"
-          hint="The remainder, held for a pool."
         />
       </div>
 
-      <AllocationBar
-        shares={shares}
-        amounts={{ sale: values.sale, creator: values.creator, lp: values.lp }}
-      />
+      <AllocationBar shares={shares} amounts={{ sale: values.sale, creator: values.creator, lp: values.lp }} />
 
       <SectionNotices notices={notices} section="allocation" />
     </FormSection>
   );
 }
 
-/** Stacked bar: for sale / creator / LP reserve, with a legend. */
+/** The supply as one stacked bar (for sale, creator, LP reserve) over its three exact amounts. */
 export function AllocationBar({
   shares,
   amounts,
@@ -79,17 +66,14 @@ export function AllocationBar({
       label: "Creator",
       bps: shares?.creator ?? 0n,
       amount: amounts.creator,
-      color: creatorWarn ? "bg-warn" : "bg-fg/70",
+      color: creatorWarn ? "bg-warn" : "bg-viz-people",
     },
-    { key: "lp", label: "LP reserve", bps: shares?.lp ?? 0n, amount: amounts.lp, color: "bg-subtle/70" },
+    { key: "lp", label: "LP reserve", rest: true, bps: shares?.lp ?? 0n, amount: amounts.lp, color: "bg-fg/25" },
   ];
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       <div
-        className={cn(
-          "flex h-3.5 w-full gap-[3px] overflow-hidden rounded-full bg-inset p-[3px] ring-1 ring-line",
-          !shares && "hatch",
-        )}
+        className="flex h-1.5 w-full gap-0.5 overflow-hidden rounded-full bg-wash-strong"
         role="img"
         aria-label={
           shares
@@ -103,23 +87,28 @@ export function AllocationBar({
             .map((s) => (
               <span
                 key={s.key}
-                className={cn("h-full min-w-[3px] rounded-full transition-[flex-grow] duration-300", s.color)}
+                className={cn("h-full min-w-[3px] transition-[flex-grow] duration-200 ease-out", s.color)}
                 style={{ flexGrow: Number(s.bps), flexBasis: 0 }}
               />
             ))}
       </div>
-      <dl className="grid grid-cols-3 gap-3">
+      <dl className="grid grid-cols-3 gap-4">
         {segs.map((s) => (
           <div key={s.key} className="min-w-0">
-            <dt className="flex items-center gap-1.5 text-[12px] text-subtle">
-              <span className={cn("size-2 shrink-0 rounded-full", s.color)} aria-hidden />
-              <span className="truncate">{s.label}</span>
-            </dt>
-            <dd className="num mt-1 flex flex-wrap items-baseline gap-x-1.5 text-[13.5px] text-fg">
-              <span>{shares && s.amount !== undefined ? tokenStr(s.amount) : "—"}</span>
-              <span className={cn("text-[12px]", s.key === "creator" && creatorWarn ? "text-warn" : "text-subtle")}>
-                {shares ? pctStr(s.bps) : ""}
+            <dt className="flex items-start gap-1.5 text-label text-subtle">
+              <span className={cn("mt-[6px] size-1.5 shrink-0 rounded-full", s.color)} aria-hidden />
+              <span>
+                {s.label}
+                {s.rest && <span className="max-sm:hidden">, the rest</span>}
               </span>
+            </dt>
+            <dd className="num mt-1 flex flex-wrap items-baseline gap-x-1.5 text-num-sm text-fg">
+              <span className="[overflow-wrap:anywhere]">{shares && s.amount !== undefined ? tokenFull(s.amount) : "–"}</span>
+              {shares && (
+                <span className={cn("text-label font-normal", s.key === "creator" && creatorWarn ? "text-warn" : "text-muted")}>
+                  {pctStr(s.bps)}
+                </span>
+              )}
             </dd>
           </div>
         ))}

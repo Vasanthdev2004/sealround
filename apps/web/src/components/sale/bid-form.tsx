@@ -1,15 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { Lock, LockKeyhole, Wallet } from "lucide-react";
+import { Wallet } from "lucide-react";
 import { formatUnits, parseUnits } from "@fairground/clearing";
+import {
+  ActionError,
+  GasNote,
+  PaidFallbackPrompt,
+  useGasMode,
+  usePaidFallback,
+} from "@/components/sale-common/relay";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
-import { getClient } from "@/lib/client";
+import { errorInfo, getClient, type ErrorInfo } from "@/lib/client";
 import { canonicalBid, randomHex, sealBid } from "@/lib/crypto";
 import { priceStr, shortHash, usdcStr } from "@/lib/format";
-import type { BidPlaintext, BidRecord, Sale } from "@/lib/types";
+import type { BidPlaintext, BidRecord, PaidReason, Sale } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { BidPreview } from "./bid-preview";
 import { saveLocalBid } from "./local-bid";
@@ -34,6 +41,11 @@ const plain = (v: bigint) => formatUnits(v, 6, 6).replace(/,/g, "");
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * The bid form: three amounts on the left, what they buy and what leaves the
+ * wallet on the right, with the one button under that. While a bid is sealed
+ * and sent the form gives way to the sealing moment (SealTransition).
+ */
 export function BidForm({
   sale,
   account,
@@ -50,97 +62,133 @@ export function BidForm({
   /** Called when a sealed bid starts on its way to the contract. */
   onSend?: () => void;
 }) {
-  const { connect, connecting } = useWallet();
   const [seal, setSeal] = useState<SealState | null>(null);
-
-  let body: React.ReactNode;
-  if (account) {
-    const canBid = !myBidLoading && !myBid;
-    body = (
-      <>
-        {seal && <SealTransition state={seal} pubkey={sale.sealerPubkey} />}
-        {!seal && myBidLoading && <div className="shimmer h-[220px] rounded-card bg-elev-2" />}
-        {!seal && !myBidLoading && myBid && <AlreadyBid bid={myBid} />}
-        {/* Stays mounted (hidden) while sealing, so a rejected bid keeps its inputs and shows the error. */}
-        {(canBid || (seal && seal.phase !== "done")) && (
-          <div hidden={!!seal}>
-            <BidInputs sale={sale} account={account} usdcBalance={usdcBalance} onSeal={setSeal} onSend={onSend} />
-          </div>
-        )}
-      </>
-    );
-  } else {
-    body = (
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="text-[14px] font-medium text-fg">Connect a wallet to bid.</div>
-          <p className="mt-0.5 text-[13px] text-muted">Demo accounts start with 100 test USDC. No real funds.</p>
-        </div>
-        <Button
-          variant="primary"
-          size="lg"
-          onClick={connect}
-          loading={connecting}
-          icon={<Wallet className="size-4" strokeWidth={1.75} />}
-          className="w-full sm:w-auto"
-        >
-          Connect
-        </Button>
-      </div>
-    );
-  }
+  const commit = sale.config.revealMode === "commit_reveal";
+  const checking = !!account && myBidLoading && !seal;
+  const already = !!account && !myBidLoading && !!myBid && !seal;
+  // The inputs stay mounted (hidden) while sealing, so a rejected bid keeps
+  // its values and shows the error. They are also usable before connecting.
+  const showInputs = !already && (!seal || seal.phase !== "done");
+  // A reason the page already shows under the button needs no second question.
+  const gas = useGasMode();
+  const fallback = usePaidFallback(gas.paidBy === "user" ? gas.reason : null);
 
   return (
     <Panel
       id="bid"
-      title="Place a sealed bid"
-      subtitle="Encrypted in this browser to the sale's enclave key."
-      icon={<LockKeyhole strokeWidth={1.75} />}
+      title={
+        already || seal?.phase === "done"
+          ? commit
+            ? "Your committed bid"
+            : "Your sealed bid"
+          : commit
+            ? "Place a committed bid"
+            : "Place a sealed bid"
+      }
+      action={
+        account && usdcBalance !== null ? (
+          <span className="text-label text-subtle" title="USDC in your NEAR account">
+            In your wallet <span className="num text-fg">{usdcStr(usdcBalance)} USDC</span>
+          </span>
+        ) : undefined
+      }
     >
-      {body}
+      {seal && <SealTransition state={seal} pubkey={sale.sealerPubkey} />}
+      {/* The relayer refused after the first signature: say why before the wallet asks again. */}
+      <PaidFallbackPrompt fallback={fallback} what="the bid" className="mt-5" />
+      {already && myBid && <AlreadyBid bid={myBid} commit={commit} />}
+      {showInputs && (
+        <div hidden={!!seal}>
+          <BidInputs
+            sale={sale}
+            account={account}
+            checking={checking}
+            usdcBalance={usdcBalance}
+            onSeal={setSeal}
+            onSend={onSend}
+            onPaidFallback={fallback.onPaidFallback}
+          />
+        </div>
+      )}
     </Panel>
   );
 }
 
-function AlreadyBid({ bid }: { bid: BidRecord }) {
+function AlreadyBid({ bid, commit }: { bid: BidRecord; commit: boolean }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft ring-1 ring-accent/30">
-        <Lock className="size-4 text-accent" strokeWidth={1.75} />
-      </span>
-      <div>
-        <div className="text-[14px] font-medium text-fg">Your sealed bid is in.</div>
-        <p className="mt-0.5 text-[13px] text-muted">
-          One bid per account. Your deposit of <span className="num text-fg">{usdcStr(bid.deposit)} USDC</span> is locked
-          until the sale closes. Details are under My bid.
-        </p>
-      </div>
+    // The status panel above already says the bid is in; this card says what that means for the money.
+    <div role="status">
+      <p className="max-w-[62ch] text-small text-muted">
+        One bid per account. Your deposit of <span className="num text-fg">{usdcStr(bid.deposit)} USDC</span> is locked
+        until the sale settles.
+        {commit && " Come back after the close to reveal it: a bid that is not revealed is void and loses 1\u00a0% of its deposit."}
+      </p>
     </div>
+  );
+}
+
+/**
+ * A quick-fill chip under a field: the shared small button, filled when the
+ * field holds exactly its value. `label` is the tooltip.
+ */
+function Preset({
+  active,
+  onClick,
+  children,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={active ? "tactile" : "outline"}
+      aria-pressed={active}
+      title={label}
+      onClick={onClick}
+      className="gap-1.5 max-sm:h-10"
+    >
+      {children}
+    </Button>
   );
 }
 
 function BidInputs({
   sale,
   account,
+  checking,
   usdcBalance,
   onSeal,
   onSend,
+  onPaidFallback,
 }: {
   sale: Sale;
-  account: string;
+  account: string | null;
+  /** Looking up whether this account already bid. */
+  checking: boolean;
   usdcBalance: bigint | null;
   onSeal: React.Dispatch<React.SetStateAction<SealState | null>>;
   onSend?: () => void;
+  /** Awaited by the client before a paid transaction replaces a gasless one. */
+  onPaidFallback: (reason: PaidReason) => Promise<void>;
 }) {
+  const { connect, connecting, mode } = useWallet();
   const c = sale.config;
+  const commit = c.revealMode === "commit_reveal";
   const closed = sale.status !== "open";
   const [price, setPrice] = useState("");
   const [spend, setSpend] = useState("");
   const [deposit, setDeposit] = useState("");
   const [depositTouched, setDepositTouched] = useState(false);
   const [attempted, setAttempted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
   const [busy, setBusy] = useState(false);
+  // The last attempt may still land: no second attempt until the chain has spoken.
+  const inDoubt = !!error?.maybeSubmitted;
 
   const depositInput = depositTouched ? deposit : spend;
   const p = parseUsdc(price);
@@ -170,43 +218,91 @@ function BidInputs({
   }
   if (!depositErr && d.value === null && attempted) depositErr = "Enter a deposit.";
 
-  const ok =
-    p.value !== null &&
-    s.value !== null &&
-    d.value !== null &&
-    !priceErr &&
-    !spendErr &&
-    !depositErr;
-
+  const ok = p.value !== null && s.value !== null && d.value !== null && !priceErr && !spendErr && !depositErr;
   const capped = c.maxPrice !== null && p.value !== null && p.value > c.maxPrice;
+
+  // Price presets: multiples of the floor, plus the sale's max price if it has one.
+  const pricePresets: { label: string; value: bigint }[] = [
+    { label: "Floor", value: c.floorPrice },
+    { label: "2×", value: c.floorPrice * 2n },
+    { label: "5×", value: c.floorPrice * 5n },
+  ];
+  if (c.maxPrice !== null && c.maxPrice > c.floorPrice * 5n) pricePresets.push({ label: "Max", value: c.maxPrice });
+
+  // Spend presets: the minimum, a quarter, a half and all of what this account may deposit.
+  let cap = c.maxDepositPerAccount;
+  if (usdcBalance !== null && usdcBalance >= c.minDeposit && usdcBalance < cap) cap = usdcBalance;
+  const spendPresets: bigint[] = [];
+  for (const v of [c.minDeposit, cap / 4n, cap / 2n, cap]) {
+    const r = (v / 10_000n) * 10_000n; // whole cents
+    if (r >= c.minDeposit && !spendPresets.includes(r)) spendPresets.push(r);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!account) {
+      await connect();
+      return;
+    }
     setAttempted(true);
     setError(null);
-    if (!ok || p.value === null || s.value === null || d.value === null) return;
+    if (checking || inDoubt || !ok || p.value === null || s.value === null || d.value === null) return;
     const dep = d.value;
-    const pt: BidPlaintext = {
-      sale_id: sale.id,
-      bidder: account,
-      max_price: p.value.toString(),
-      max_spend: s.value.toString(),
-      salt: randomHex(16),
-    };
+    const terms = { maxPrice: p.value, maxSpend: s.value };
+    const base = { deposit: dep, txHash: null, bidder: account, relay: null, cipher: null } as const;
     setBusy(true);
     onSend?.();
-    onSeal({ phase: "plain", plain: canonicalBid(pt), cipher: null, deposit: dep, txHash: null });
     let alive = true;
     try {
+      if (commit) {
+        // Commit-reveal: the client makes the salt and the commitment, and
+        // saves the secret in this browser before anything is sent, so a bid
+        // that lands can always be revealed.
+        onSeal({
+          ...base,
+          kind: "commitment",
+          phase: "plain",
+          plain: JSON.stringify({
+            sale_id: sale.id,
+            bidder: account,
+            max_price: terms.maxPrice.toString(),
+            max_spend: terms.maxSpend.toString(),
+            salt: "16 random bytes, made and kept in this browser",
+          }),
+        });
+        const [rec] = await Promise.all([
+          getClient().bid(sale.id, account, dep, terms, { onPaidFallback }),
+          wait(600),
+        ]);
+        saveLocalBid(sale.id, account, {
+          max_price: terms.maxPrice.toString(),
+          max_spend: terms.maxSpend.toString(),
+          salt: rec.secret?.salt ?? "",
+          savedAt: Date.now(),
+        });
+        const commitment = rec.secret?.commitment ?? "";
+        onSeal((st) => st && { ...st, phase: "cipher", cipher: commitment });
+        await wait(950);
+        onSeal((st) => st && { ...st, phase: "done", txHash: rec.txHash, relay: rec.relay ?? null });
+        return;
+      }
+      const pt: BidPlaintext = {
+        sale_id: sale.id,
+        bidder: account,
+        max_price: terms.maxPrice.toString(),
+        max_spend: terms.maxSpend.toString(),
+        salt: randomHex(16),
+      };
+      onSeal({ ...base, kind: "sealed", phase: "plain", plain: canonicalBid(pt) });
       const ct = await sealBid(sale.sealerPubkey, pt);
       // Send right away. The sealing animation plays alongside the
       // transaction, so a bid placed seconds before the close is not held
       // back by it, and a rejection shows at once.
-      const placing = getClient().placeBid(sale.id, account, dep, ct);
+      const placing = getClient().placeBid(sale.id, account, dep, ct, { onPaidFallback });
       const animation = (async () => {
-        await wait(700);
+        await wait(600);
         if (alive) onSeal((st) => st && { ...st, phase: "cipher", cipher: ct });
-        await wait(1100);
+        await wait(950);
         if (alive) onSeal((st) => st && { ...st, phase: "sending" });
       })();
       const [rec] = await Promise.all([placing, animation]);
@@ -216,31 +312,20 @@ function BidInputs({
         salt: pt.salt,
         savedAt: Date.now(),
       });
-      onSeal((st) => st && { ...st, phase: "done", txHash: rec.txHash });
+      onSeal((st) => st && { ...st, phase: "done", txHash: rec.txHash, relay: rec.relay ?? null });
     } catch (err) {
       alive = false;
       onSeal(null);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorInfo(err));
     } finally {
       setBusy(false);
     }
   }
 
-  const chip = (label: string, mult: bigint) => (
-    <button
-      type="button"
-      key={label}
-      onClick={() => setPrice(plain(c.floorPrice * mult))}
-      className="inline-flex h-6 items-center rounded-full bg-elev-2 px-2.5 text-[12px] text-muted ring-1 ring-line transition-colors hover:text-fg"
-    >
-      {label}
-    </button>
-  );
-
   return (
-    <form onSubmit={submit} noValidate>
-      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="space-y-4">
+    <form onSubmit={submit} noValidate aria-busy={checking || undefined}>
+      <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
+        <div className="flex flex-col gap-5">
           <div>
             <Field
               label="Max price"
@@ -253,29 +338,66 @@ function BidInputs({
               error={priceErr && (attempted || price) ? priceErr : undefined}
               hint={
                 capped
-                  ? `Above this sale's max price. The enclave caps it at ${priceStr(c.maxPrice!)} USDC.`
-                  : `The most you would pay per token. Floor ${priceStr(c.floorPrice)} USDC.`
+                  ? `Above this sale's max price. It counts as ${priceStr(c.maxPrice!)} USDC.`
+                  : commit
+                    ? "Hidden until you reveal it after the close."
+                    : "Never shown to anyone, even after the sale."
               }
             />
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {chip("Floor", 1n)}
-              {chip("2× floor", 2n)}
-              {chip("5× floor", 5n)}
+            <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Max price presets">
+              {pricePresets.map((x) => (
+                <Preset
+                  key={x.label}
+                  active={p.value === x.value}
+                  onClick={() => setPrice(plain(x.value))}
+                  label={`${x.label === "Floor" ? "Floor" : x.label === "Max" ? "Sale max" : `${x.label} floor`}: ${priceStr(x.value)} USDC`}
+                >
+                  {x.label}
+                  {x.label !== "Floor" && x.label !== "Max" && <span className="sr-only">floor,</span>}
+                  <span className="num font-normal text-muted">{priceStr(x.value)}</span>
+                  <span className="sr-only">USDC</span>
+                </Preset>
+              ))}
             </div>
           </div>
-          <Field
-            label="Max spend"
-            suffix="USDC"
-            inputMode="decimal"
-            autoComplete="off"
-            placeholder="5"
-            value={spend}
-            onChange={(e) => setSpend(e.target.value)}
-            error={spendErr && (attempted || spend) ? spendErr : undefined}
-            hint="The most USDC you will spend in total."
-          />
+
+          <div>
+            <Field
+              label="Max spend"
+              suffix="USDC"
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder={usdcStr(cap / 2n)}
+              value={spend}
+              onChange={(e) => setSpend(e.target.value)}
+              error={spendErr && (attempted || spend) ? spendErr : undefined}
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Max spend presets">
+              {spendPresets.map((v, i) => {
+                const last = i === spendPresets.length - 1 && spendPresets.length > 1;
+                return (
+                  <Preset
+                    key={v.toString()}
+                    active={s.value === v}
+                    onClick={() => setSpend(plain(v))}
+                    label={`${last ? "Most you can deposit" : "Spend"}: ${usdcStr(v)} USDC`}
+                  >
+                    {last && "Max"}
+                    <span className={last ? "num font-normal text-muted" : "num"}>{usdcStr(v)}</span>
+                    <span className="sr-only">USDC</span>
+                  </Preset>
+                );
+              })}
+            </div>
+          </div>
+
           <Field
             label="Deposit"
+            labelAside={
+              <span className="num text-label text-subtle">
+                {usdcStr(c.minDeposit)} to {usdcStr(c.maxDepositPerAccount)} USDC
+              </span>
+            }
             suffix="USDC"
             inputMode="decimal"
             autoComplete="off"
@@ -287,58 +409,94 @@ function BidInputs({
             }}
             error={depositErr && (attempted || depositInput) ? depositErr : undefined}
             hint={
-              <>
-                {depositTouched
-                  ? "Public. Above max spend, it hides your real spend."
-                  : "Public. Defaults to max spend; set it higher to hide your real spend."}{" "}
-                <span className="num">
-                  {usdcStr(c.minDeposit)}–{usdcStr(c.maxDepositPerAccount)}
-                </span>{" "}
-                USDC.
-                {usdcBalance !== null && (
-                  <>
-                    {" "}
-                    Balance <span className="num text-muted">{usdcStr(usdcBalance)} USDC</span>.
-                  </>
-                )}
-              </>
+              depositTouched ? (
+                <>
+                  Public. Above your max spend, it hides the spend.{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeposit("");
+                      setDepositTouched(false);
+                    }}
+                    className="rounded-sm text-muted underline decoration-line-strong underline-offset-2 transition-colors duration-[120ms] hover:text-fg"
+                  >
+                    Match max spend
+                  </button>
+                </>
+              ) : (
+                "Public. Follows your max spend. Raise it to hide the spend."
+              )
             }
           />
         </div>
 
-        <BidPreview
-          sale={sale}
-          maxPrice={p.value !== null && !priceErr ? p.value : null}
-          maxSpend={s.value !== null && !s.error && s.value > 0n ? s.value : null}
-          deposit={d.value !== null && !d.error ? d.value : null}
-        />
+        <div className="border-t border-line pt-5 md:border-t-0 md:border-l md:pt-0 md:pl-8">
+          <BidPreview
+            sale={sale}
+            maxPrice={p.value !== null && !priceErr ? p.value : null}
+            maxSpend={s.value !== null && !s.error && s.value > 0n ? s.value : null}
+            deposit={d.value !== null && !d.error ? d.value : null}
+          />
+        </div>
       </div>
 
-      {error && (
-        <p role="alert" className="mt-5 rounded-tile border border-bad/25 bg-bad-soft px-3.5 py-2.5 text-[13px] text-bad">
-          {error}
-          {closed && " Your deposit never left your account."}
-        </p>
-      )}
-      {closed && !error && !busy && (
-        <p className="mt-5 text-[13px] text-muted">The bid window has closed. No more bids can be placed.</p>
-      )}
-
-      <Button
-        type="submit"
-        variant="primary"
-        size="lg"
-        loading={busy}
-        disabled={(attempted && !ok) || (closed && !busy)}
-        icon={<Lock className="size-4" strokeWidth={1.75} />}
-        className="mt-5 w-full"
-      >
-        Seal and place bid
-      </Button>
-      <p className="mt-2.5 text-center text-[12px] leading-snug text-subtle">
-        Sealed in this browser to sale key <span className="num">{shortHash(sale.sealerPubkey, 5)}</span>. Stored only in
-        this browser. No server keeps your price.
-      </p>
+      <div className="mt-5 flex flex-col gap-4 border-t border-line pt-5">
+        <ActionError info={error} what="bid" />
+        {closed && !error && !busy && (
+          <p className="text-small text-muted">The bid window has closed. No more bids can be placed.</p>
+        )}
+        <div className="flex flex-col gap-x-5 gap-y-3 sm:flex-row sm:items-center">
+          {account ? (
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              loading={busy}
+              disabled={checking || inDoubt || (attempted && !ok) || (closed && !busy)}
+              className="shrink-0 max-sm:w-full"
+            >
+              {checking
+                ? "Checking your account"
+                : inDoubt
+                  ? "Checking the chain for your bid"
+                  : commit
+                    ? "Commit and place bid"
+                    : "Seal and place bid"}
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              loading={connecting}
+              disabled={closed}
+              icon={<Wallet className="size-4" strokeWidth={1.75} />}
+              className="shrink-0 max-sm:w-full"
+            >
+              Connect a wallet to bid
+            </Button>
+          )}
+          {/* Who pays the network fee, then the one line of reassurance. */}
+          <div className="flex min-w-0 flex-col gap-1">
+            {account || mode === "near" ? (
+              <GasNote what="This bid" />
+            ) : (
+              <p className="text-label text-subtle">Demo accounts start with 100 test USDC. Your inputs stay.</p>
+            )}
+            <p className="text-label text-subtle">
+              {!account && mode === "near" && "Your inputs stay. "}
+              {commit ? (
+                "Only a hash of your bid goes on chain until you reveal it."
+              ) : (
+                <>
+                  Sealed in this browser to sale key <span className="num">{shortHash(sale.sealerPubkey, 4)}</span>.
+                </>
+              )}{" "}
+              Unspent deposit comes back in full.
+            </p>
+          </div>
+        </div>
+      </div>
     </form>
   );
 }

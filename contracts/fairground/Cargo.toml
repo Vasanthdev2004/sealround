@@ -1,0 +1,53 @@
+[package]
+name = "fairground"
+description = "Fairground sale contract: sealed-bid uniform-price batch auctions for NEAR token launches"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Reproducible build (NEP-330), for `cargo near build reproducible-wasm` and
+# `cargo near deploy build-reproducible-wasm`, so that anyone can rebuild the
+# deployed wasm from the published commit and compare hashes. It needs the
+# sources committed and pushed to `repository`, with the root Cargo.lock and
+# contracts/res/fairground_token.wasm (embedded with include_bytes!) in that
+# commit. See contracts/DESIGN.md, "Reproducible build".
+[package.metadata.near.reproducible_build]
+# cargo-near 0.22.0 with Rust 1.97.1, the compiler the tests were run with.
+# The tag only describes the image; the digest identifies it.
+image = "sourcescan/cargo-near:0.22.0-rust-1.97.1"
+image_digest = "sha256:7467038bdddc86484b73b416eeadce926ff59013e128e53dec5a19e1cb4b2234"
+# No environment variable changes the build.
+passed_env = []
+# The same build scripts/build-contracts.ps1 runs, plus `--locked`.
+container_build_command = [
+    "cargo",
+    "near",
+    "build",
+    "non-reproducible-wasm",
+    "--locked",
+    "--no-abi",
+]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk.workspace = true
+# A path dependency rather than `workspace = true`, so `default-features = false`
+# takes effect: the contract hashes with near's host sha256, not the sha2 crate.
+fairground-clearing = { path = "../../crates/clearing", default-features = false }
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }
+# With sha2 on, to check the contract's bid-set hash against the reference one.
+fairground-clearing = { path = "../../crates/clearing" }
+# The real token, to measure the storage its `new` writes (see costs.rs).
+fairground-token = { path = "../token" }
+near-contract-standards.workspace = true
+
+[lints.rust]
+# cargo-near builds with `--cfg near`, which rustc does not know about.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(near)"] }

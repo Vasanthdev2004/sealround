@@ -1,10 +1,11 @@
 "use client";
 
 import { useId } from "react";
-import { CircleExclamationPoint, Info, Lock, TriangleExclamationPoint } from "lucide-react";
-import { Panel } from "@/components/ui/panel";
+import { ChevronDown } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { sectionDomId, type Derived, type Draft, type FieldKey, type Notice, type SectionId } from "./model";
+import type { SectionStatus } from "./progress";
 
 /** What every section needs from the page. */
 export type SectionProps = {
@@ -14,43 +15,71 @@ export type SectionProps = {
   error: (key: FieldKey) => string | undefined;
   touch: (key: FieldKey) => void;
   derived: Derived;
+  /** Where this section stands, for the header badge. */
+  status?: SectionStatus;
 };
 
-/** One numbered section of the wizard. */
+/**
+ * One block of the form: a hairline, a title row, at most one line under it,
+ * then the fields. The six numbered sections pass `n` and `status`; the
+ * fixed-rules block at the end passes neither.
+ */
 export function FormSection({
   id,
   n,
   title,
   description,
+  status,
   children,
 }: {
-  id: SectionId;
-  n: number;
+  id: SectionId | "fixed";
+  n?: number;
   title: string;
-  description: React.ReactNode;
+  description?: React.ReactNode;
+  status?: SectionStatus;
   children: React.ReactNode;
 }) {
+  const domId = id === "fixed" ? "create-fixed" : sectionDomId(id);
   return (
-    <Panel
-      id={sectionDomId(id)}
-      className="scroll-mt-20"
-      title={
-        <span className="flex items-baseline gap-2.5">
-          <span className="num text-[12px] text-subtle">{String(n).padStart(2, "0")}</span>
-          {title}
-        </span>
-      }
-      subtitle={description}
-      bodyClassName="flex flex-col gap-4"
-    >
-      {children}
-    </Panel>
+    <section id={domId} aria-labelledby={`${domId}-h`} className="scroll-mt-[72px] border-t border-line pt-6">
+      <header className="mb-5">
+        <div className="flex items-baseline gap-3">
+          {n !== undefined && (
+            <span aria-hidden className="num text-label text-subtle">
+              {n}
+            </span>
+          )}
+          <h2 id={`${domId}-h`} className="min-w-0 flex-1 text-h2 text-fg">
+            {title}
+          </h2>
+          {status && <SectionState status={status} />}
+        </div>
+        {description && <p className="mt-1 max-w-[62ch] text-small text-muted">{description}</p>}
+      </header>
+      <div className="flex flex-col gap-5">{children}</div>
+    </section>
   );
 }
 
-/** Small field label, matching Field's. */
+/** "Ready", "To do" or "Fix 2" at the right of a section title: a dot and a word. */
+function SectionState({ status }: { status: SectionStatus }) {
+  if (status.state === "fix") {
+    return (
+      <Badge plain dot tone="bad" className="shrink-0">
+        Fix {status.count}
+      </Badge>
+    );
+  }
+  return (
+    <Badge plain dot tone={status.state === "ready" ? "ok" : "neutral"} className="shrink-0">
+      {status.state === "ready" ? "Ready" : "To do"}
+    </Badge>
+  );
+}
+
+/** Label for a group of chips or cards, matching Field's. */
 export function Label({ children, htmlFor, id }: { children: React.ReactNode; htmlFor?: string; id?: string }) {
-  const cls = "text-[12.5px] font-medium text-muted";
+  const cls = "text-label font-[510] text-muted";
   return htmlFor ? (
     <label htmlFor={htmlFor} id={id} className={cls}>
       {children}
@@ -80,21 +109,21 @@ export function TextArea({
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-3">
         <Label htmlFor={id}>{label}</Label>
-        {counter && <span className="num text-[11.5px] text-subtle">{counter}</span>}
+        {counter && <span className="num text-label text-subtle">{counter}</span>}
       </div>
       <textarea
         id={id}
-        rows={3}
+        rows={2}
         aria-invalid={!!error}
         aria-describedby={hint || error ? `${id}-d` : undefined}
         className={cn(
-          "inset min-h-[84px] resize-y px-3 py-2.5 text-[14px] leading-relaxed text-fg outline-none transition-colors placeholder:text-subtle focus:border-accent/60",
-          error && "border-bad/60",
+          "inset min-h-[72px] resize-y border-control px-3 py-2.5 text-body text-fg outline-none transition-[border-color,box-shadow] duration-[120ms] ease-surface placeholder:text-subtle hover:border-control-hover focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-soft)] hover:focus:border-accent",
+          error && "border-bad",
         )}
         {...rest}
       />
       {(error || hint) && (
-        <p id={`${id}-d`} className={cn("text-[12px]", error ? "text-bad" : "text-subtle")}>
+        <p id={`${id}-d`} className={cn("text-label", error ? "text-bad" : "text-subtle")}>
           {error || hint}
         </p>
       )}
@@ -102,58 +131,50 @@ export function TextArea({
   );
 }
 
-/** Tactile on/off switch. */
-export function Switch({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-}) {
+/** A chip label for a length that only makes sense on testnet: the length, then the word, quiet. */
+export function PresetLabel({ preset }: { preset: { label: string; testnet?: boolean } }) {
+  if (!preset.testnet) return preset.label;
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full ring-1 transition-colors",
-        checked ? "bg-accent ring-accent-strong" : "bg-inset ring-line-strong",
-      )}
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "size-4 rounded-full transition-transform duration-150",
-          checked ? "translate-x-[19px]" : "translate-x-[3px]",
-        )}
-        style={{
-          background: "linear-gradient(#ffffff, #d4d4da)",
-          boxShadow: "0 1px 2px rgba(0,0,0,.45), inset 0 -1px 1px rgba(0,0,0,.12)",
-        }}
-      />
-    </button>
+    <>
+      {preset.label}
+      <span className="font-normal text-subtle">testnet</span>
+    </>
   );
 }
 
-/** Radio card. Wrap a set of these in a role="radiogroup". */
+/**
+ * Arrow keys for a hand-laid radio group (the mode cards, the colour discs):
+ * the choice and the focus move together, as they do in Segmented.
+ */
+export function radioKeys<T>(values: readonly T[], value: T, onChange: (v: T) => void) {
+  return (e: React.KeyboardEvent<HTMLElement>) => {
+    const step =
+      e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (!step || values.length === 0) return;
+    e.preventDefault();
+    const next = (Math.max(0, values.indexOf(value)) + step + values.length) % values.length;
+    onChange(values[next]);
+    e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
+  };
+}
+
+/**
+ * A choice that needs a line of explanation: a hairline card with a radio
+ * mark. The selected choice uses an accent border and a faint wash.
+ * Wrap a set of these in a role="radiogroup" with `radioKeys`.
+ */
 export function ChoiceCard({
   selected,
   onSelect,
   title,
   tag,
-  disabled,
   children,
 }: {
   selected: boolean;
   onSelect: () => void;
   title: React.ReactNode;
+  /** One quiet word at the right: "Default", "Fallback". */
   tag?: React.ReactNode;
-  /** Shown for context but not selectable. */
-  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -161,38 +182,37 @@ export function ChoiceCard({
       type="button"
       role="radio"
       aria-checked={selected}
-      aria-disabled={disabled || undefined}
-      onClick={disabled ? undefined : onSelect}
+      tabIndex={selected ? 0 : -1}
+      onClick={onSelect}
       className={cn(
-        "tile flex w-full flex-col items-start gap-1.5 p-4 text-left transition-colors",
-        selected ? "bg-accent-soft ring-1 ring-accent/60" : !disabled && "hover:bg-hover",
+        "flex w-full flex-col items-start gap-1.5 rounded-tile border p-4 text-left transition-[background-color,border-color] duration-[120ms] ease-surface",
+        selected ? "border-accent/40 bg-accent-soft" : "border-line hover:bg-wash",
       )}
     >
       <span className="flex w-full items-center gap-2.5">
         <span
           aria-hidden
           className={cn(
-            "flex size-4 shrink-0 items-center justify-center rounded-full ring-1",
-            selected ? "bg-accent ring-accent-strong" : "bg-inset ring-line-strong",
+            "flex size-4 shrink-0 items-center justify-center rounded-full border",
+            selected ? "border-accent" : "border-line-strong",
           )}
         >
-          {selected && <span className="size-1.5 rounded-full bg-white" />}
+          {selected && <span className="size-2 rounded-full bg-accent" />}
         </span>
-        <span className="text-[13.5px] font-medium text-fg">{title}</span>
-        {tag && <span className="ml-auto">{tag}</span>}
+        <span className="text-h3 text-fg">{title}</span>
+        {tag && <span className="ml-auto text-label whitespace-nowrap text-subtle">{tag}</span>}
       </span>
-      <span className="pl-[26px] text-[12.5px] leading-relaxed text-muted">{children}</span>
+      <span className="pl-[26px] text-small text-muted">{children}</span>
     </button>
   );
 }
 
-const NOTE_TONE = {
-  warn: { box: "bg-warn-soft ring-warn/20", icon: "text-warn", Icon: TriangleExclamationPoint },
-  bad: { box: "bg-bad-soft ring-bad/25", icon: "text-bad", Icon: CircleExclamationPoint },
-  neutral: { box: "bg-hover ring-line", icon: "text-subtle", Icon: Info },
-} as const;
+const NOTE_DOT = { warn: "bg-warn", bad: "bg-bad" } as const;
 
-/** Inline plain-words note. */
+/**
+ * One plain line of advice. A warning or a blocker gets a state dot; a
+ * neutral note is just the line. No box.
+ */
 export function Note({
   tone = "neutral",
   children,
@@ -202,14 +222,15 @@ export function Note({
   children: React.ReactNode;
   className?: string;
 }) {
-  const t = NOTE_TONE[tone];
   return (
     <div
       role={tone === "bad" ? "alert" : undefined}
-      className={cn("flex items-start gap-2.5 rounded-tile px-3 py-2.5 ring-1", t.box, className)}
+      className={cn("flex items-start gap-2 text-small", tone === "bad" ? "text-fg" : "text-muted", className)}
     >
-      <t.Icon className={cn("mt-px size-4 shrink-0", t.icon)} strokeWidth={1.75} aria-hidden />
-      <div className="min-w-0 text-[12.5px] leading-snug text-fg/90">{children}</div>
+      {tone !== "neutral" && (
+        <span aria-hidden className={cn("mt-[7px] size-1.5 shrink-0 rounded-full", NOTE_DOT[tone])} />
+      )}
+      <div className="min-w-0 max-w-[68ch]">{children}</div>
     </div>
   );
 }
@@ -229,18 +250,19 @@ export function SectionNotices({ notices, section }: { notices: Notice[]; sectio
   );
 }
 
-/** A rule that is fixed for every sale: shown, not editable. */
-export function LockedRow({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
+/** The reasoning behind a rule, folded away: a text link that opens a short paragraph. */
+export function Why({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3 py-3">
-      <Lock className="mt-0.5 size-4 shrink-0 text-subtle" strokeWidth={1.75} aria-hidden />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-          <span className="text-[13px] text-fg">{label}</span>
-          <span className="num text-[13px] text-fg">{value}</span>
-        </div>
-        <p className="mt-0.5 text-[12px] leading-snug text-subtle">{detail}</p>
-      </div>
-    </div>
+    <details className="group">
+      <summary className="inline-flex min-h-10 cursor-pointer list-none items-center gap-1 rounded-sm text-small text-muted underline decoration-line-strong underline-offset-4 transition-colors duration-[120ms] hover:text-fg sm:min-h-8 [&::-webkit-details-marker]:hidden">
+        {label}
+        <ChevronDown
+          aria-hidden
+          className="size-4 shrink-0 transition-transform duration-[120ms] group-open:rotate-180"
+          strokeWidth={1.75}
+        />
+      </summary>
+      <div className="mt-1.5 flex max-w-[68ch] flex-col gap-2 text-small text-muted">{children}</div>
+    </details>
   );
 }

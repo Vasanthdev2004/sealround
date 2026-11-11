@@ -1,14 +1,22 @@
 "use client";
 
-import { ArrowUpRight, RotateCcw } from "lucide-react";
-import { Badge, Tag } from "@/components/ui/badge";
+import { useEffect } from "react";
+import { ArrowRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { CheckRow, SimulatedNote, TokenAvatar, type CheckState } from "@/components/ui/bits";
 import { Button, ButtonLink } from "@/components/ui/button";
-import { CheckRow, SimulatedNote, TokenAvatar } from "@/components/ui/bits";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Stat, StatRow } from "@/components/ui/stat";
+import { CipherChip } from "@/components/visual/cipher-chip";
+import { effectiveFills, groupStats, type GroupStats } from "@/components/result/compute";
+import { invalidBidPenalty } from "@/lib/client/rules";
+import { cn } from "@/lib/cn";
 import { priceStr, tokenStr, usdcStr } from "@/lib/format";
-import { useResult } from "@/lib/hooks";
+import { useBids, useResult } from "@/lib/hooks";
+import { focusEl } from "@/lib/scroll";
 import type { Sale, SaleResult } from "@/lib/types";
 import { JUDGE_GOAL_MS, clock } from "./judge-store";
+import { RunNotice } from "./run-card";
 
 type FillRow = SaleResult["fills"][number];
 
@@ -26,18 +34,13 @@ const VOID_TEXT: Record<NonNullable<FillRow["invalidReason"]>, string> = {
   price_below_floor: "max price was below the floor",
 };
 
-/** Average USDC paid per whole token across a group of fills, or null if none filled. */
-function avgPaid(fills: FillRow[], decimals: number): bigint | null {
-  let spent = 0n;
-  let tokens = 0n;
-  for (const f of fills) {
-    if (!f.valid || f.tokens === 0n) continue;
-    spent += f.spent;
-    tokens += f.tokens;
-  }
-  return tokens > 0n ? (spent * 10n ** BigInt(decimals)) / tokens : null;
-}
+const PAD = "p-5 sm:p-8";
 
+/**
+ * The end of the show: the one clearing price as the hero, what bots and
+ * people each paid side by side, three checks (same price, the copycat, your
+ * own bid), the run's totals, and the one main action, the full result.
+ */
 export function JudgeSummary({
   saleId,
   sale,
@@ -52,94 +55,158 @@ export function JudgeSummary({
   onRunAgain: () => void;
 }) {
   const result = useResult(saleId);
+  const ready = !result.loading && !!sale && !!result.data;
 
-  if (result.loading || !sale) {
-    return <div className="panel shimmer h-[340px]" aria-busy="true" aria-label="Loading result" />;
-  }
+  // The live stage (and its focused title) unmounted when the run ended. If
+  // focus fell to the page, put it on the summary's heading.
+  useEffect(() => {
+    if (!ready) return;
+    const a = document.activeElement;
+    if (!a || a === document.body) focusEl(document.getElementById("summary-title"));
+  }, [ready]);
+
+  if (result.loading || !sale) return <SummarySkeleton />;
   if (result.error || !result.data) {
     return (
-      <div className="panel p-5">
-        <p className="text-[13.5px] text-fg">The run finished but the result could not be read.</p>
-        <p className="mt-1 text-[12.5px] text-bad">{result.error?.message ?? "No result stored for this sale."}</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button onClick={() => result.refetch()}>Try again</Button>
-          <Button variant="ghost" onClick={onRunAgain} icon={<RotateCcw className="size-4" strokeWidth={1.75} />}>
-            Run again
-          </Button>
-        </div>
-      </div>
+      <RunNotice
+        badge="No result"
+        title="The run finished, but its result could not be read"
+        detail={result.error?.message ?? "No result is stored for this sale."}
+        actions={
+          <>
+            <Button variant="primary" size="lg" onClick={() => result.refetch()}>
+              Try again
+            </Button>
+            <Button size="lg" onClick={onRunAgain}>
+              Run again
+            </Button>
+          </>
+        }
+      />
     );
   }
 
   const r = result.data;
   const c = sale.config;
   const settled = r.status === "settled";
+  // A failed sale refunds everyone; only bids a trusted clearing found void lose the 1 % penalty.
+  const penalized = (r.totalPenalties ?? 0n) > 0n;
   const underGoal = elapsedMs < JUDGE_GOAL_MS;
   const multiple = c.floorPrice > 0n ? Number((r.clearingPrice * 100n) / c.floorPrice) / 100 : null;
 
+  const bots = groupStats(
+    r.fills.filter((f) => f.tag === "bot"),
+    c.decimals,
+  );
+  const people = groupStats(
+    r.fills.filter((f) => f.tag !== "bot"),
+    c.decimals,
+  );
+  const P = r.clearingPrice;
+  // Each charge rounds up to the micro-USDC, so a group average can sit one
+  // base unit above the price. That still counts as the same price.
+  const near = (a: bigint | null) => a !== null && a >= P && a - P <= 1n;
+  const same = near(bots.avgPrice) && near(people.avgPrice);
+  const exact = bots.avgPrice === P && people.avgPrice === P;
+  const oneEmpty = bots.avgPrice === null || people.avgPrice === null;
+  // What each bidder actually gets: on a failed sale, no tokens and the deposit back.
+  const mine = account ? effectiveFills(r).find((f) => f.bidder === account) : undefined;
+
+  const yours = <YourBid mine={mine} settled={settled} sym={c.tokenSymbol} decimals={c.decimals} />;
+
   return (
-    <section className="panel">
-      <div className="p-5 sm:p-6">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <TokenAvatar symbol={c.tokenSymbol} hue={sale.meta.hue} size={28} />
-          <span className="text-[13.5px] text-fg">{c.tokenName}</span>
-          <span className="num text-[12.5px] text-subtle">${c.tokenSymbol}</span>
-          <Badge tone={settled ? "ok" : "bad"} dot>
+    <section className="panel overflow-hidden" aria-labelledby="summary-title">
+      <div className={PAD}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <TokenAvatar symbol={c.tokenSymbol} hue={sale.meta.hue} size={36} />
+            <div className="min-w-0">
+              <div className="truncate text-h3 text-fg">{c.tokenName}</div>
+              <div className="truncate text-label text-subtle">${c.tokenSymbol}</div>
+            </div>
+          </div>
+          <Badge tone={settled ? "ok" : "bad"} dot plain>
             {settled ? "Settled" : "Refunding"}
           </Badge>
-          <Tag tone="accent">judge mode</Tag>
         </div>
 
-        <h2 className="mt-4 font-display text-[20px] leading-tight font-medium tracking-[-0.02em] text-fg sm:text-[22px]">
-          {settled ? (
-            <>
-              Everyone paid <span className="num">{priceStr(r.clearingPrice)}</span> USDC per token.
-            </>
-          ) : (
-            "The sale did not settle. Every bidder gets a full refund."
-          )}
+        <h2 id="summary-title" tabIndex={-1} className="anim-rise mt-6 text-h2 text-fg outline-none sm:mt-8">
+          {settled ? "Every winner paid one clearing price" : "The sale did not settle"}
         </h2>
-        <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-muted">
-          {settled
-            ? "Every filled bid paid the one clearing price, bots included. Bidding first and high got the bots a fill, not a better price."
-            : (r.failReason ? FAIL_TEXT[r.failReason] : "A contract check failed.") +
-              " Deposits come back in full at claim."}
-        </p>
+        {settled ? (
+          <div className="anim-rise" style={{ "--i": 1 } as React.CSSProperties}>
+            <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="num text-num-hero text-fg">{priceStr(P)}</span>
+              <span className="text-body text-muted">USDC per token</span>
+            </div>
+            {multiple !== null && (
+              <p className="mt-3 text-small text-muted">
+                <span className="num text-fg">{multiple.toFixed(2)}×</span> the floor of{" "}
+                <span className="num text-fg">{priceStr(c.floorPrice)}</span> USDC
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="anim-rise mt-2 max-w-[60ch] text-body text-muted" style={{ "--i": 1 } as React.CSSProperties}>
+            {(r.failReason ? FAIL_TEXT[r.failReason] : "A contract check failed.") +
+              (penalized
+                ? " Deposits come back at claim: valid bids in full, void bids less the 1 % penalty."
+                : " Every deposit comes back in full at claim.")}
+          </p>
+        )}
 
-        <StatRow className="mt-5">
+        <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="flex flex-wrap gap-2 max-sm:w-full">
+            <ButtonLink href={`/sale/${saleId}/result`} variant="primary" size="lg" className="max-sm:w-full">
+              Open the full result <ArrowRight className="size-4" strokeWidth={1.75} aria-hidden />
+            </ButtonLink>
+            <Button size="lg" onClick={onRunAgain} className="max-sm:w-full">
+              Run again
+            </Button>
+          </div>
+          <span className="text-small text-muted">Every fill, the claims and the proof checks.</span>
+        </div>
+
+        {settled && (
+          <dl className="mt-6 grid border-t border-line sm:mt-8 sm:grid-cols-2">
+            <Paid kind="bot" stats={bots} sym={c.tokenSymbol} decimals={c.decimals} className="sm:pr-5" />
+            <Paid
+              kind="person"
+              stats={people}
+              sym={c.tokenSymbol}
+              decimals={c.decimals}
+              className="border-line max-sm:border-t sm:border-l sm:pl-5"
+            />
+          </dl>
+        )}
+
+        <div className={cn("divide-y divide-line border-t border-line", !settled && "mt-6 sm:mt-8")}>
+          {mine && yours}
+          {settled && (
+            <CheckRow
+              state={same ? "pass" : oneEmpty ? "idle" : "fail"}
+              label={
+                same
+                  ? exact
+                    ? "Bots and people paid exactly the clearing price."
+                    : "Bots and people paid the clearing price, to the last 0.000001 USDC."
+                  : oneEmpty
+                    ? "One group got no tokens, so there is nothing to compare."
+                    : "The groups paid different prices."
+              }
+            />
+          )}
+          <Copycat result={r} saleId={saleId} />
+          {!mine && yours}
+        </div>
+
+        <StatRow>
+          <Stat label="Valid bids" value={r.nValid} countUp hint={`${r.nInvalid} void`} />
+          <Stat label="Raised" value={usdcStr(r.totalRaised)} unit="USDC" countUp />
           <Stat
-            label="Clearing price"
-            value={priceStr(r.clearingPrice)}
-            unit="USDC"
-            hint={
-              multiple !== null ? (
-                <>
-                  <span className="num">{multiple.toFixed(2)}×</span> the floor of{" "}
-                  <span className="num">{priceStr(c.floorPrice)}</span>
-                </>
-              ) : undefined
-            }
-          />
-          <Stat
-            label="Bids"
-            value={r.nValid}
-            unit="valid"
-            hint={
-              <>
-                <span className="num">{r.nInvalid}</span> void
-              </>
-            }
-          />
-          <Stat
-            label="Raised"
-            value={usdcStr(r.totalRaised)}
-            unit="USDC"
-            hint={
-              <>
-                <span className="num">{tokenStr(r.totalSold, c.decimals)}</span> tokens sold
-                {r.oversubscribed ? ", oversubscribed" : ""}
-              </>
-            }
+            label="Tokens sold"
+            value={tokenStr(r.totalSold, c.decimals)}
+            hint={r.oversubscribed ? "Oversubscribed" : undefined}
           />
           <Stat
             label="Time to result"
@@ -148,145 +215,175 @@ export function JudgeSummary({
           />
         </StatRow>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <AveragePaid result={r} decimals={c.decimals} />
-          <div className="tile px-4 py-1.5">
-            <Copycat result={r} />
-            <YourBid result={r} account={account} decimals={c.decimals} />
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-wrap items-center gap-2.5">
-          <ButtonLink
-            href={`/sale/${saleId}/result`}
-            variant="primary"
-            size="lg"
-            className="w-full sm:w-auto"
-          >
-            Open the result and Verified panel <ArrowUpRight className="size-4" strokeWidth={1.75} />
-          </ButtonLink>
-          <Button
-            size="lg"
-            onClick={onRunAgain}
-            icon={<RotateCcw className="size-4" strokeWidth={1.75} />}
-            className="w-full sm:w-auto"
-          >
-            Run again
-          </Button>
-        </div>
         <SimulatedNote className="mt-4" />
       </div>
     </section>
   );
 }
 
-function AveragePaid({ result, decimals }: { result: SaleResult; decimals: number }) {
-  const bots = result.fills.filter((f) => f.tag === "bot");
-  const humans = result.fills.filter((f) => f.tag !== "bot");
-  const avgBots = avgPaid(bots, decimals);
-  const avgHumans = avgPaid(humans, decimals);
-  const p = result.clearingPrice;
-  const near = (a: bigint | null) => a !== null && a - p <= 1n && a >= p;
-  const exact = avgBots === p && avgHumans === p;
-  const same = near(avgBots) && near(avgHumans);
-
+/** One group's average price per token, with what it bought. The two sit side by side, divided by a hairline. */
+function Paid({
+  kind,
+  stats,
+  sym,
+  decimals,
+  className,
+}: {
+  kind: "bot" | "person";
+  stats: GroupStats;
+  sym: string;
+  decimals: number;
+  className?: string;
+}) {
+  const bot = kind === "bot";
   return (
-    <div className="tile p-4">
-      <div className="text-[12px] text-subtle">Average price paid per token</div>
-      <dl className="mt-3 grid grid-cols-2 gap-3">
-        <Group label="Bots" n={bots.filter((f) => f.valid && f.tokens > 0n).length} avg={avgBots} />
-        <Group label="People" n={humans.filter((f) => f.valid && f.tokens > 0n).length} avg={avgHumans} />
-      </dl>
-      <div className="mt-3 border-t border-dashed border-line-dashed pt-1">
-        <CheckRow
-          state={same ? "pass" : avgBots === null || avgHumans === null ? "idle" : "fail"}
-          label={
-            same
-              ? exact
-                ? "Both equal the clearing price."
-                : "Both equal the clearing price, to the last 0.000001 USDC."
-              : avgBots === null || avgHumans === null
-                ? "One group got no tokens, so there is nothing to compare."
-                : "The groups paid different prices."
-          }
-          detail={same ? "spent / tokens, summed over every filled bid" : undefined}
-        />
-      </div>
-    </div>
-  );
-}
-
-function Group({ label, n, avg }: { label: string; n: number; avg: bigint | null }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[12.5px] text-muted">
-        {label} <span className="num text-[11.5px] text-subtle">· {n} filled</span>
+    <div className={cn("min-w-0 py-5", className)}>
+      <dt className="flex items-center gap-2 text-label text-subtle">
+        <span className={cn("size-1.5 rounded-full", bot ? "bg-bot" : "bg-viz-people")} aria-hidden />
+        {bot ? "Bots paid" : "People paid"}
       </dt>
-      <dd className="num mt-1 text-[22px] leading-none tracking-[-0.03em] text-fg">
-        {avg === null ? "–" : priceStr(avg)}
-      </dd>
-      <dd className="mt-1 text-[11.5px] text-subtle">USDC / token</dd>
+      {stats.avgPrice !== null ? (
+        <>
+          <dd className="mt-2 flex flex-wrap items-baseline gap-x-2">
+            <span className="num text-num-lg text-fg sm:text-num-xl">{priceStr(stats.avgPrice)}</span>
+            <span className="text-label text-muted">USDC per token</span>
+          </dd>
+          <dd className="mt-2 text-label text-muted">
+            <span className="num text-fg">{stats.filled}</span> filled,{" "}
+            <span className="num text-fg">{tokenStr(stats.tokens, decimals)}</span> {sym} for{" "}
+            <span className="num text-fg">{usdcStr(stats.spent)}</span> USDC
+          </dd>
+        </>
+      ) : (
+        <dd className="mt-2 text-body text-muted">{bot ? "No bot received tokens." : "No person received tokens."}</dd>
+      )}
     </div>
   );
 }
 
-function Copycat({ result }: { result: SaleResult }) {
+function Copycat({ result, saleId }: { result: SaleResult; saleId: string }) {
+  const bids = useBids(saleId).data;
   const copy = result.fills.find((f) => f.invalidReason === "bidder_mismatch");
-  if (!copy) {
-    return <CheckRow state="idle" label="No copied ciphertext in this run." />;
-  }
+  if (!copy) return <CheckRow state="idle" label="No copied ciphertext in this run." />;
+  // What the rules say must happen to a copied bid, each part checked on its
+  // own: void, no tokens, nothing spent, and the deposit back less exactly the
+  // invalid-bid penalty (1 % of the deposit, rounded up). The penalty is
+  // recomputed here from the rule, not read back from the same result.
+  const penalty = copy.penalty ?? 0n;
+  const ok =
+    !copy.valid &&
+    copy.tokens === 0n &&
+    copy.spent === 0n &&
+    penalty === invalidBidPenalty(copy.deposit) &&
+    copy.refund === copy.deposit - penalty;
   return (
     <CheckRow
-      state={!copy.valid && copy.tokens === 0n && copy.refund === copy.deposit ? "pass" : "fail"}
-      label="Copied ciphertext: void, refunded"
-      detail={`${copy.bidder} · ${usdcStr(copy.refund)} USDC back, 0 tokens`}
+      state={ok ? "pass" : "fail"}
+      label={
+        <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+          <span>
+            The copycat&apos;s bid was void: <span className="num">0</span> tokens,{" "}
+            <span className="num">{usdcStr(copy.refund, 6)}</span> USDC back,{" "}
+            <span className="num">{usdcStr(penalty, 6)}</span> USDC kept as the 1 % penalty.
+          </span>
+          <CipherChip
+            seed={`${saleId}:${copy.index}`}
+            text={bids?.find((b) => b.index === copy.index)?.ciphertext}
+            chars={14}
+            tone="bad"
+            struck
+            label="void"
+          />
+        </span>
+      }
     />
   );
 }
 
-function YourBid({ result, account, decimals }: { result: SaleResult; account: string | null; decimals: number }) {
-  const mine = account ? result.fills.find((f) => f.bidder === account) : undefined;
-  if (!mine) {
-    return (
-      <CheckRow
-        className="border-t border-dashed border-line-dashed"
-        state="idle"
-        label="You did not bid this run."
-        detail="Run again and add a sealed bid while the window is open."
-      />
+function YourBid({
+  mine,
+  settled,
+  sym,
+  decimals,
+}: {
+  mine: FillRow | undefined;
+  settled: boolean;
+  sym: string;
+  decimals: number;
+}) {
+  let state: CheckState = "idle";
+  let label: React.ReactNode = "You did not bid. Run again to add a sealed bid of your own.";
+  if (mine && !mine.valid) {
+    state = "fail";
+    label = `Your bid was void because ${mine.invalidReason ? VOID_TEXT[mine.invalidReason] : "it was invalid"}. ${usdcStr(mine.refund, 6)} USDC back${
+      (mine.penalty ?? 0n) > 0n ? `, after the 1 % penalty of ${usdcStr(mine.penalty ?? 0n, 6)} USDC` : ""
+    }.`;
+  } else if (mine && !settled) {
+    label = `Your deposit of ${usdcStr(mine.refund, 6)} USDC comes back at claim.`;
+  } else if (mine && mine.tokens === 0n) {
+    label = `Your bid did not fill: the clearing price was above your max price. ${usdcStr(mine.refund, 6)} USDC back.`;
+  } else if (mine) {
+    state = "pass";
+    label = (
+      <>
+        You got <span className="num">{tokenStr(mine.tokens, decimals)}</span> {sym} for{" "}
+        <span className="num">{usdcStr(mine.spent, 6)}</span> USDC, the same price as the bots.{" "}
+        <span className="num">{usdcStr(mine.refund, 6)}</span> USDC back at claim.
+      </>
     );
   }
-  if (!mine.valid) {
-    return (
-      <CheckRow
-        className="border-t border-dashed border-line-dashed"
-        state="fail"
-        label="Your bid was void"
-        detail={`${mine.invalidReason ? VOID_TEXT[mine.invalidReason] : "invalid"} · ${usdcStr(mine.refund)} USDC back`}
-      />
-    );
-  }
-  if (mine.tokens === 0n) {
-    return (
-      <CheckRow
-        className="border-t border-dashed border-line-dashed"
-        state="idle"
-        label="Your bid did not fill"
-        detail={`Clearing price was above your max price · ${usdcStr(mine.refund)} USDC back`}
-      />
-    );
-  }
+  return <CheckRow state={state} label={label} />;
+}
+
+/** The settled summary, box for box, while the result loads. */
+function SummarySkeleton() {
   return (
-    <CheckRow
-      className="border-t border-dashed border-line-dashed"
-      state="pass"
-      label={
-        <>
-          You got <span className="num">{tokenStr(mine.tokens, decimals)}</span> tokens for{" "}
-          <span className="num">{usdcStr(mine.spent, 6)}</span> USDC
-        </>
-      }
-      detail={`Same price as the bots · ${usdcStr(mine.refund, 6)} USDC back at claim`}
-    />
+    <div className={cn("panel", PAD)} role="status" aria-busy="true">
+      <span className="sr-only">Loading the result</span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Skeleton className="size-9" rounded="tile" />
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-3 w-14" />
+          </div>
+        </div>
+        <Skeleton className="h-4 w-16" />
+      </div>
+      <Skeleton className="mt-6 h-[30px] w-96 max-w-full sm:mt-8" />
+      <Skeleton className="mt-3 h-12 w-72 max-w-full sm:h-[72px] sm:w-[26rem]" />
+      <Skeleton className="mt-3 h-[21px] w-52" />
+      <div className="mt-6 flex flex-wrap gap-2">
+        <Skeleton className="h-11 w-52 max-sm:w-full" rounded="tile" />
+        <Skeleton className="h-11 w-28 max-sm:w-full" rounded="tile" />
+      </div>
+      <div className="mt-6 grid border-t border-line sm:mt-8 sm:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div key={i} className={cn("space-y-2.5 py-5", i === 1 && "border-line max-sm:border-t sm:border-l sm:pl-5")}>
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-8 w-56 max-w-full sm:h-10" />
+            <Skeleton className="h-4 w-64 max-w-full" />
+          </div>
+        ))}
+      </div>
+      <div className="divide-y divide-line border-y border-line">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex h-11 items-center gap-3">
+            <Skeleton className="size-4" rounded="full" />
+            <Skeleton className="h-4 w-80 max-w-full" />
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-x-5 gap-y-4 border-b border-line py-4 sm:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="space-y-2">
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-6 w-16" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+        ))}
+      </div>
+      <Skeleton className="mt-4 h-4 w-96 max-w-full" />
+    </div>
   );
 }

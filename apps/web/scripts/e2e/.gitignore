@@ -1,0 +1,2 @@
+# Logs of the last end-to-end run (pnpm --filter web e2e:sandbox).
+.run/

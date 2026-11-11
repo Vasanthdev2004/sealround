@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getClient } from "./client";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { bidSecretsSnapshot, getBidSecret, subscribeBidSecrets, type BidSecret } from "./bid-secrets";
+import { errorInfo, getClient, type ErrorInfo } from "./client";
 import type {
   Balances,
   BidRecord,
+  ClientNotice,
+  RelayerPolicyInfo,
   Sale,
   SaleEvent,
   SaleResult,
@@ -21,9 +24,24 @@ export type Query<T> = {
 type QState<T> = { key: string | null; data?: T; error: Error | null };
 
 /**
+ * A cheap structural fingerprint of a query result (bigints included). Polls
+ * that return the same data skip setState, so a settled page goes idle instead
+ * of re-rendering its whole tree every second.
+ */
+function fingerprint(v: unknown): string | null {
+  try {
+    return JSON.stringify(v, (_k, x: unknown) => (typeof x === "bigint" ? `${x}n` : x));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Runs `fn` against the client and re-runs it on every client state change
  * and every `pollMs` (time-based status like open -> awaiting_close).
- * `deps` must be JSON-serialisable (ids, account names).
+ * `deps` must be JSON-serialisable (ids, account names). A result equal to the
+ * previous one is dropped, so `data` keeps its identity until something
+ * actually changes.
  */
 export function useClientQuery<T>(
   fn: () => Promise<T>,
@@ -46,6 +64,8 @@ export function useClientQuery<T>(
     // a slow call is never discarded and the latest state still lands.
     let inFlight = false;
     let dirty = false;
+    // Fingerprint of the last result stored for this key.
+    let last: string | null = null;
     const run = () => {
       if (inFlight) {
         dirty = true;
@@ -56,10 +76,15 @@ export function useClientQuery<T>(
       fnRef
         .current()
         .then((data) => {
-          if (!cancelled) setState({ key, data, error: null });
+          if (cancelled) return;
+          const fp = fingerprint(data);
+          if (fp !== null && fp === last) return;
+          last = fp;
+          setState({ key, data, error: null });
         })
         .catch((e: unknown) => {
           if (!cancelled) {
+            last = null;
             setState((s) => ({
               key,
               data: s.key === key ? s.data : undefined,
@@ -117,12 +142,70 @@ export const useBalances = (account: string | null) =>
 /** The connected account's bid in a sale, if any. */
 export const useMyBid = (saleId: string, account: string | null) =>
   useClientQuery<BidRecord | null>(
-    async () =>
-      account
-        ? ((await getClient().getBids(saleId)).find((b) => b.bidder === account) ?? null)
-        : null,
+    () => (account ? getClient().getBid(saleId, account) : Promise.resolve(null)),
     [saleId, account],
   );
+
+/**
+ * NEAR close_sale will ask the wallet to attach now, in yoctoNEAR
+ * (get_close_deposit: OutLayer's compute deposit for a TEE sale with bids;
+ * the closer gets back what OutLayer does not charge). 0n for a commit-reveal
+ * sale, a sale without bids, and on the simulated chain.
+ */
+export const useCloseDeposit = (saleId: string) =>
+  useClientQuery<bigint>(() => getClient().getCloseDeposit(saleId), ["close-deposit", saleId], 15_000);
+
+/**
+ * What the relayer pays for, or null when there is none (or it cannot be
+ * reached). A call is gasless when this is non-null and the wallet can sign
+ * delegates (useWallet().canSignDelegates).
+ */
+export const useRelayerPolicy = () =>
+  useClientQuery<RelayerPolicyInfo | null>(() => getClient().getRelayerPolicy(), ["relayer-policy"], 0);
+
+/**
+ * The client's notices, newest first: a paid transaction is about to replace
+ * a gasless one (with the reason), USDC storage was sponsored or paid for.
+ * The mock never sends any.
+ */
+export function useNotices(limit = 5): ClientNotice[] {
+  const [notices, setNotices] = useState<ClientNotice[]>([]);
+  useEffect(
+    () => getClient().subscribeNotices((n) => setNotices((all) => [n, ...all].slice(0, limit))),
+    [limit],
+  );
+  return notices;
+}
+
+/**
+ * The commit-reveal secret this browser holds for an account's bid (the
+ * committed price and spend and the salt), or null: then the bid cannot be
+ * revealed from this device until the secrets file is imported
+ * (lib/bid-secrets importBidSecrets). Updates when a secret is saved or imported.
+ */
+export function useBidSecret(saleId: string, account: string | null): BidSecret | null {
+  const raw = useSyncExternalStore(subscribeBidSecrets, bidSecretsSnapshot, () => "");
+  return useMemo(
+    () => (account && raw !== undefined ? getBidSecret(getClient().secretsScope, saleId, account) : null),
+    [saleId, account, raw],
+  );
+}
+
+/**
+ * Names the browser tab after what the page shows ("Fair Test · Sealround"),
+ * for client-loaded pages whose static metadata cannot know it. Restores the
+ * previous title on unmount.
+ */
+export function DocumentTitle({ title }: { title: string }): null {
+  useEffect(() => {
+    const before = document.title;
+    document.title = `${title} · Sealround`;
+    return () => {
+      document.title = before;
+    };
+  }, [title]);
+  return null;
+}
 
 /** Current time, ticking every `ms`. */
 export function useNow(ms = 1000): number {
@@ -134,18 +217,22 @@ export function useNow(ms = 1000): number {
   return now;
 }
 
-/** Run an async action with pending/error state. */
+/**
+ * Run an async action with pending/error state. `error` is the message;
+ * `errorDetails` has the rest for a client error (its code, the contract's or
+ * relayer's reason, `maybeSubmitted`, the relayer's request id).
+ */
 export function useAction<A extends unknown[], R>(fn: (...a: A) => Promise<R>) {
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ErrorInfo | null>(null);
   const run = useCallback(
     async (...a: A): Promise<R | undefined> => {
       setPending(true);
-      setError(null);
+      setFailure(null);
       try {
         return await fn(...a);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setFailure(errorInfo(e));
         return undefined;
       } finally {
         setPending(false);
@@ -153,6 +240,6 @@ export function useAction<A extends unknown[], R>(fn: (...a: A) => Promise<R>) {
     },
     [fn],
   );
-  const clearError = useCallback(() => setError(null), []);
-  return { run, pending, error, clearError };
+  const clearError = useCallback(() => setFailure(null), []);
+  return { run, pending, error: failure?.message ?? null, errorDetails: failure, clearError };
 }

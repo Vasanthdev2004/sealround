@@ -5,18 +5,18 @@ import { effectiveFills } from "@/components/result/compute";
 import { EventLog } from "@/components/sale-common/event-log";
 import { SaleHeader } from "@/components/sale-common/sale-header";
 import { WheresMyMoney } from "@/components/sale-common/wheres-my-money";
-import { ButtonLink } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { Empty } from "@/components/ui/panel";
 import { useLatestFunding } from "@/lib/funding";
 import { getClient } from "@/lib/client";
-import { useBalances, useClientQuery, useMyBid, useSale } from "@/lib/hooks";
+import { isNearMode } from "@/lib/config";
+import { DocumentTitle, useBalances, useClientQuery, useMyBid, useSale } from "@/lib/hooks";
 import type { Sale } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { BidForm } from "./bid-form";
 import { BidTable } from "./bid-table";
 import { FundPanel } from "./fund-panel";
 import { MyBidCard } from "./my-bid-card";
-import { PublicStats } from "./public-stats";
 import { RulesPanel } from "./rules-panel";
 import { SaleSkeleton } from "./sale-skeleton";
 import { StatusPanel } from "./status-panel";
@@ -28,14 +28,21 @@ export function SalePage({ params }: { params: Promise<{ id: string }> }) {
   if (sale.loading) return <SaleSkeleton />;
   if (sale.error && !sale.data) {
     return (
-      <div className="mx-auto max-w-[1180px]">
+      <div className="py-6">
+        <DocumentTitle title="Sale" />
         <Empty
+          className="py-16"
+          size="lg"
+          titleAs="h1"
           title="Could not load this sale"
           body={sale.error.message}
           action={
-            <ButtonLink href="/" size="sm">
-              All sales
-            </ButtonLink>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button onClick={sale.refetch}>Try again</Button>
+              <ButtonLink href="/" variant="ghost">
+                All sales
+              </ButtonLink>
+            </div>
           }
         />
       </div>
@@ -45,20 +52,35 @@ export function SalePage({ params }: { params: Promise<{ id: string }> }) {
   return <SaleLoaded key={sale.data.id} sale={sale.data} />;
 }
 
-function SaleNotFound({ id }: { id: string }) {
+/** Shared by the sale and result pages: an unknown id, explained, with a way on. */
+export function SaleNotFound({ id }: { id: string }) {
   return (
-    <div className="mx-auto max-w-[1180px] py-10">
+    <div className="py-6">
+      <DocumentTitle title="Sale not found" />
       <Empty
+        className="py-16"
+        size="lg"
+        titleAs="h1"
         title={
           <>
-            No sale called <span className="num">{id}</span>
+            No sale called <span className="num [overflow-wrap:anywhere]">{id}</span>
           </>
         }
-        body="This demo keeps sales in your browser's storage, so a sale created in another browser will not show here. Check the link or pick a sale from the list."
+        body={
+          isNearMode()
+            ? "The contract has no sale with this id. Check the link, or pick a sale from the list."
+            : "This demo keeps sales in your browser's storage, so a sale created in another browser will not show here."
+        }
         action={
-          <ButtonLink href="/" size="sm">
-            All sales
-          </ButtonLink>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <ButtonLink href="/">All sales</ButtonLink>
+            {/* Judge mode runs on the simulated chain only. */}
+            {!isNearMode() && (
+              <ButtonLink href="/judge" variant="ghost">
+                Run the demo
+              </ButtonLink>
+            )}
+          </div>
         }
       />
     </div>
@@ -86,18 +108,20 @@ function SaleLoaded({ sale }: { sale: Sale }) {
     result.data && account ? (effectiveFills(result.data).find((f) => f.bidder === account) ?? null) : null;
 
   return (
-    <div className="mx-auto max-w-[1180px]">
-      <SaleHeader sale={sale} />
+    <div>
+      <DocumentTitle title={sale.config.tokenName} />
+      {/* The status panel carries the page's one "simulated" line, so the header does not. */}
+      <SaleHeader sale={sale} simulatedNote={false} />
 
       {/*
-        Desktop: main column (status, stats, bid form, then bids and log) and a
-        side column (my bid, fund, where's my money, rules).
-        Mobile: one column, with the side panels right after the bid form.
+        Desktop: the main column (status, bid form, then the bids and the log)
+        and a 340px side column (my bid, funding, where's my money, rules).
+        Phones: one column, with the side cards right after the bid form.
+        SaleSkeleton mirrors this grid.
       */}
-      <div className="mt-7 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[auto_1fr]">
-        <div className="min-w-0 space-y-6 xl:col-start-1 xl:row-start-1">
-          <StatusPanel sale={sale} account={account} />
-          <PublicStats sale={sale} />
+      <div className="mt-5 grid gap-4 sm:mt-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[auto_1fr] xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-1">
+          <StatusPanel sale={sale} account={account} hasBid={!!myBid.data} myBid={myBid.data ?? null} />
           {(sale.status === "open" || bidSent) && (
             <BidForm
               sale={sale}
@@ -110,7 +134,10 @@ function SaleLoaded({ sale }: { sale: Sale }) {
           )}
         </div>
 
-        <aside className="min-w-0 space-y-6 xl:col-start-2 xl:row-span-2 xl:row-start-1">
+        <aside
+          className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-span-2 lg:row-start-1"
+          aria-label="Your funds and the rules"
+        >
           {account && <MyBidCard sale={sale} account={account} bid={myBid.data} loading={myBid.loading} />}
           {(sale.status === "open" || sale.status === "upcoming") && (
             <FundPanel sale={sale} account={account} hasBid={!!myBid.data} />
@@ -126,7 +153,7 @@ function SaleLoaded({ sale }: { sale: Sale }) {
           <RulesPanel sale={sale} />
         </aside>
 
-        <div className="min-w-0 space-y-6 xl:col-start-1 xl:row-start-2">
+        <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-2">
           <BidTable sale={sale} account={account} />
           <EventLog saleId={sale.id} />
         </div>

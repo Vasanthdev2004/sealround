@@ -1,0 +1,42 @@
+[package]
+name = "fairground-token"
+description = "Fixed-supply NEP-141 token deployed per sale"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Reproducible build (NEP-330). The sale contract embeds this crate's wasm
+# (contracts/res/fairground_token.wasm) and deploys it for every sale, so a
+# verifiable sale contract needs a verifiable token: build this first with
+# `cargo near build reproducible-wasm`, commit the result to contracts/res,
+# then build the sale contract from that commit. Same image and command as
+# contracts/fairground; see contracts/DESIGN.md, "Reproducible build".
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.22.0-rust-1.97.1"
+image_digest = "sha256:7467038bdddc86484b73b416eeadce926ff59013e128e53dec5a19e1cb4b2234"
+passed_env = []
+container_build_command = [
+    "cargo",
+    "near",
+    "build",
+    "non-reproducible-wasm",
+    "--locked",
+    "--no-abi",
+]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk.workspace = true
+near-contract-standards.workspace = true
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }
+
+[lints.rust]
+# cargo-near builds with `--cfg near`, which rustc does not know about.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(near)"] }

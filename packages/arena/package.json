@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Bot Arena: a deterministic, seeded simulator that runs the same crowd through a bonding curve, a first-come fixed-price sale and Fairground.",
+  "description": "Bot Arena: a deterministic, seeded simulator that runs the same crowd through a bonding curve, a first-come fixed-price sale and Sealround.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
