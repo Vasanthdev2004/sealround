@@ -116,10 +116,25 @@ another device. A bid that is not revealed pays the 1 % penalty.
 - A fresh attestation fetch: the "Verified" data comes from what the contract
   stored (the pinned code hash, the sale key, the sha256 of the clearing input
   and of the enclave's answer). No TDX quote is fetched.
-- Real 1Click swaps: quotes are live, the swap itself is still simulated and
-  ends by minting test USDC (testnet and sandbox only).
 - The time a sale settled, and transaction hashes of other people's calls: the
   views do not hold them.
+
+### Funding from another chain
+
+Preview quotes are dry. Mock, testnet and sandbox funding simulates the swap.
+The server enables deposit quotes only when `ONECLICK_REAL_SWAPS=1`, the app
+is configured for NEAR mainnet, and the quote token is Circle's native USDC.
+`ONECLICK_JWT` is an optional server credential for the 1Click proxy.
+
+An enabled swap requires a connected NEAR account that can receive USDC and
+a refund address on the origin chain. The funding panel shows the exact input,
+deposit address, expiry and minimum output before the user sends from their
+own origin wallet. The receipt stays in the browser and the sale and result
+pages resume polling it on return. Funding credits the connected NEAR account.
+Placing a sealed bid is a separate action.
+
+To exercise deposit quotes and status locally without sending funds, run
+`pnpm --filter web exec vitest run src/lib/__tests__/oneclick-routes.test.ts src/lib/__tests__/oneclick-funding.test.ts`.
 
 ## Local sandbox
 
@@ -180,6 +195,6 @@ const client = new NearClient(config.near, { signers: devSigners(config.near), c
 | `src/lib/crypto.ts` | bid sealing (padded plaintext), commitments |
 | `src/lib/bid-secrets.ts` | commit-reveal salts kept in the browser |
 | `src/lib/wallet.tsx` | wallet context: demo account, NEAR Connect, dev accounts |
-| `src/lib/oneclick.ts` | 1Click quotes, simulated funding, USDC storage registration |
+| `src/lib/oneclick.ts` | 1Click preview and deposit quotes, status tracking, simulated funding, USDC storage registration |
 | `src/lib/__tests__/` | vitest suites, including byte parity with the Rust sealer |
 | `UI-DIRECTION.md` | the design brief |

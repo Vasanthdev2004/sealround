@@ -554,7 +554,7 @@ Delete the key after the smoke tests (sections 6 and 6b), which need no
 contract key, and before you tell anyone the contract exists:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -Account $ME -Lock                       # lists the keys
+powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -Account $ME -Lock                       # prints the commands; add -Execute to list the keys
 powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -Account $ME -Lock -PublicKey ed25519:... -Execute
 # which runs:
 near account list-keys $FG network-config testnet now

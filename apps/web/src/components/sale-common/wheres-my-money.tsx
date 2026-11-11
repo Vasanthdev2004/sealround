@@ -1,13 +1,16 @@
 "use client";
 
+import { useEffect } from "react";
 import { ArrowUpRight } from "lucide-react";
 import { Tag } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { TxLink, type CheckState } from "@/components/ui/bits";
 import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
-import { accountUrl, shortHash, tokenStr, usdcStr } from "@/lib/format";
+import { accountUrl, networkName, shortHash, tokenStr, usdcStr } from "@/lib/format";
 import { ONECLICK_STATUS_TEXT, type FundingRecord } from "@/lib/funding";
+import { useNow } from "@/lib/hooks";
+import { resumeLiveSwaps } from "@/lib/oneclick";
 import type { BidRecord, Sale, SaleResult } from "@/lib/types";
 
 type HopState = CheckState | "skip";
@@ -51,6 +54,17 @@ const ExtLink = ({ href, children }: { href: string; children: React.ReactNode }
   </a>
 );
 
+function LiveFundingStatus({ funding }: { funding: FundingRecord }) {
+  const now = useNow(5000);
+  if (funding.status === "FAILED") return "1Click reported a failure. A refund is unconfirmed.";
+  if (funding.statusCheckFailed) return "1Click status is temporarily unavailable. This page will retry.";
+  if (funding.status === "INCOMPLETE_DEPOSIT") return "1Click detected a short deposit. Waiting for refund status.";
+  if (funding.status === "PENDING_DEPOSIT" && funding.depositExpiresAt !== undefined && now >= funding.depositExpiresAt) {
+    return "Deposit window expired. Tracking continues for deposits already sent.";
+  }
+  return ONECLICK_STATUS_TEXT[funding.status];
+}
+
 /**
  * A ledger with one row per hop: origin chain -> 1Click deposit address ->
  * your NEAR account -> Sealround contract -> tokens and refund claimed. The
@@ -77,8 +91,13 @@ export function WheresMyMoney({
 }) {
   const sym = sale.config.tokenSymbol;
   const mockChain = getClient().mode === "mock";
+  const onMainnet = !mockChain && networkName() === "mainnet";
   const sim = <Tag>sim</Tag>;
   const hops: Hop[] = [];
+
+  useEffect(() => {
+    if (account && onMainnet) return resumeLiveSwaps(account);
+  }, [account, onMainnet]);
 
   // 1. Origin chain
   if (funding) {
@@ -86,27 +105,32 @@ export function WheresMyMoney({
     const state: HopState =
       funding.status === "SUCCESS" ? "pass" : failed ? "fail" : funding.status === "PENDING_DEPOSIT" ? "idle" : "pending";
     const failLabel = funding.status === "REFUNDED" ? "Refunded" : funding.status === "INCOMPLETE_DEPOSIT" ? "Short deposit" : "Failed";
+    const refunded = funding.status === "REFUNDED";
+    const refundAmount = funding.refundedAmount;
     hops.push({
       title: funding.originChain,
       state,
-      value: `${funding.amountIn} ${funding.originAsset}`,
+      value: funding.simulated
+        ? `${funding.amountIn} ${funding.originAsset}`
+        : refunded && refundAmount !== undefined ? `${refundAmount} ${funding.originAsset}` : undefined,
       word: failed ? failLabel : state === "pass" ? "Sent" : undefined,
       detail: failed ? (
         <>
-          Refund goes to <span className="num">{shortHash(funding.refundTo, 6)}</span>
+          {funding.simulated ? "Refund goes to " : refunded ? "Refunded to " : "Refund address "}
+          <span className="num" title={funding.refundTo}>{shortHash(funding.refundTo, 6)}</span>
         </>
       ) : (
         "From your wallet"
       ),
-      link: funding.originTxUrl ? <ExtLink href={funding.originTxUrl}>explorer</ExtLink> : funding.simulated ? sim : undefined,
+      link: funding.originTxUrl ? <ExtLink href={funding.originTxUrl}>{funding.simulated ? "explorer" : "deposit tx"}</ExtLink> : funding.simulated ? sim : undefined,
     });
     hops.push({
       title: "1Click address",
       state,
       value: <span title={funding.depositAddress}>{shortHash(funding.depositAddress, 5)}</span>,
       word: failed ? failLabel : undefined,
-      detail: ONECLICK_STATUS_TEXT[funding.status],
-      link: funding.simulated ? sim : undefined,
+      detail: funding.simulated ? ONECLICK_STATUS_TEXT[funding.status] : <LiveFundingStatus funding={funding} />,
+      link: funding.simulated ? sim : funding.destinationTxUrl ? <ExtLink href={funding.destinationTxUrl}>delivery tx</ExtLink> : undefined,
     });
   } else {
     hops.push({ title: "Origin chain", state: "skip" });

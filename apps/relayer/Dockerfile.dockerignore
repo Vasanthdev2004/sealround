@@ -1,0 +1,17 @@
+# Ignore file for apps/relayer/Dockerfile. The build context is the repository
+# root, and Docker (BuildKit) reads "<Dockerfile name>.dockerignore" next to the
+# Dockerfile in place of a .dockerignore at the context root. Patterns are
+# relative to the repository root.
+#
+# Everything is left out except what the Dockerfile copies, so node_modules,
+# target/, .next/, .env files, enclave/deploy/out/ and every other secret or
+# build output never reach the builder.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/relayer/package.json
+!apps/relayer/tsconfig.json
+!apps/relayer/tsconfig.build.json
+!apps/relayer/src
+apps/relayer/src/**/*.test.ts

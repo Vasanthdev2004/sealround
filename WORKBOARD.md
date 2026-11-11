@@ -7,16 +7,13 @@ Shared task board for the agents in this repo. Rules are in `AGENTS.md`
 
 | Agent | Task | Files claimed | Started | Notes |
 | --- | --- | --- | --- | --- |
+| Codex | Push the release and verify the Vercel mock demo | `WORKBOARD.md`, mock deployment instructions in `LAUNCH.md` | 2026-11-11 | Owner authorized the release commit, push and mock Vercel deployment. |
 | Claude | Measured Designeer spec and current UI replacement audit | `UI-AUDIT.md`, this workboard row | 2026-11-11 | Supports Claude's redesign decisions. |
 
 ## Backlog
 
 Pick one, move it to "In progress" with your claim.
 
-- **Testnet launch checklist.** Write the exact steps the owner runs: accounts,
-  deploy order, `new` args, relayer hosting and env, removing the contract's
-  full-access key, OutLayer job registration, web env. Document only; agents do
-  not deploy.
 - **Web decisions to confirm with the owner**: `maxBids` default 100,
   commit-reveal selectable on `/create`, the "sim" tag on `TxLink` in mock mode,
   wording of the "Verified" panel.
@@ -25,6 +22,11 @@ Pick one, move it to "In progress" with your claim.
 
 | Agent | Task | Result | Checks |
 | --- | --- | --- | --- |
+| Codex | Live 1Click deposit quotes and status tracking | Kept dry previews separate. Mainnet deposit quotes require server-only `ONECLICK_REAL_SWAPS=1` and Circle's native NEAR USDC. Checked quote terms before showing payment instructions. The receipt persists across reloads and tracks delivery or refund. Updated the launch and web docs. | 18 focused route and funding tests with local fixtures, 121 web tests total, ESLint, TypeScript and the production build passed. The built app returned `liveSwaps: false` by default and rejected deposit and status requests. No public-chain swap was attempted. Claude completed the bot sandbox test separately. |
+| Claude | Root README, LICENSE, SUBMISSION.md, fresh-clone check; MIT license fields | `README.md` follows the spec`s 14-section outline; `LICENSE` is MIT; `SUBMISSION.md` has the video shot list, X post (single and thread), form answers and the rules checklist. Rust `license` fields changed to `MIT` to match; contract and sealer hashes unchanged (`0061c856…921e`, `f8408a87…d8cb`), `enclave/res/build-info.json` refreshed for the new Cargo.toml checksums. Owner fills: video, demo and repo links, pilot results, form personal fields, and confirms the baseline sentence in README section 12. | Fresh clone: install, `pnpm build`, judge mode settled in 0:33, `pnpm arena` byte-identical, all TS and Rust unit tests pass. `build-enclave.ps1 -Verify` MATCH. Contracts rebuilt to the same hashes. |
+| Claude | Live sniper bot (`pnpm --filter web live-bot` with status, snipe, copycat, report, reveal) | Reuses the web client and sealing code. Key only from `LIVE_BOT_PRIVATE_KEY` or `--key-file`; checks network and key before signing; mainnet needs `--yes-mainnet`. See `apps/web/scripts/live-bot/README.md`. | Sandbox test (`pnpm --filter web exec tsx scripts/live-bot/sandbox-test.ts`): 8/8 scenarios, 62/62 checks. Snipe landed 0.8 s after open; bot paid exactly the clearing price; copycat rejected (different length) or voided with the 1 % penalty (same length). Never run on a public network. |
+| Claude | Launch runbook | `LAUNCH.md`: testnet T1 to T8 via `enclave/deploy/*.ps1`, relayer on Fly.io (`apps/relayer/Dockerfile`, build from repo root), web on Vercel (mock demo, testnet, mainnet projects), testnet dry run of the pilot, mainnet pilot caps (`max_deposit_per_account` 10 USDC, `max_bids` 50), rollback and pre-submission checklist. Added a mainnet-only unaudited notice in the app shell and NEAR-mode copy in `how/limits.tsx`. | Relayer image builds (266 MB) and starts offline. Web TypeScript and ESLint pass. End to end on the rebuilt contract: 21/21 scenarios, 483/483 checks. |
+| Codex | Verify the web release while Claude prepares launch materials | The normal Turbopack build passed when run directly via Node from `apps/web` with font access. The Webpack fallback compiled without Tailwind utilities because the repo config wires Tailwind through Turbopack. Use the Turbopack build for previews. Claude retained the shared sandbox for bot testing. | All 103 web tests and baseline web ESLint passed. All seven routes rendered in the production preview at 1440px and 375px. The phone Judge demo settled in 33 seconds and opened its full result. |
 | Claude | Baseline commit, local paths removed, pushed (owner asked) | `main` is `ee5c419`, pushed to origin. `scripts/build-contracts.ps1` now passes `--remap-path-prefix` through cargo-near `--env RUSTFLAGS=...` and refuses a wasm that still contains the home or checkout path. Rebuilt contracts: `fairground.wasm` sha256 `0061c856…921e` (546,701 bytes), token 167,069 bytes; AGENTS.md, enclave/README.md and contracts/GAS.md updated. | Contracts: 178 unit and 17 sandbox integration tests pass. e2e not rerun. |
 | Claude | Base blue palette (owner picked option A; task moved from Codex to Claude by the owner) | `globals.css` tokens only: neutral near-black canvas and hairlines again, Base blue `#0052FF` for primary buttons, selections and the price (`#3d7eff` as text on dark), state colours retuned for black. Light theme is the same blue on a neutral white canvas. Kept Codex`s light theme, theme toggle and token names; no component changed. `UI-DIRECTION.md` token table updated. | Web TypeScript, ESLint and 103/103 tests pass. All routes checked at 1440px dark, Home, Sale, Result and Arena in light, Home and Sale at 375px with no horizontal scroll. |
 | Codex | Fix the amber simulation labels found in browser feedback | Changed the funding panel's network label and the other simulation tags to the shared neutral style. | Verified the funding badge and other visible sale tags at 957px and 375px. Checked result tags at 375px. Web ESLint, TypeScript and all 103 web tests passed. |
@@ -37,6 +39,10 @@ Pick one, move it to "In progress" with your claim.
 | Claude | Reconcile contract, enclave, relayer, web data layer; full verification | Contract and sealer hashes pinned (`20e54626…`, since rebuilt as `0061c856…` without local paths; `f8408a87…`); bid length leak closed; penalties for invalid bids; sealer error retries; `clear_onchain` at 150 TGas | Everything in `AGENTS.md` "Checks", all green on 2026-11-10 |
 
 ## Notes
+
+### Mainnet 1Click follow-up
+
+- Live 1Click has local fixture coverage. Before enabling it on the pilot, verify the provider's signed quote and check that a live response passes recipient and refund address validation. The owner records the first completed swap.
 
 - **Resolved during Claude's Create pass.** The preview previously showed a missing `LockedRow` export. Create rendered in the browser and web TypeScript passed after the files were integrated.
 

@@ -21,9 +21,9 @@ export const ONECLICK_STATUS_TEXT: Record<OneClickStatus, string> = {
   KNOWN_DEPOSIT_TX: "Deposit seen, confirming",
   PROCESSING: "Swapping to USDC on NEAR",
   SUCCESS: "USDC delivered to your NEAR account",
-  INCOMPLETE_DEPOSIT: "Deposit was less than quoted. Refunding to your origin address",
+  INCOMPLETE_DEPOSIT: "Deposit was less than quoted. Waiting for refund confirmation",
   REFUNDED: "Swap did not complete. Refunded to your origin address",
-  FAILED: "Swap failed. Funds are returned to your origin address",
+  FAILED: "Swap failed. Check the transaction before sending again",
 };
 
 export type FundingRecord = {
@@ -45,6 +45,15 @@ export type FundingRecord = {
   createdAt: number;
   updatedAt: number;
   originTxUrl?: string;
+  destinationTxUrl?: string;
+  refundedAmount?: string;
+  refundReason?: string;
+  minAmountOutUsdc?: bigint;
+  receivedUsdc?: bigint;
+  depositExpiresAt?: number;
+  correlationId?: string;
+  providerUpdatedAt?: number;
+  statusCheckFailed?: boolean;
   /** True when this swap was simulated (testnet has no Intents). */
   simulated: boolean;
 };
@@ -52,13 +61,23 @@ export type FundingRecord = {
 const KEY = "fairground:funding:v1";
 const EVT = "fairground:funding";
 
-type Stored = Omit<FundingRecord, "amountOutUsdc"> & { amountOutUsdc: string };
+type AmountField = "amountOutUsdc" | "minAmountOutUsdc" | "receivedUsdc";
+type Stored = Omit<FundingRecord, AmountField> & {
+  amountOutUsdc: string;
+  minAmountOutUsdc?: string;
+  receivedUsdc?: string;
+};
 
 function readAll(): FundingRecord[] {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return [];
-    return (JSON.parse(raw) as Stored[]).map((r) => ({ ...r, amountOutUsdc: BigInt(r.amountOutUsdc) }));
+    return (JSON.parse(raw) as Stored[]).map((r) => ({
+      ...r,
+      amountOutUsdc: BigInt(r.amountOutUsdc),
+      minAmountOutUsdc: r.minAmountOutUsdc === undefined ? undefined : BigInt(r.minAmountOutUsdc),
+      receivedUsdc: r.receivedUsdc === undefined ? undefined : BigInt(r.receivedUsdc),
+    }));
   } catch {
     return [];
   }
@@ -68,10 +87,18 @@ function writeAll(all: FundingRecord[]) {
   try {
     localStorage.setItem(
       KEY,
-      JSON.stringify(all.map((r) => ({ ...r, amountOutUsdc: r.amountOutUsdc.toString() }))),
+      JSON.stringify(all.map((r) => ({
+        ...r,
+        amountOutUsdc: r.amountOutUsdc.toString(),
+        minAmountOutUsdc: r.minAmountOutUsdc?.toString(),
+        receivedUsdc: r.receivedUsdc?.toString(),
+      }))),
     );
-  } catch {}
+  } catch {
+    return false;
+  }
   window.dispatchEvent(new Event(EVT));
+  return true;
 }
 
 export function getFundings(account: string, saleId?: string): FundingRecord[] {
@@ -83,7 +110,7 @@ export function getFundings(account: string, saleId?: string): FundingRecord[] {
 export function saveFunding(rec: FundingRecord) {
   const all = readAll().filter((r) => r.id !== rec.id);
   all.push({ ...rec, updatedAt: Date.now() });
-  writeAll(all);
+  return writeAll(all);
 }
 
 export function subscribeFunding(cb: () => void): () => void {

@@ -40,10 +40,10 @@
   },
   "inputs": {
     "cargo_lock_sha256": "dc62f8e01f68a7156a6ba394eb0685bd9ed6a914f267942c3067eea9bd7d5fcc",
-    "files_sha256": "328a1f768770092568bc3901819f7bcfdf34b7a0e9b0264794c4e6b253efb5f1",
+    "files_sha256": "dc4d0bf89a6fce2e3922a43187cf33390d1af5ffba499b3c22d9d3ead3f6c48f",
     "files": {
       ".cargo/config.toml": "431dd09b9b69035367d2614798d581c2c92a5423c6aabe8a887ce2aa4f5dd61f",
-      "Cargo.toml": "301f0756413b4ade4bf9b472569f955aa8b565a98a88e532fe77a2f94aaafd30",
+      "Cargo.toml": "1451250c7f2e7f2219e81bdcfbc4b7a12da79ebb70d933fcd5a1ea47df742129",
       "crates/clearing/Cargo.toml": "cfa55abcd31752f6df9f65b2e35a6527a35e9392f834bc05a08b09b962430c09",
       "crates/clearing/src/checks.rs": "0c77f618d2d251d5a608bef265aa118d5766f5d0358afa06533fc2d3e9be9d5d",
       "crates/clearing/src/clear.rs": "d5075ab3db375cbe8415094e53009275dc2067d2305ebddd4f24f76ff5e42e84",
@@ -57,7 +57,7 @@
       "crates/sealer/src/keys.rs": "a708df438c631eedd3713bdff334c3a365b8d5d9a68941003120aaf5c87b0b66",
       "crates/sealer/src/lib.rs": "7e4504e530278219dd014b5a4dc60d66a76ea5e3d447aec042b16e147d133cb0",
       "enclave/Cargo.lock": "dc62f8e01f68a7156a6ba394eb0685bd9ed6a914f267942c3067eea9bd7d5fcc",
-      "enclave/Cargo.toml": "e64ecbad0158235688a969a5b99e996f54f28655255af5c2c46ce9ef9740099f",
+      "enclave/Cargo.toml": "810b081fc1f07ebf2c8c855da4fd9923ef26b8ede42127ebd69ef2229cac6cd5",
       "enclave/build/Dockerfile": "c89806e5eccf19d98e9aa27a413483471e22d1eba305af786b548f13d836fcf3",
       "enclave/build/build.sh": "b6675cef77bc2f83194ff0a102c8b4ad8aa04b8f9535310c861e43dd69a12f1b",
       "enclave/build/build_info.py": "6082291aca23e42996f813c81dcf34393dcf52a4e5cab83877bc7ebc44e7bfbb",
@@ -70,7 +70,7 @@
   },
   "git": {
     "commit": null,
-    "head": "781f75b0bcde91dc772fff8329dbecdca2f121cd",
+    "head": "bc5ad5e8acae2446b6622351493f19cd201d0bab",
     "inputs_clean": false
   },
   "module": {

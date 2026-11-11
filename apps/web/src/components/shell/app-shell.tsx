@@ -195,6 +195,17 @@ function ShellFooter({ className }: { className?: string }) {
  * Honest environment label. In the demo the chain itself runs in the browser,
  * so it says "Simulated"; against a real contract it names the network.
  */
+/** On mainnet, real money moves: say once, above everything, that this is an unaudited experiment. */
+function MainnetNotice() {
+  if (!isNearMode() || networkName() !== "mainnet") return null;
+  return (
+    <p className="border-b border-line bg-elev px-4 py-2 text-center text-label text-muted">
+      <span className="font-[510] text-warn">Unaudited experiment.</span> Sealround runs on NEAR mainnet with capped
+      deposits. If a sale fails, every deposit can be refunded. Bid only what you can afford to lose.
+    </p>
+  );
+}
+
 function NetworkPill() {
   const near = isNearMode();
   const network = networkName();
@@ -311,6 +322,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <div className="flex min-h-dvh flex-col">
+        <MainnetNotice />
         <header className="sticky top-0 z-30 border-b border-line bg-bg">
           <div className="mx-auto flex h-14 max-w-[1240px] items-center gap-2 px-4 max-[359px]:gap-1 max-[359px]:px-3 sm:gap-4 sm:px-6 xl:gap-6 xl:px-8">
             <Logo className="max-[359px]:gap-1.5" />

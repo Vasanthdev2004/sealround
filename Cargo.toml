@@ -13,7 +13,7 @@ exclude = ["contracts/tests", "enclave"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.95"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/Vasanthdev2004/fairground"
 
 [workspace.dependencies]

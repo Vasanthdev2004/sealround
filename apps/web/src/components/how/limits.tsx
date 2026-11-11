@@ -1,3 +1,5 @@
+import { isNearMode } from "@/lib/config";
+
 const LIMITS = [
   {
     title: "Money still talks",
@@ -25,7 +27,9 @@ const LIMITS = [
   },
   {
     title: "The contract is unaudited",
-    body: "The Sealround contract has not been audited. The demo uses simulated USDC.",
+    body: isNearMode()
+      ? "The Sealround contract has not been audited. Each sale caps how much one account can deposit."
+      : "The Sealround contract has not been audited. The demo uses simulated USDC.",
   },
 ];
 

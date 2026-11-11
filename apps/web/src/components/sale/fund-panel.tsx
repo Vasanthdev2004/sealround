@@ -20,10 +20,14 @@ import {
   SLIPPAGE_BPS,
   canSimulateSwaps,
   ensureDeliverable,
+  fetchLiveSwapsEnabled,
   isFinished as fundingDone,
+  isTerminal,
+  isValidLiveRefundAddress,
   originById,
   parseOriginAmount,
   resumeSimulatedSwaps,
+  startLiveSwap,
   startSimulatedSwap,
   type OriginId,
   type QuoteView,
@@ -54,8 +58,8 @@ const GROUP_LABEL = "text-label font-[510] text-muted";
 const CHIPS = "mt-1.5 max-sm:[&>button]:h-10";
 
 /**
- * Fund from any chain (1Click). Live dry quotes; on testnet the swap itself is
- * simulated and ends by minting test USDC, or in REFUNDED when asked to fail.
+ * Fund from any chain (1Click). The preview uses dry quotes. Mainnet can
+ * request a deposit address when the server enables swaps.
  */
 export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: string | null; hasBid: boolean }) {
   const funding = useLatestFunding(account, sale.id);
@@ -65,17 +69,31 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
   const [refundOpen, setRefundOpen] = useState(false);
   const [fail, setFail] = useState(false);
   const [watchId, setWatchId] = useState<string | null>(null);
+  const [dismissedFundingId, setDismissedFundingId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<ErrorInfo | null>(null);
+  const [liveSwaps, setLiveSwaps] = useState<boolean | null>(null);
   // Registering the account for USDC is normally paid by the relayer; when it cannot, the user is asked first.
   const storage = usePaidFallback();
-  // A simulated swap ends by minting test USDC, which mainnet does not have.
-  const canSwap = canSimulateSwaps();
+  const canSimulate = canSimulateSwaps();
   const { mode } = useWallet();
+  const onMainnet = mode === "near" && networkName() === "mainnet";
+  const liveEnabled = onMainnet && liveSwaps === true;
+  const canSwap = canSimulate || liveEnabled;
 
   useEffect(() => {
-    if (account) resumeSimulatedSwaps(account);
-  }, [account]);
+    if (account && canSimulate) resumeSimulatedSwaps(account);
+  }, [account, canSimulate]);
+
+  useEffect(() => {
+    if (!onMainnet) return;
+    let active = true;
+    void fetchLiveSwapsEnabled().then(
+      (enabled) => { if (active) setLiveSwaps(enabled); },
+      () => { if (active) setLiveSwaps(false); },
+    );
+    return () => { active = false; };
+  }, [onMainnet]);
 
   const origin = originById(originId);
   const parsed = parseOriginAmount(amount, origin);
@@ -84,12 +102,19 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
     amountBase !== null ? { originId, amount: amountBase.toString(), recipient: account ?? "", refundTo } : null,
   );
 
-  const showProgress = !!funding && (funding.id === watchId || !fundingDone(funding.status));
-  const refundError = q.errorField === "refundTo" ? (q.error ?? undefined) : undefined;
-  const showRefund = refundOpen || refundTo !== "" || !!refundError;
+  const showProgress = !!funding && dismissedFundingId !== funding.id && (
+    funding.id === watchId || !(funding.simulated ? fundingDone(funding.status) : isTerminal(funding.status))
+  );
+  const refundAddress = refundTo.trim();
+  const validLiveRefund = isValidLiveRefundAddress(origin, refundAddress);
+  const refundError = liveEnabled
+    ? refundAddress.length > 0 && !validLiveRefund ? `Enter a valid ${origin.chain} address.` : undefined
+    : q.errorField === "refundTo" ? (q.error ?? undefined) : undefined;
+  const showRefund = liveEnabled || refundOpen || refundTo !== "" || !!refundError;
+  const canRequest = liveEnabled ? amountBase !== null && validLiveRefund : !!q.quote && !q.loading;
 
   async function confirm() {
-    if (!account || !q.quote || amountBase === null || starting) return;
+    if (!account || !canSwap || !canRequest || amountBase === null || starting || startError?.maybeSubmitted) return;
     const quote = q.quote;
     setStarting(true);
     setStartError(null);
@@ -98,6 +123,12 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
       // contract. The relayer registers it for free; on the simulated chain
       // there is nothing to register and this returns at once.
       await ensureDeliverable(account, { onPaidFallback: storage.onPaidFallback });
+      if (liveEnabled) {
+        const rec = await startLiveSwap({ account, saleId: sale.id, origin, amountInBase: amountBase, refundTo: refundAddress });
+        setWatchId(rec.id);
+        return;
+      }
+      if (!quote) return;
       const rec = startSimulatedSwap({
         account,
         saleId: sale.id,
@@ -128,7 +159,12 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
         <SwapProgress
           funding={funding}
           canBid={sale.status === "open" && !hasBid}
-          onNewSwap={() => setWatchId(null)}
+          liveDepositsEnabled={liveEnabled}
+          focusOnOpen={funding.id === watchId}
+          onNewSwap={() => {
+            setWatchId(null);
+            setDismissedFundingId(funding.id);
+          }}
         />
       ) : (
         <div className="flex flex-col gap-5">
@@ -138,7 +174,11 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
             </div>
             <Segmented
               value={originId}
-              onChange={setOriginId}
+              onChange={(id) => {
+                if (starting || id === originId) return;
+                setOriginId(id);
+                if (liveEnabled) setRefundTo("");
+              }}
               options={CHAINS}
               labelledBy="fund-origin-label"
               className={CHIPS}
@@ -153,6 +193,7 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
               autoComplete="off"
               placeholder={origin.placeholder}
               value={amount}
+              disabled={starting}
               onChange={(e) => setAmount(e.target.value)}
               error={parsed && "error" in parsed ? parsed.error : undefined}
               hint={
@@ -172,6 +213,7 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
                     size="sm"
                     variant={active ? "tactile" : "outline"}
                     aria-pressed={active}
+                    disabled={starting}
                     onClick={() => setAmount(v)}
                     className="gap-1.5 max-sm:h-10"
                   >
@@ -195,12 +237,14 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
             <div id="fund-refund" className="anim-fade">
               <Field
                 label={`Refund address on ${origin.chain}`}
-                labelAside={<span className="text-label text-subtle">Optional</span>}
+                labelAside={!liveEnabled && <span className="text-label text-subtle">Optional</span>}
                 placeholder={origin.refundHint}
                 autoComplete="off"
                 spellCheck={false}
                 autoFocus={refundOpen && refundTo === ""}
                 value={refundTo}
+                required={liveEnabled}
+                disabled={starting}
                 onChange={(e) => setRefundTo(e.target.value)}
                 error={refundError}
                 hint="Where 1Click returns funds if the swap fails."
@@ -216,7 +260,7 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
             </button>
           )}
 
-          {canSwap && (
+          {canSimulate && (
             <div>
               <div id="fund-outcome-label" className={GROUP_LABEL}>
                 Simulated outcome
@@ -236,12 +280,14 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
             acceptLabel="Pay 0.00125 NEAR and continue"
             copy={(reason) => ({
               title: "Your account must be registered to hold USDC",
-              body: `It is a one-time 0.00125 NEAR storage deposit on the USDC contract. The gas relayer normally pays it, but ${RELAYER_CANNOT[reason]}. Your wallet will ask you to pay it; then the swap starts.`,
+              body: `It is a one-time 0.00125 NEAR storage deposit on the USDC contract. The gas relayer normally pays it, but ${RELAYER_CANNOT[reason]}. Your wallet will ask you to pay it before ${liveEnabled ? "we request a deposit address" : "the simulation starts"}.`,
             })}
           />
           <ActionError info={startError} what="registration" />
 
-          {!canSwap ? (
+          {onMainnet && liveSwaps === null ? (
+            <p className="text-small text-muted" role="status">Checking live swap availability…</p>
+          ) : !canSwap ? (
             <p className="text-small text-muted">
               Quotes are live, but this build cannot start a swap on mainnet. Bring USDC to your NEAR account another
               way.
@@ -250,18 +296,35 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
             <div className="flex flex-col gap-2">
               <Button
                 className="w-full max-sm:h-10"
-                disabled={!q.quote || q.loading || !!startError?.maybeSubmitted}
+                disabled={!canRequest || !!startError?.maybeSubmitted}
                 loading={starting}
                 onClick={() => void confirm()}
               >
-                Simulate swap
+                {liveEnabled ? "Get deposit address" : "Simulate swap"}
               </Button>
-              {mode === "near" && (
+              {liveEnabled ? (
+                <p className="text-label text-subtle">Review the exact amount and deadline before sending from your {origin.chain} wallet.</p>
+              ) : mode === "near" && (
                 <p className="text-label text-subtle">It ends by minting test USDC, a transaction your wallet signs.</p>
               )}
             </div>
           ) : (
-            <p className="text-small text-muted">Connect a wallet to simulate a swap.</p>
+            <p className="text-small text-muted">
+              {liveEnabled ? "Connect a NEAR wallet to get a deposit address." : "Connect a wallet to simulate a swap."}
+            </p>
+          )}
+          {funding && !funding.simulated && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-3 self-start max-sm:h-10"
+              onClick={() => {
+                setDismissedFundingId(null);
+                setWatchId(funding.id);
+              }}
+            >
+              View last swap
+            </Button>
           )}
         </div>
       )}
