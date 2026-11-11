@@ -13,9 +13,6 @@ Shared task board for the agents in this repo. Rules are in `AGENTS.md`
 
 Pick one, move it to "In progress" with your claim.
 
-- **Baseline commit** (owner decides). Only `781f75b` is committed; the Rust
-  crates, contracts, enclave, relayer, relayer client and most of the web data
-  layer are untracked. A commit gives both agents a clean base to diff against.
 - **Testnet launch checklist.** Write the exact steps the owner runs: accounts,
   deploy order, `new` args, relayer hosting and env, removing the contract's
   full-access key, OutLayer job registration, web env. Document only; agents do
@@ -23,14 +20,12 @@ Pick one, move it to "In progress" with your claim.
 - **Web decisions to confirm with the owner**: `maxBids` default 100,
   commit-reveal selectable on `/create`, the "sim" tag on `TxLink` in mock mode,
   wording of the "Verified" panel.
-- **Wasm built on Windows embeds local paths.** Decide whether
-  `contracts/res/*.wasm` should come from the reproducible Docker build before
-  it is committed.
 
 ## Done
 
 | Agent | Task | Result | Checks |
 | --- | --- | --- | --- |
+| Claude | Baseline commit, local paths removed, pushed (owner asked) | `main` is `ee5c419`, pushed to origin. `scripts/build-contracts.ps1` now passes `--remap-path-prefix` through cargo-near `--env RUSTFLAGS=...` and refuses a wasm that still contains the home or checkout path. Rebuilt contracts: `fairground.wasm` sha256 `0061c856…921e` (546,701 bytes), token 167,069 bytes; AGENTS.md, enclave/README.md and contracts/GAS.md updated. | Contracts: 178 unit and 17 sandbox integration tests pass. e2e not rerun. |
 | Claude | Base blue palette (owner picked option A; task moved from Codex to Claude by the owner) | `globals.css` tokens only: neutral near-black canvas and hairlines again, Base blue `#0052FF` for primary buttons, selections and the price (`#3d7eff` as text on dark), state colours retuned for black. Light theme is the same blue on a neutral white canvas. Kept Codex`s light theme, theme toggle and token names; no component changed. `UI-DIRECTION.md` token table updated. | Web TypeScript, ESLint and 103/103 tests pass. All routes checked at 1440px dark, Home, Sale, Result and Arena in light, Home and Sale at 375px with no horizontal scroll. |
 | Codex | Fix the amber simulation labels found in browser feedback | Changed the funding panel's network label and the other simulation tags to the shared neutral style. | Verified the funding badge and other visible sale tags at 957px and 375px. Checked result tags at 375px. Web ESLint, TypeScript and all 103 web tests passed. |
 | Codex | Refine sale states and timing after browser feedback | Used neutral phase icons and labels on Home, Sale and Result. Removed colored dots from routine counters and simulation disclosures. Used text weight for action hints and surfaced close and refund hints on phones. Updated the shared UI direction. | Verified the Home table at 957px and 375px, the filter with keyboard input, and Sale and Result links. Smoke-checked all seven routes at 1440px and 375px. No page-level overflow observed. Web ESLint, TypeScript and 103 web tests passed. |
