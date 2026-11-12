@@ -39,7 +39,7 @@ export function SalePage({ params }: { params: Promise<{ id: string }> }) {
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
               <Button onClick={sale.refetch}>Try again</Button>
-              <ButtonLink href="/" variant="ghost">
+              <ButtonLink href="/sales" variant="ghost">
                 All sales
               </ButtonLink>
             </div>
@@ -73,7 +73,7 @@ export function SaleNotFound({ id }: { id: string }) {
         }
         action={
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <ButtonLink href="/">All sales</ButtonLink>
+            <ButtonLink href="/sales">All sales</ButtonLink>
             {/* Judge mode runs on the simulated chain only. */}
             {!isNearMode() && (
               <ButtonLink href="/judge" variant="ghost">

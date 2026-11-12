@@ -4,7 +4,11 @@ The rule book for every page. Read it once, then use the tokens and components i
 needs to change, ask its owner (see `WORKBOARD.md`) instead of hand-rolling a one-off.
 
 **In one sentence:** a quiet, exact product UI in the manner of Linear, on a neutral near-black canvas (white in light mode) with one Base blue (`#0052FF`) accent,
-hairline borders, medium-weight Inter set tight, flat controls, and the product's own data as the picture.
+hairline borders, medium-weight Inter set tight, lit controls that press like keys, and the product's own data
+as the picture.
+
+**Try the controls:** `http://localhost:3000/lab` shows every shared control in every state (not linked from
+the app). Change a control there first, then check the routes.
 
 **The reference is code, not a mockup:** the home page (`src/app/page.tsx`, `src/components/home/*`). Open
 `http://localhost:3000/` and match its level of finish. When this text and the home page disagree, the home
@@ -19,15 +23,20 @@ body, flat 6 to 10px controls, hairline cards, and real numbers instead of decor
 
 1. **Nothing is decoration.** No illustrations, orbs, glows, gradients, textures, hatches, dashed frames or
    generated artwork. If a block needs a picture, show the real thing: a countdown, a ledger of sealed bids, a
-   chart of real data.
+   chart of real data. The exceptions are material, not pictures: a button's two-stop body, lit edge, sheen
+   and (primary only) the blue glow under it (`.btn-lit`); a card's lit top edge and faint sheen (`panel`);
+   the cursor light on interactive cards (`spotlight`); the app's dot-grid backdrop with its slow scan band
+   (`.backdrop`); and on the landing page only, the hero's breathing blue light (`hero-backdrop`) and the glow
+   under the hero stage (`stage-glow`). Nothing else gets a gradient or a glow.
 2. **One neutral ramp, one accent.** Surfaces and text come from the tokens below. Blue (`accent`) is for
    primary actions, selections, progress, links, focus and "you". Sale phases use small neutral icons with text labels. Simulation and
    network labels use neutral text. Use green, amber and red for outcomes, warnings and errors. Violet marks bots.
 3. **Hierarchy by size and weight, not by boxes.** Each page's first screen answers: what is this, what state
    is it in, what is the number that matters, what do I do next. Everything else sits below.
 4. **Borders group; space separates.** A card (`panel`) is a hairline box one step lighter than the canvas.
-   Never put a bordered box inside a card: divide the inside with hairlines and spacing. No shadows except
-   under things that float (menus, popovers).
+   Never put a bordered box inside a card: divide the inside with hairlines and spacing. Depth comes from four
+   tokens only: `shadow-card` (a card's lit top edge), `shadow-well` (inputs sit in), `shadow-float` (menus,
+   popovers) and the button recipe. No other shadows.
 5. **Text discipline.** Sentence case. No all-caps labels. No em dashes. A label does not need a sentence
    repeating it. Helper text is one line and only where a mistake is likely. Say a thing once per page.
    Nothing below 13px except a `Tag` (12px) and mono ciphertext (12 to 12.5px).
@@ -56,10 +65,25 @@ Both themes use the same component tokens.
 | `accent`, `accent-bright`, `accent-soft` | Base blue: `#3d7eff` text on dark, `#0052ff` on light; primary buttons fill `#0052ff` in both | Progress, links, focus and selected controls |
 | `live`/`ok`, `warn`, `bad` | green, amber, red | Outcome, warning and error feedback |
 | `bot` | violet | Bots |
-| `viz-fairground`, `-bonding`, `-fixed`, `-bot`, `-people` | blue, amber, green, violet, grey | Chart series only |
+| `viz-fairground`, `-bonding`, `-fixed`, `-bot`, `-people` | blue (Sealround), grey and dim grey (the two launch types it is compared with: highlight one, grey the rest), violet, grey | Chart series only. Values and labels stay in text colours |
 
-Radii: controls and inputs `rounded-btn`/`rounded-tile` (8px); cards `rounded-panel` (12px); status chips
-and filter chips `rounded-full`; tags 5px; cipher slips 6px. Nothing else.
+Radii are concentric: controls and inputs `rounded-btn`/`rounded-tile` (10px; a 32px button 8px, a 44px
+one 12px); menus 14px with 8px items; cards `rounded-panel` (16px); sheets and the hero stage
+`rounded-stage` (24px); status chips and segmented controls `rounded-full`; tags 5px; cipher slips 6px. An
+element inside a padded box uses the outer radius minus the padding.
+
+Surfaces: `panel` (card: elev colour, a `--card-sheen` fade over the top 200px, a `--card-line` border and
+`shadow-card`), `inset` (recessed well), `layer-float` (menus and popovers), `material` (the sticky top bar:
+translucent canvas with the page blurred behind).
+
+`spotlight`, added to a `panel` that is a link or holds the main action (the live sale, the sales table, the
+landing cards): a soft accent rim and fill follow the pointer. `SpotlightTracker` (in both shells) sets
+`--mx`/`--my` on the `.spotlight` card under the pointer, from one `pointermove` listener, at most once per
+frame, for mouse and pen only.
+
+The app's background is `.backdrop`, rendered once by `AppShell`: a fixed dot grid that fades out down the
+page, with a band of brighter dots that sweeps down every 14s. Only `html` paints the canvas colour, so the
+backdrop sits between the canvas and the content. Reduced motion stops the sweep.
 
 No colour literals in components (`#hex`, `rgb()`, `hsl()`); no arbitrary font sizes except the few half-pixel
 steps already in the shared components. If a value is missing, it belongs in `globals.css`.
@@ -72,7 +96,7 @@ line height, tracking and weight.
 
 | Utility | Size | Use |
 | --- | --- | --- |
-| `text-display` | 40 to 64px, 510 | The home headline only |
+| `text-display` | 40 to 64px, 510 (84px on the landing hero) | The landing headline and `PageHeader size="lg"` only |
 | `text-h1` | 32 to 48px, 510 | Page titles |
 | `text-h2` | 24px, 510 | Section titles |
 | `text-h3` | 16px, 590 | Card titles, row titles |
@@ -104,11 +128,13 @@ line height, tracking and weight.
 
 Shared, in `src/components/ui`:
 
-- `Button` / `ButtonLink`: `primary` (blue in both themes, one per decision area), `tactile` (default secondary),
-  `outline`, `ghost`, `danger` (irreversible actions). Sizes `sm` 32, `md` 36, `lg` 44px, and `square` (44px,
-  icon only, needs an `aria-label`). Use them for every
-  clickable control that is not a link in text; do not hand-build buttons.
-- `Segmented`: filter and choice chips (a radio group with arrow keys). `Field`: 40px input, label above.
+- `Button` / `ButtonLink`: `primary` (lit Base blue with a glow, one per decision area), `tactile` (default
+  secondary, a lit charcoal key on dark and a white key on light), `outline`, `ghost`, `danger` (irreversible
+  actions). Sizes `sm` 32, `md` 36, `lg` 44px, and `square` (44px, icon only, needs an `aria-label`). Use them
+  for every clickable control that is not a link in text; do not hand-build buttons. The paint is
+  `.btn-lit` with a colourway class; flat buttons use `.btn-press` for the same press.
+- `Segmented`: a radio group in a recessed track; a lit thumb slides to the chosen option. `Field`: 40px
+  recessed input, label above, 4px soft focus ring (red when it has an error).
 - `Panel` (`base`, `raised`, `outline`, `inset`; `feature` is the same as `base`), `PageHeader`,
   `SectionHeader`, `Empty`, `Rule`, `KV`.
 - `Stat` (label over number), `StatRow` (cells divided by hairlines between two hairlines), `Progress`
@@ -128,11 +154,35 @@ Legacy class names that are now plain or empty and should disappear from markup 
 
 ## 6. Motion
 
-120ms for hover and press, 200ms for menus and sheets, 400ms for entrances. Easing `ease-out`
-(`cubic-bezier(.23,1,.32,1)`); colour changes `ease-surface`. Animate `opacity`, `transform`, `translate`,
-`scale` only. Above the fold use `anim-rise` / `anim-fade` (stagger with `style={{ "--i": n }}`); `Reveal`
-below it, sparingly. Hover never moves a control. Nothing loops except a live dot's ring and the loading
-shimmer. Reduced motion shows the final state at once.
+150ms for hover colour, 180ms for menus (`popup-in`: from 94% scale and 8px up), 400ms for entrances. Easing
+`ease-out` (`cubic-bezier(.23,1,.32,1)`); colour changes `ease-surface`; release and settle `ease-spring`
+(`cubic-bezier(.3,1.12,.4,1)`, a slight overshoot and nothing more). Press: a button sinks to 97% in 90ms and
+springs back in 320ms. Sliding indicators (segmented thumb, desktop nav hover) use a motion spring
+(stiffness 520, damping 38 to 40). Animate `opacity`, `transform`, `translate`, `scale` and the registered
+button colours only. Above the fold use `anim-rise` / `anim-fade` (stagger with `style={{ "--i": n }}`);
+`Reveal` below it, sparingly. Hover never moves a control; only a trailing arrow icon leans 2px toward where
+the button goes. App pages enter through `src/app/(app)/template.tsx` (fade and an 8px rise, 320ms). In the
+app nothing loops except a live dot's ring, the loading shimmer and the backdrop's scan band. Reduced motion
+shows the final state at once.
+
+## 6a. Landing page (`src/app/(site)`, `src/components/site`)
+
+The landing page sells the idea; the app at `/sales` stays a tool with a compact page header. Its pictures
+are the product working, never stock art:
+
+- `BidField` (hero, canvas): one sale in about 12 seconds. Sealed bids arrive as rings (bots violet and
+  early), the sale closes, the enclave opens every bid at its real price, the clearing line drops, winners
+  turn blue and settle on the line, losers fade. Paused off screen and in a hidden tab; reduced motion shows
+  the settled frame. Colours come from the `--field-*` tokens, read again when the theme changes.
+- `step-visuals.tsx`: four small loops for the four steps (seal, ledger, enclave, one price), each running
+  only while on screen.
+- `proof.tsx`: `ArenaBars` (the Bot Arena's real averages from `src/data/arena-results.json`, bars grow
+  once in view), `ChecksDemo` (the five result checks ticking over, with "Run again") and `SwapRoute` (a
+  1Click route stepping through quote, deposit, swap, ready).
+- Headline words enter with `anim-blur` (blur, fade and rise, 90ms stagger); the hero stage with
+  `anim-stage`. Sections below use `Reveal`.
+- Links into the app go through `appHref()` (`src/lib/site.ts`), so they point at the app host when
+  `NEXT_PUBLIC_APP_URL` is set.
 
 ## 7. Data viz (recharts)
 

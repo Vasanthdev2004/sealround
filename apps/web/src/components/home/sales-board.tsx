@@ -92,7 +92,7 @@ export function SalesBoard() {
             }
           />
         ) : (
-          <div className="panel overflow-hidden">
+          <div className="panel spotlight overflow-hidden">
             <SaleTableHead />
             {visible.map((s) => (
               <SaleRow key={s.id} sale={s} now={now} />

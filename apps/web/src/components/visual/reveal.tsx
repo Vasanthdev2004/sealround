@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotionSafe } from "./use-reduced-motion";
 
 const TAGS = {
   div: motion.div,
@@ -49,7 +50,8 @@ export function Reveal({
   children: React.ReactNode;
   id?: string;
 }) {
-  const reduce = useReducedMotion();
+  // False while hydrating, so the server HTML matches; reduced-motion users then see the content at once.
+  const reduce = useReducedMotionSafe();
   const Tag = TAGS[as] as typeof motion.div;
   const transition = { duration: 0.4, ease: [0.22, 1, 0.36, 1] as const, delay: delay + Math.min(index, 8) * 0.05 };
   const hidden = { opacity: 0, y };
@@ -57,7 +59,7 @@ export function Reveal({
 
   if (reduce) {
     return (
-      <Tag className={className} style={style} id={id}>
+      <Tag className={className} style={style} id={id} initial={hidden} animate={shown} transition={{ duration: 0 }}>
         {children}
       </Tag>
     );

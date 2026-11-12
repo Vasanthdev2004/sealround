@@ -52,8 +52,8 @@ Bids stay sealed inside a TEE on NEAR until the sale closes. Pay from any chain 
 
 Built at NEAR HACKATHON @NEARProtocol #NEARHackathon @NearBuilders @out_layer
 
-Try it with no funds: <demo link>
-Code: <repo link>
+Try it with no funds: https://sealround-demo.vercel.app/judge
+Code: https://github.com/Vasanthdev2004/fairground
 
 What would you launch with it?
 ```
@@ -67,7 +67,7 @@ Every token launch, bots buy in the first block and dump on you.
 
 Sealround: sealed bids, one clearing price. Bot or human, everyone pays the same. Bids stay sealed in a TEE on NEAR until close.
 
-Try it with no funds: <demo link>
+Try it with no funds: https://sealround-demo.vercel.app/judge
 
 @NEARProtocol #NEARHackathon
 ```
@@ -78,7 +78,7 @@ Post 2 (250 characters):
 In 60 simulated launches, sniper bots made 1,269 USDC on a bonding curve and 0 on Sealround. Pay from any chain through NEAR Intents.
 
 Built at NEAR HACKATHON with @NearBuilders @out_layer
-Code: <repo link>
+Code: https://github.com/Vasanthdev2004/fairground
 
 What would you launch with it?
 ```
@@ -96,7 +96,7 @@ Check before posting: that "Sealround" is free on X, GitHub and as a domain
 | Team size | `2 - 4` (confirm) |
 | Tracks | `memecoins`, `defi`, `privacy`, `open` |
 | Mainnet NEAR account for the payout | `<account>.near` |
-| Public repo link | `<repo link>` (git `origin` is currently `https://github.com/Vasanthdev2004/fairground`) |
+| Public repo link | https://github.com/Vasanthdev2004/fairground (make it public first) |
 | Public demo post link | `<X post link>` |
 | Description | Below, 1,195 characters (limit 20 to 2,000) |
 | Consent to the contact notice | Owner ticks it |
@@ -152,8 +152,8 @@ submission, change "Buyers can fund" to "Buyers get live quotes to fund".
 
 ### Still to fill in
 
-- `<video link>`, `<demo link>` in `README.md` (top) and in the X posts.
-- `<repo link>` in the X posts and the form.
+- `<video link>` in `README.md` (top). The demo link is filled in: https://sealround-demo.vercel.app
+- The repo link is filled in; make the repository public before posting.
 - README section 7, pilot results, with transaction links.
 - The baseline sentence in README section 12 ("owner to confirm").
 - Form fields: team lead name, contact email, team size, payout account, X post link.

@@ -507,6 +507,25 @@ Environment variables:
 | `NEXT_PUBLIC_DEV_ACCOUNTS` | never | never | never | sandbox only; its keys would ship to every visitor |
 | `ONECLICK_JWT` | the 1Click key | same | same | partners.near-intents.org. Server only (the `/api/oneclick/*` routes); mark it Sensitive |
 | `ONECLICK_REAL_SWAPS` | not set | not set | `1` when the owner enables 1Click funding | Server only. Requires mainnet and Circle's native USDC. See M6. |
+| `NEXT_PUBLIC_APP_URL` | not set | optional, `https://app.<domain>` | optional, `https://app.<domain>` | only with the custom domains below; no trailing slash |
+
+Custom domains (optional). One project can serve the landing page and the app
+on two hosts. `src/proxy.ts` decides by host name:
+
+- The root domain (`<domain>`) serves the landing page at `/`. The app is
+  under `/sales`, `/sale/...`, `/create`, `/judge`, `/arena` and `/how`.
+- A host that starts with `app.` (`app.<domain>`) serves the sales board at
+  `/`. Every other path is the same page as on the root domain.
+- With `NEXT_PUBLIC_APP_URL=https://app.<domain>`, the landing page's links
+  point at the app host, and an app path opened on the root domain redirects
+  (308) to the same path on the app host. Without it nothing redirects, which
+  is right for a single host such as `<web-demo>.vercel.app`.
+
+To set it up: in the Vercel project, Settings, Domains, add `<domain>` and
+`app.<domain>` to the same project, add the DNS records Vercel shows, set
+`NEXT_PUBLIC_APP_URL`, redeploy, and add `https://app.<domain>` to the
+relayer's `CORS_ORIGINS`. Locally, `http://app.localhost:3000` is the app host
+with no setup.
 
 Checks after each deploy, on the production URL:
 

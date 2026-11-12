@@ -50,7 +50,7 @@ export function JudgeMode() {
           description="Judge mode runs on the simulated chain, and this app is connected to a real NEAR contract."
           actions={
             <>
-              <ButtonLink href="/" variant="primary" size="lg">
+              <ButtonLink href="/sales" variant="primary" size="lg">
                 All sales
               </ButtonLink>
               <ButtonLink href="/how" variant="ghost" size="lg">

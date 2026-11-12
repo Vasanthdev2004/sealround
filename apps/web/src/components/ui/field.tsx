@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { motion } from "motion/react";
 import { cn } from "@/lib/cn";
 
 /**
@@ -41,8 +42,11 @@ export function Field({
       )}
       <div
         className={cn(
-          "inset flex h-10 items-center gap-2 border-control px-3 transition-[border-color,box-shadow] duration-[120ms] ease-surface hover:border-control-hover focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-soft)] hover:focus-within:border-accent",
-          error && "border-bad",
+          "inset flex h-10 items-center gap-2 px-3 transition-[border-color,box-shadow] duration-150 ease-surface",
+          // cn does not merge classes, so the error and normal borders never both apply.
+          error
+            ? "border-bad focus-within:shadow-[var(--elev-well),0_0_0_4px_var(--bad-soft)]"
+            : "border-control hover:border-control-hover focus-within:border-accent focus-within:shadow-[var(--elev-well),0_0_0_4px_var(--accent-soft)] hover:focus-within:border-accent",
         )}
       >
         <input
@@ -67,9 +71,9 @@ export function Field({
 }
 
 /**
- * Filter chips. A radio group: one option is always chosen, arrow keys move
- * between options. The chosen chip uses the blue accent and carries its
- * selected state for assistive technology.
+ * Segmented control. A radio group in a recessed track: one option is always
+ * chosen, arrow keys move between options, and a lit thumb slides to the
+ * chosen one (a spring, dropped under reduced motion).
  */
 export function Segmented<T extends string>({
   value,
@@ -97,6 +101,7 @@ export function Segmented<T extends string>({
   scroll?: boolean;
   scrollClassName?: string;
 }) {
+  const thumbId = useId();
   if (scroll) {
     return (
       <div
@@ -128,7 +133,10 @@ export function Segmented<T extends string>({
 
   return (
     <div
-      className={cn("flex flex-wrap items-center gap-1", className)}
+      className={cn(
+        "inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-full bg-inset p-[3px] shadow-[inset_0_0_0_1px_var(--line),var(--elev-well)]",
+        className,
+      )}
       role="radiogroup"
       aria-label={labelledBy ? undefined : label}
       aria-labelledby={labelledBy}
@@ -145,13 +153,25 @@ export function Segmented<T extends string>({
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={cn(
-              "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13.5px] font-[510] max-sm:h-10 max-sm:px-3.5 transition-[color,background-color] duration-[120ms] ease-surface",
-              active ? "bg-accent-soft text-accent-bright" : "text-muted hover:bg-wash hover:text-fg",
+              "btn-press relative inline-flex h-[30px] items-center gap-1.5 rounded-full px-3 text-[13.5px] font-[510] max-sm:h-9 max-sm:px-3.5",
+              active ? "text-fg" : "text-muted hover:text-fg",
             )}
           >
-            {o.label}
+            {/* The lit thumb slides to the chosen option. */}
+            {active && (
+              <motion.span
+                layoutId={thumbId}
+                aria-hidden
+                className="seg-thumb absolute inset-0 rounded-full"
+                transition={{ type: "spring", stiffness: 520, damping: 38, mass: 0.8 }}
+              />
+            )}
+            {/* z-[1] keeps every label above the thumb while it slides past. */}
+            <span className="relative z-[1]">{o.label}</span>
             {o.count !== undefined && (
-              <span className={cn("num text-[12.5px] font-normal", !active && "text-subtle")}>{o.count}</span>
+              <span className={cn("num relative z-[1] text-[12.5px] font-normal", active ? "text-muted" : "text-subtle")}>
+                {o.count}
+              </span>
             )}
           </button>
         );

@@ -23,6 +23,23 @@ pnpm install          # from the repo root
 pnpm --filter web dev # http://localhost:3000, mock mode
 ```
 
+`http://localhost:3000` is the landing page; the app's sales board is at
+`/sales`. `http://app.localhost:3000` is the app host: the same deployment
+with the sales board at `/`. Every other page (`/sale/<id>`, `/create`,
+`/judge`, `/arena`, `/how`) has the same path on both hosts.
+
+## Routes
+
+| Group | Layout | Pages |
+| --- | --- | --- |
+| `src/app/(site)` | `SiteShell`: slim bar, footer | `/`, the landing page (`components/site`) |
+| `src/app/(app)` | `AppShell`: app bar, wallet, page transition | `/sales`, `/sale/[id]`, `/sale/[id]/result`, `/create`, `/judge`, `/arena`, `/how`, `/lab` (control review sheet, not linked, noindex) |
+
+`src/proxy.ts` rewrites `/` to `/sales` on any host that starts with `app.`.
+When `NEXT_PUBLIC_APP_URL` is set, it also redirects app paths on the landing
+host to the app host (see `.env.example` and `LAUNCH.md` part 4). Links
+inside the app go to `/sales`, which works on both hosts.
+
 Checks (from `apps/web`):
 
 ```powershell

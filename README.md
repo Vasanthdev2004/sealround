@@ -3,7 +3,7 @@
 Sealed-bid, single-price token sales on NEAR. Bids are sealed in the browser and opened only inside an OutLayer TEE after the sale closes, and every winner pays the same clearing price, so bots and people pay the same.
 
 - 90-second video: `<video link>`
-- Hosted demo (no wallet, no funds): `<demo link>`
+- Hosted demo (no wallet, no funds): https://sealround-demo.vercel.app
 - Tracks: Memecoins With Mechanics, Unstoppable DeFi, Privacy & Private AI, Open Innovation
 
 The product was first called Fairground. Package names (`@fairground/*`), crate names (`fairground-*`), the contract's method, event and storage names, the wasm file names and the `NEXT_PUBLIC_FAIRGROUND_*` variables keep `fairground` for compatibility. They all refer to Sealround.
@@ -37,7 +37,7 @@ Judge mode runs a whole sale in your browser: 50 fictional people, 3 sniper bots
 
 | Do | See |
 | --- | --- |
-| Open `<demo link>/judge` | "Judge mode", a **Run demo** button ("About 35 seconds. No wallet, no funds.") and "The run in nine steps" |
+| Open [sealround-demo.vercel.app/judge](https://sealround-demo.vercel.app/judge) | "Judge mode", a **Run demo** button ("About 35 seconds. No wallet, no funds.") and "The run in nine steps" |
 | Click **Run demo** | A live timeline: Create the sale, Enclave makes the sale key, 3 sniper bots bid at second 0, 50 people bid over the window, A copycat replays a sealed bid, The bid window runs out, Anyone closes the sale, Enclave clears the sale, Result. Bids stream in as ciphertext only. |
 | Wait about 35 seconds | "Every winner paid one clearing price" with the price in USDC per token; **Bots paid** and **People paid** side by side at the same price; checks "Bots and people paid exactly the clearing price." and "The copycat's bid was void: 0 tokens, ... USDC back, ... USDC kept as the 1 % penalty."; a **Time to result** stat under the 2:00 goal |
 | Click **Open the full result** | `/sale/judge-1/result`: clearing price, "Bot or person, same price", the **Verified** panel (5 of 5 checks, tagged "simulated"), "Where's my money", every fill with deposit, tokens, spent, penalty and refund, "Who got the tokens", and the transaction history |
@@ -176,7 +176,7 @@ Setup -> Bidding (upcoming / open / awaiting_close)
 - **The gas relayer** only pays gas. It cannot move anyone's funds.
 - **The contracts are unaudited.**
 
-**Attestation.** OutLayer's attestation endpoints take no verifier nonce ([contracts/DESIGN.md](contracts/DESIGN.md), "Spec deviations" 1). In judge mode the Verified panel runs its five checks against a simulated attestation and says so. In NEAR mode the app checks what the contract stored (the pinned code hash, the sale key, the sha256 of the clearing input and of the enclave's answer) and does not fetch a TDX quote; `enclave/deploy/Verify-Attestation.ps1` checks a real OutLayer attestation against those values.
+**Attestation.** OutLayer's attestation endpoints take no verifier nonce ([contracts/DESIGN.md](contracts/DESIGN.md), "Spec deviations" 1), so the Verified panel's first check ties the attested run to the sale by its input and output hashes instead. In judge mode the Verified panel runs its five checks against a simulated attestation and says so. In NEAR mode the app checks what the contract stored (the pinned code hash, the sale key, the sha256 of the clearing input and of the enclave's answer) and does not fetch a TDX quote; `enclave/deploy/Verify-Attestation.ps1` checks a real OutLayer attestation against those values.
 
 ### Pinned hashes
 
@@ -219,7 +219,7 @@ The `/arena` page reads `arena-results.json`, so every number on it comes from t
 
 ## 7. Pilot results
 
-**To be filled after the pilot.** Capped mainnet sale: a demo token with no utility, 10 USDC maximum deposit per account, 500 USDC total cap, unaudited-contract banner.
+**To be filled after the pilot.** The pilot runs on NEAR testnet with community bidders and our own openly run sniper bot, which is the spec's documented fallback for a mainnet pilot that cannot be announced a day ahead. Same caps as the planned mainnet sale: a demo token with no utility, 10 USDC maximum deposit per account, at most 50 bids. If one real 1Click swap is recorded on mainnet, its link goes in the last row.
 
 | Measure | Result |
 | --- | --- |
@@ -232,6 +232,7 @@ The `/arena` page reads `arena-results.json`, so every number on it comes from t
 | Refunds processed | `<to be filled>` |
 | Verified panel | `<to be filled>` |
 | Transaction links (create, close, settle, sample claims) | `<to be filled>` |
+| Real 1Click swap on mainnet (optional) | `<to be filled>` |
 
 ## 8. Run it locally
 

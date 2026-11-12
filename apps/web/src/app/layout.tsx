@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
-import { AppShell } from "@/components/shell/app-shell";
 import { THEME_BOOTSTRAP } from "@/components/shell/theme-preference";
 import { WalletProvider } from "@/lib/wallet";
 import "./globals.css";
@@ -28,7 +27,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body>
         <WalletProvider>
-          <AppShell>{children}</AppShell>
+          {children}
         </WalletProvider>
       </body>
     </html>

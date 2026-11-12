@@ -12,16 +12,27 @@ import { networkName } from "@/lib/format";
 import { DEMO_FAUCET_USDC, useWallet } from "@/lib/wallet";
 import { Button } from "@/components/ui/button";
 import { MotionProvider } from "@/components/visual/motion-provider";
+import { SpotlightTracker } from "@/components/visual/spotlight";
 import { ConnectButton } from "./connect-button";
 import { NAV } from "./nav";
 import { ThemeToggle } from "./theme-toggle";
 
-export function Logo({ className, wordmarkClassName }: { className?: string; wordmarkClassName?: string }) {
+export function Logo({
+  className,
+  wordmarkClassName,
+  href = "/sales",
+  label = "Sealround sales",
+}: {
+  className?: string;
+  wordmarkClassName?: string;
+  href?: string;
+  label?: string;
+}) {
   return (
     <Link
-      href="/"
+      href={href}
       className={cn("flex min-h-11 shrink-0 items-center gap-2 rounded-btn text-fg", className)}
-      aria-label="Sealround home"
+      aria-label={label}
     >
       {/* The negative space between the two solid halves is the clearing line. */}
       <svg aria-hidden="true" className="size-5 shrink-0 text-accent-bright" viewBox="0 0 20 20" fill="currentColor">
@@ -82,19 +93,37 @@ function NavLinks({ path, layout }: { path: string | null; layout: "bar" | "draw
       </nav>
     );
   }
+  return <BarNav items={items} path={path} />;
+}
+
+/** Desktop nav. A soft highlight glides to whichever link the pointer is over. */
+function BarNav({ items, path }: { items: ReturnType<typeof navItems>; path: string | null }) {
+  const [hover, setHover] = useState<string | null>(null);
   return (
     <nav aria-label="Main" className="hidden min-w-0 lg:block">
-      <ul className="flex items-center xl:gap-1">
+      <ul className="flex items-center xl:gap-1" onPointerLeave={() => setHover(null)}>
         {items.map((n) => {
           const active = path !== null && n.match(path);
           return (
-            <li key={n.href}>
+            <li key={n.href} className="relative">
+              {hover === n.href && !active && (
+                <motion.span
+                  layoutId="nav-hover"
+                  aria-hidden
+                  className="absolute inset-0 rounded-btn bg-wash-soft"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 520, damping: 40, mass: 0.8 }}
+                />
+              )}
               <Link
                 href={n.href}
                 aria-current={active ? "page" : undefined}
+                onPointerEnter={(e) => e.pointerType === "mouse" && setHover(n.href)}
                 className={cn(
-                  "inline-flex h-8 items-center rounded-btn px-2 text-[14px] whitespace-nowrap transition-colors duration-[120ms] ease-surface xl:px-2.5",
-                  active ? "bg-accent-soft text-accent-bright" : "text-muted hover:bg-wash-soft hover:text-fg",
+                  "relative inline-flex h-8 items-center rounded-btn px-2 text-[14px] whitespace-nowrap transition-colors duration-150 ease-surface xl:px-2.5",
+                  active ? "bg-accent-soft text-accent-bright" : "text-muted hover:text-fg",
                 )}
               >
                 {n.label}
@@ -123,7 +152,7 @@ function ResetDemo() {
       // The connected demo account starts again with its test USDC.
       if (account) await client.faucet(account, DEMO_FAUCET_USDC);
       setStage("idle");
-      router.push("/");
+      router.push("/sales");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStage("confirm");
@@ -315,6 +344,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <MotionProvider>
+      <div className="backdrop" aria-hidden />
+      <SpotlightTracker />
       <a
         href="#main"
         className="sr-only z-[60] rounded-btn bg-fg px-3 py-2 text-[14px] font-[510] text-bg focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -323,7 +354,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </a>
       <div className="flex min-h-dvh flex-col">
         <MainnetNotice />
-        <header className="sticky top-0 z-30 border-b border-line bg-bg">
+        <header className="material sticky top-0 z-30 border-b border-line">
           <div className="mx-auto flex h-14 max-w-[1240px] items-center gap-2 px-4 max-[359px]:gap-1 max-[359px]:px-3 sm:gap-4 sm:px-6 xl:gap-6 xl:px-8">
             <Logo className="max-[359px]:gap-1.5" />
             <NavList layout="bar" />

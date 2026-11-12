@@ -1,10 +1,11 @@
+import { Plus } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { isNearMode } from "@/lib/config";
 
 /**
- * The pitch and the two actions. No illustration: the live sale right below
- * it is the picture. Server-rendered, and it enters with the CSS `anim-*`
- * classes, so it shows before hydration.
+ * The app's page header: what this board is and the two actions. The pitch
+ * lives on the landing page, so this stays compact and puts the live sale
+ * near the top. Server-rendered and entered with the CSS `anim-*` classes.
  */
 export function HomeHero() {
   // Judge mode exists only on the simulated chain; against a real contract the first action is to read the rules.
@@ -12,25 +13,21 @@ export function HomeHero() {
   return (
     <section
       aria-labelledby="home-title"
-      className="grid gap-5 pt-2 sm:gap-6 sm:pt-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)] lg:items-end lg:gap-12 lg:pt-8"
+      className="flex flex-col gap-4 pt-2 sm:flex-row sm:items-end sm:justify-between sm:gap-8 sm:pt-4"
     >
-      <h1 id="home-title" className="anim-rise text-display text-fg">
-        Sealed bids.
-        <br />
-        <span className="text-accent-bright">One price.</span>
-      </h1>
-      <div className="anim-rise flex flex-col gap-5" style={{ "--i": 1 } as React.CSSProperties}>
-        <p className="max-w-[46ch] text-lead text-muted">
-          Bid terms stay sealed until the sale closes. Every winner pays the same clearing price.
+      <div className="anim-rise">
+        <h1 id="home-title" className="text-h1 text-fg">
+          Sales
+        </h1>
+        <p className="mt-2 max-w-[52ch] text-small text-muted">
+          Bids stay sealed until each sale closes. Every winner pays the same clearing price.
         </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <ButtonLink href={near ? "/how" : "/judge"} variant="primary" size="lg">
-            {near ? "How it works" : "Run the demo"}
-          </ButtonLink>
-          <ButtonLink href="/create" variant="ghost" size="lg" className="max-[359px]:px-2.5">
-            Launch a sale
-          </ButtonLink>
-        </div>
+      </div>
+      <div className="anim-rise flex shrink-0 flex-wrap items-center gap-2" style={{ "--i": 1 } as React.CSSProperties}>
+        <ButtonLink href={near ? "/how" : "/judge"}>{near ? "How it works" : "Run the demo"}</ButtonLink>
+        <ButtonLink href="/create" variant="primary" icon={<Plus className="size-4" aria-hidden />}>
+          Launch a sale
+        </ButtonLink>
       </div>
     </section>
   );

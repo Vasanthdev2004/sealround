@@ -25,7 +25,7 @@ function ConnectError({ text }: { text: string }) {
   return (
     <p
       role="alert"
-      className="panel fixed inset-x-4 top-[60px] z-40 p-3 text-label text-bad shadow-pop sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-72"
+      className="layer-float fixed inset-x-4 top-[60px] z-40 animate-popup p-3 text-label text-bad sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-72"
     >
       Could not connect. {text}
     </p>
@@ -148,7 +148,7 @@ export function ConnectButton() {
   const otherDevAccounts = near ? wallet.devAccounts.filter((a) => a !== account) : [];
 
   const item =
-    "flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-left text-small text-muted transition-colors hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg disabled:opacity-60";
+    "flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-small text-muted transition-colors hover:bg-wash hover:text-fg focus-visible:bg-wash focus-visible:text-fg disabled:opacity-60";
 
   return (
     <div className="relative min-w-0" ref={ref}>
@@ -180,12 +180,12 @@ export function ConnectButton() {
             role="menu"
             aria-label="Account"
             onKeyDown={onMenuKey}
-            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            initial={{ opacity: 0, y: -8, scale: 0.94 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            exit={{ opacity: 0, y: -4, scale: 0.96, transition: { duration: 0.12 } }}
+            transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
             style={{ transformOrigin: "top right" }}
-            className="panel fixed inset-x-4 top-[60px] z-40 bg-elev-2 p-1.5 shadow-pop sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-72"
+            className="layer-float fixed inset-x-4 top-[60px] z-40 p-1.5 sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-72"
           >
             <div className="px-2.5 pt-2.5 pb-3">
               <div className="text-label text-subtle">

@@ -61,7 +61,7 @@ function ResultPage({ id }: { id: string }) {
         title="Could not load this sale"
         body={sale.error.message}
         action={
-          <ButtonLink href="/" size="sm">
+          <ButtonLink href="/sales" size="sm">
             All sales
           </ButtonLink>
         }

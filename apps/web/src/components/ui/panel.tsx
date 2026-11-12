@@ -56,7 +56,8 @@ export function Panel({
       {(title || action) && (
         <header
           className={cn(
-            "flex items-start justify-between gap-4 border-b border-line px-5 py-3.5",
+            // No rule under the header: the title and spacing separate it from the body.
+            "flex items-start justify-between gap-4 px-5 pt-[18px] pb-2",
             headerClassName,
           )}
         >
@@ -74,7 +75,9 @@ export function Panel({
           {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
         </header>
       )}
-      <div className={cn(!hasPadding(bodyClassName) && "p-5", bodyClassName)}>{children}</div>
+      <div className={cn(!hasPadding(bodyClassName) && (title || action ? "px-5 pt-2 pb-5" : "p-5"), bodyClassName)}>
+        {children}
+      </div>
     </Tag>
   );
 }

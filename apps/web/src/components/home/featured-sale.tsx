@@ -45,7 +45,7 @@ export function FeaturedSale({ sale, now }: { sale: Sale; now: number }) {
   const span = c.bidEnd - c.bidStart;
 
   return (
-    <section aria-label={`${c.tokenName} sale`} className="panel grid overflow-hidden lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+    <section aria-label={`${c.tokenName} sale`} className="panel spotlight grid overflow-hidden lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col p-5 sm:p-8">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">

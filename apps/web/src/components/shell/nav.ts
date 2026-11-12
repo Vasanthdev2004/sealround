@@ -1,5 +1,5 @@
 export const NAV = [
-  { href: "/", label: "Sales", match: (p: string) => p === "/" || p.startsWith("/sale") },
+  { href: "/sales", label: "Sales", match: (p: string) => p.startsWith("/sale") },
   { href: "/create", label: "Launch a sale", match: (p: string) => p.startsWith("/create") },
   { href: "/judge", label: "Judge mode", match: (p: string) => p.startsWith("/judge") },
   { href: "/arena", label: "Bot Arena", match: (p: string) => p.startsWith("/arena") },

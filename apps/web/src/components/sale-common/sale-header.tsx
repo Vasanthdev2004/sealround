@@ -17,7 +17,7 @@ import type { Sale } from "@/lib/types";
 export function SaleHeader({
   sale,
   actions,
-  back = { href: "/", label: "All sales" },
+  back = { href: "/sales", label: "All sales" },
   simulatedNote = true,
 }: {
   sale: Sale;

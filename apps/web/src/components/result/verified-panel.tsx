@@ -34,8 +34,10 @@ const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
- * The five checks from the spec, run in this browser. The attestation is
- * fetched with a fresh random nonce every run, so a replayed answer fails.
+ * The five checks from the spec, run in this browser. OutLayer's attestation
+ * takes no nonce (contracts/DESIGN.md, spec deviation 1), so the first check
+ * ties the attested run to this sale instead: its input and output hashes must
+ * equal the ones the contract stored.
  * Results tick in one by one, in order, each time the checks run.
  *
  * The panel leads with the outcome ("5 of 5 checks passed") and one line
@@ -89,7 +91,6 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
   const revealed = shown.attempt === attempt ? shown.n : 0;
   const att = fetched ? run.attestation : undefined;
   const fetchError = fetched ? run.error : undefined;
-  const sentNonce = run?.nonce ?? "";
   const client = getClient();
   const expected = client.expectedCodeHash();
   const timedOut = result.failReason === "settle_timeout";
@@ -103,9 +104,12 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
   // instead of passing or failing on values that were never compared.
   const fromChain = att?.source === "chain";
 
-  // 1. Fresh nonce
-  const nonceOk = !!att && !fromChain && att.nonce === sentNonce;
-  const r1: CheckState = onchain || fromChain ? "idle" : nonceOk ? "pass" : "fail";
+  // 1. The attested run is this sale's run: its input and output hashes equal the ones the contract stored.
+  const storedIn = result.inputSha256 ?? "";
+  const storedOut = result.resultSha256 ?? "";
+  const runOk =
+    !!att && !!att.outputHash && att.outputHash === storedOut && (!storedIn || att.inputHash === storedIn);
+  const r1: CheckState = onchain || fromChain || timedOut ? "idle" : runOk ? "pass" : "fail";
   // 2. Code hash
   const codeOk = !!att && !!expected && att.codeHash === expected;
   const r2: CheckState = onchain || (fromChain && !expected) ? "idle" : codeOk ? "pass" : "fail";
@@ -156,7 +160,7 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
       ? "Reading the contract's result again."
       : fetched
         ? "Comparing the attestation with the chain."
-        : "Fetching the attestation with a fresh nonce."
+        : "Fetching the attestation."
     : `Run in your browser${att ? ` at ${timeStr(att.fetchedAt)}` : ""}${against}.${left}`;
 
   return (
@@ -207,24 +211,26 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
         <ProofRow
           n={1}
           state={states[0]}
-          idle={attIdle}
-          label="OutLayer attestation fetched with a fresh random nonce"
-          pending="Sending a new 16-byte nonce."
+          idle={timedOut && !onchain ? "Not applicable" : attIdle}
+          label="Attested run's input and output hashes match what the contract stored"
+          pending="Comparing the run's hashes."
           href={onchain || fromChain ? undefined : att?.url}
         >
           {onchain ? (
             <Note>No enclave ran for this sale.</Note>
           ) : fromChain ? (
             <Note>
-              This build reads the values the contract stored and does not fetch OutLayer&apos;s attestation itself,
-              so there is no nonce to compare.
+              This build reads the hashes the contract stored and does not fetch OutLayer&apos;s attestation itself,
+              so there is nothing independent to compare them with.
             </Note>
+          ) : timedOut ? (
+            <Note>The sale timed out before a run settled it.</Note>
           ) : fetchError ? (
             <Note tone="bad">Fetch failed: {fetchError}</Note>
           ) : (
             <>
-              <Pair a={["sent", shortHash(sentNonce, 6)]} b={["echoed", shortHash(att?.nonce ?? "", 6)]} ok={nonceOk} />
-              {!nonceOk && <Note>The attestation answered a different nonce. It could be a replay.</Note>}
+              <Pair a={["attested output", shortHash(att?.outputHash ?? "", 6)]} b={["on chain", shortHash(storedOut, 6)]} ok={runOk} />
+              {!runOk && <Note>The attestation describes a different run than the one the contract settled.</Note>}
             </>
           )}
         </ProofRow>
