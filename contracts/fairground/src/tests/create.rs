@@ -7,8 +7,8 @@ use near_sdk::test_utils::{get_created_receipts, get_logs};
 use super::*;
 use crate::costs::{
     MAX_BIDS_PER_SALE, ON_SEALER_KEY_GAS, QUOTE_REGISTRATION_COST, SEALER_MAX_EXECUTION_SECONDS,
-    SEALER_MAX_INSTRUCTIONS, TOKEN_INIT_GAS, TOKEN_STORAGE_DEPOSIT, TOKEN_WASM, per_bid_reserve,
-    sale_storage_cost, token_deploy_balance,
+    SEALER_MAX_INSTRUCTIONS, SEALER_MAX_MEMORY_MB, TOKEN_INIT_GAS, TOKEN_STORAGE_DEPOSIT,
+    TOKEN_WASM, per_bid_reserve, sale_storage_cost, token_deploy_balance,
 };
 use crate::outlayer::pubkey_input;
 use crate::sale::MIN_DEPOSIT_FLOOR;
@@ -413,7 +413,7 @@ fn create_sale_deploys_the_token_and_asks_for_the_key() {
         request.args,
         json!({
             "source": {"Project": {"project_id": "fairground.testnet/fairground-sealer", "version_key": CODE_HASH}},
-            "resource_limits": {"max_instructions": SEALER_MAX_INSTRUCTIONS, "max_execution_seconds": SEALER_MAX_EXECUTION_SECONDS},
+            "resource_limits": {"max_instructions": SEALER_MAX_INSTRUCTIONS, "max_memory_mb": SEALER_MAX_MEMORY_MB, "max_execution_seconds": SEALER_MAX_EXECUTION_SECONDS},
             "input_data": pubkey_input(&contract_id(), "fairt"),
             "secrets_ref": {"profile": "default", "account_id": "sealer-owner.testnet"},
             "response_format": "Text",

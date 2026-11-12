@@ -7,6 +7,7 @@
   },
   "resource_limits": {
     "max_instructions": 50000000000,
+    "max_memory_mb": 128,
     "max_execution_seconds": 60
   },
   "input_data": "{\"v\":1,\"op\":\"pubkey\",\"contract\":\"{{CALLER}}\",\"sale_id\":\"{{SALE_ID}}\"}",

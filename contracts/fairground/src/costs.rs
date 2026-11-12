@@ -129,6 +129,13 @@ pub const OUTLAYER_FREE_INPUT_BYTES: usize = 32_768;
 pub const SEALER_MAX_INSTRUCTIONS: u64 = 50_000_000_000;
 /// Well inside the 200-block (about 117 s) yield window.
 pub const SEALER_MAX_EXECUTION_SECONDS: u64 = 60;
+/// Memory limit for a sealer run (MB). OutLayer's testnet scheduler never
+/// picks up a request that leaves `max_memory_mb` out: it times out after
+/// 200 blocks with no run (seen 12 Nov 2026 with the job alone, with and
+/// without secrets). 128 is OutLayer's default; a 500-bid clear uses about
+/// 2.3 MiB, and the worker gives every run at least its memory floor anyway.
+/// No memory fee is charged.
+pub const SEALER_MAX_MEMORY_MB: u32 = 128;
 
 /// Deposit for one OutLayer run (compute part only), with a 2x margin.
 pub const OUTLAYER_COMPUTE_DEPOSIT: u128 = 2

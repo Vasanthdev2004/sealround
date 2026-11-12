@@ -377,7 +377,7 @@ async fn key_requests_get_through_an_outlayer_price_rise() -> Result<()> {
         &env.view(
             env.outlayer.id(),
             "estimate_execution_cost",
-            json!({"resource_limits": {"max_instructions": 50_000_000_000u64, "max_execution_seconds": 60}}),
+            json!({"resource_limits": {"max_instructions": 50_000_000_000u64, "max_memory_mb": 128, "max_execution_seconds": 60}}),
         )
         .await?,
     )?;

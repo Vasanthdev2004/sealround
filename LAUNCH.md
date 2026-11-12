@@ -82,7 +82,7 @@ Install links for near CLI and the OutLayer CLI: README 0.
 
 ```powershell
 (Get-FileHash contracts\res\fairground.wasm -Algorithm SHA256).Hash.ToLower()
-# 0061c8569e7b2ad87fe3a0d863cc31cab1deee91273572af6231418f0e0f921e   (546,701 bytes, 11 Nov 2026)
+# bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800   (546,747 bytes, 12 Nov 2026)
 $SHA
 # f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb   (276,156 bytes, 10 Nov 2026)
 ```
@@ -222,6 +222,17 @@ powershell -ExecutionPolicy Bypass -File enclave\deploy\3-master-secret.ps1 -Net
 powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -Network $NET -Account $ME -Execute
 ```
 
+Or from the browser: run `pnpm dev` and open `http://localhost:3000/deploy`
+(dev server only; a production build answers 404). Type `$ME`; no testnet
+wallet is needed. The page checks that T2 and T4 are done and makes a fresh
+key for `$FG`. It then prints one `near account create-account ...` line that
+near CLI signs as `$ME` (create `$FG` with 6.5 NEAR and add that key); a
+wallet with testnet support (Meteor, Intear, Nightly) can sign it instead.
+The tab then signs deploy plus `new` with the new key and reads the config
+and code hash back. Download the key file it offers first: it is the only
+copy, and T8 needs it. The file has the same fields as a near CLI
+credentials file.
+
 - Does: checks that the version and the secret row exist, creates `$FG`
   with 6.5 NEAR, then deploys `contracts\res\fairground.wasm` and calls `new`
   in the same transaction (signed by `$FG`, so nobody can front-run the
@@ -245,7 +256,7 @@ powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -N
   never changes.
 - Success: `New account <$FG> created successfully`, the deploy succeeds,
   `get_config` echoes the arguments, and `view-account-summary` shows
-  `Contract (SHA-256 checksum hex): 0061c856...921e`.
+  `Contract (SHA-256 checksum hex): bfc2f800...a800`.
 - If it fails: `invalid config: ...` names the rule; nothing is half
   deployed. If the account was created but the deploy failed, running
   `-Execute` again stops at the account creation: run the printed
@@ -315,6 +326,10 @@ powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -N
 
 - Does: checks the key belongs to `$FG`, deletes it, lists the keys again.
   (`-Lock` without `-PublicKey` and `-Execute` only prints these steps.)
+- If you deployed from `/deploy`, near CLI does not hold `$FG`'s key. Lock
+  from step 8 of the same page instead (import the key file first if the tab
+  was closed): it refuses unless the account has exactly that one key, asks
+  you to type `$FG`, deletes the key and checks that no keys are left.
 - Success: the last `list-keys` shows no keys.
 - If T5 to T7 showed a problem in the contract itself, do not lock this
   account. Deploy a fresh one (`-Contract fairground2.$ME` on

@@ -182,7 +182,7 @@ Setup -> Bidding (upcoming / open / awaiting_close)
 
 | Artifact | sha256 | How to check |
 | --- | --- | --- |
-| `contracts/res/fairground.wasm` (sale contract, embeds the token) | `0061c8569e7b2ad87fe3a0d863cc31cab1deee91273572af6231418f0e0f921e` | Built with `scripts\build-contracts.ps1`. The reproducible container build is configured (NEP-330 metadata) but has not been run yet, see [contracts/DESIGN.md](contracts/DESIGN.md) "Reproducible build" |
+| `contracts/res/fairground.wasm` (sale contract, embeds the token) | `bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800` | Built with `scripts\build-contracts.ps1`. The reproducible container build is configured (NEP-330 metadata) but has not been run yet, see [contracts/DESIGN.md](contracts/DESIGN.md) "Reproducible build" |
 | `enclave/res/fairground_sealer.wasm` (the OutLayer job) | `f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb` | `powershell -File scripts\build-enclave.ps1 -Verify` rebuilds it in Docker and prints `verify: MATCH`. The single source of truth is `enclave/res/fairground_sealer.wasm.sha256` |
 | `contracts/res/fairground_token.wasm` | `0b1673bf822def860a637059ff55e839cc47f8c1dacee46b284080bbe7450047` | Embedded in `fairground.wasm` |
 | `contracts/res/outlayer_contract.wasm` (third party, tests only) | `74ab074a27ccddd9b6f400f3f8453c1039419acba556ba77dfb288759b3dbd0f` | [contracts/res/NOTICE.md](contracts/res/NOTICE.md) |

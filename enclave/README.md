@@ -465,8 +465,8 @@ near account view-account-summary $FG network-config testnet now
 
 - **Storage.** NEAR locks 1e19 yoctoNEAR per stored byte. The contract code
   embeds the per-sale token wasm (contracts/fairground/src/costs.rs,
-  `TOKEN_WASM`), so `fairground.wasm` is large: 546,701 bytes on 11 Nov 2026
-  (sha256 `0061c8569e7b2ad87fe3a0d863cc31cab1deee91273572af6231418f0e0f921e`),
+  `TOKEN_WASM`), so `fairground.wasm` is large: 546,747 bytes on 12 Nov 2026
+  (sha256 `bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800`),
   which is 5.48 NEAR for the code alone. The script reads the file on disk, prints its size and
   sha256, and computes the balance from it (code + 2 KB, plus 1 NEAR
   headroom: 6.5 NEAR for that file). Sale costs are paid by each sale's
@@ -849,6 +849,7 @@ attestation; a run refused before it started may have none (the
 | `"ok":false,"error":"bid_set_hash_mismatch"` | the bids sent are not the set the contract froze | a contract bug; report it |
 | execution time over the limit / out of fuel | `resource_limits` too small | the contract asks for 5e10 instructions and 60 s (costs.rs); measure larger sales |
 | nothing for about 2 minutes, then `null` | yield timeout (200 blocks) | OutLayer busy or workers down: check `https://testnet-api.outlayer.ai/health` and `/public/workers`, then retry |
+| nothing for about 2 minutes, then `null`, every time, and the request never shows in `https://testnet-api.outlayer.ai/public/jobs?user_account_id=<sender>` | the request has no `resource_limits.max_memory_mb`: OutLayer's testnet scheduler never picks such a request up (seen 12 Nov 2026; seven requests without it timed out, every one with 128 ran) | the contract sends `max_memory_mb` 128 (`SEALER_MAX_MEMORY_MB`, costs.rs) and so does `templates/request-pubkey.json`; a hand-made request must too |
 
 **`Err` (refused at the door).** The panic text is in the failed
 `request_execution` receipt:

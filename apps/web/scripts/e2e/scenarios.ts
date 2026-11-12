@@ -595,7 +595,7 @@ export async function runScenarios(w: World, report: Report): Promise<void> {
     teePubkey = answer.pubkey;
     t.ok(`the pinned job answered the key request (${served.run.instructions} instructions)`, served.run.success && answer.ok && answer.op === "pubkey" && answer.sale_id === TEE, served.run.output);
     t.eq("the request OutLayer stored is the contract's pubkey input", JSON.parse(served.input), { v: 1, op: "pubkey", contract: fg, sale_id: TEE });
-    t.eq("OutLayer was asked, by the contract and paid by the creator, to run the pinned module with a Text answer", requestFacts(served.request), [fg, creator.id, w.sealerHash, "Text", 50_000_000_000, 60]);
+    t.eq("OutLayer was asked, by the contract and paid by the creator, to run the pinned module with a Text answer", requestFacts(served.request), [fg, creator.id, w.sealerHash, "Text", 50_000_000_000, 128, 60]);
     t.ok("the sale key is 32 bytes of hex", /^[0-9a-f]{64}$/.test(teePubkey), teePubkey);
     t.eq("contract get_sale: the key the job derived, and the pinned code hash", [view.sealer_pubkey, view.sealer_code_hash, view.sealer_key_setup], [teePubkey, w.sealerHash, "done"]);
     t.eq("client createSale: the sale carries the key and the code hash", [sale.sealerPubkey, sale.sealerCodeHash], [teePubkey, w.sealerHash]);
@@ -678,7 +678,7 @@ export async function runScenarios(w: World, report: Report): Promise<void> {
 
     const served = await w.worker.last("clear", TEE);
     t.ok(`the pinned job cleared the sale (${served.run.instructions} instructions, delivered with ${served.delivery})`, served.run.success, served.run.stderr);
-    t.eq("OutLayer was asked, by the contract and paid by the closer, to run the pinned module with a Text answer", requestFacts(served.request), [fg, creator.id, w.sealerHash, "Text", 50_000_000_000, 60]);
+    t.eq("OutLayer was asked, by the contract and paid by the closer, to run the pinned module with a Text answer", requestFacts(served.request), [fg, creator.id, w.sealerHash, "Text", 50_000_000_000, 128, 60]);
     const input = JSON.parse(served.input) as { op: string; contract: string; sale_id: string; bid_set_hash: string; params: Record<string, unknown>; bids: [string, string, string][] };
     const bids = await x.bids(TEE);
     t.eq("the job's input: the sale's terms and frozen bid-set hash", [input.op, input.contract, input.sale_id, input.bid_set_hash, input.params], ["clear", fg, TEE, before.bid_set_hash, { sale_supply: teeParams.saleSupply.toString(), floor_price: "2000", max_price: "8000", min_raise: USDC.toString(), decimals: 18 }]);
@@ -944,8 +944,8 @@ export async function runScenarios(w: World, report: Report): Promise<void> {
 /** From OutLayer's own record of a request: who asked, who pays, which module (by sha256), the answer format and the limits. */
 function requestFacts(request: Record<string, unknown>): unknown[] {
   const source = request["execution_source"] as { WasmUrl?: { hash?: string } } | undefined;
-  const limits = request["resource_limits"] as { max_instructions?: number; max_execution_seconds?: number } | undefined;
-  return [request["sender_id"], request["payer_account_id"], source?.WasmUrl?.hash, request["response_format"], limits?.max_instructions, limits?.max_execution_seconds];
+  const limits = request["resource_limits"] as { max_instructions?: number; max_memory_mb?: number; max_execution_seconds?: number } | undefined;
+  return [request["sender_id"], request["payer_account_id"], source?.WasmUrl?.hash, request["response_format"], limits?.max_instructions, limits?.max_memory_mb, limits?.max_execution_seconds];
 }
 
 /**

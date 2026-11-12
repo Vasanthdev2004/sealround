@@ -237,7 +237,11 @@ function Invoke-Plan {
                 Write-Host (Format-CommandLine $step) -ForegroundColor DarkGray
                 $exe = Get-Command $step.Exe -ErrorAction SilentlyContinue
                 if (-not $exe) { throw "'$($step.Exe)' is not on PATH. See enclave\README.md, Prerequisites." }
-                & $step.Exe @($step.Arguments)
+                # Splat, so each argument arrives separately. Passing the array
+                # itself works for a real .exe but not for npm's near.ps1 shim,
+                # which then hands near CLI the whole command as one string.
+                $stepArgs = @($step.Arguments)
+                & $step.Exe @stepArgs
                 if ($LASTEXITCODE -ne 0) { throw "Step $n failed (exit code $LASTEXITCODE). Fix it and run the script again." }
                 if ($step.Expect) { Write-Host ("Expected: " + $step.Expect) -ForegroundColor DarkGray }
             }

@@ -27,7 +27,7 @@ use near_sdk::{AccountId, GasWeight, NearToken, Promise, env, serde_json};
 use crate::config::Config;
 use crate::costs::{
     MAX_CIPHERTEXT_BYTES, SEALER_MAX_EXECUTION_SECONDS, SEALER_MAX_INSTRUCTIONS,
-    outlayer_request_gas,
+    SEALER_MAX_MEMORY_MB, outlayer_request_gas,
 };
 use crate::sale::SaleTerms;
 
@@ -96,7 +96,7 @@ pub fn request_args(config: &Config, input: &str, payer: &AccountId) -> Vec<u8> 
     let mut out = String::with_capacity(input.len() + input.len() / 32 + source.len() + 512);
     let _ = write!(
         out,
-        r#"{{"source":{source},"resource_limits":{{"max_instructions":{SEALER_MAX_INSTRUCTIONS},"max_execution_seconds":{SEALER_MAX_EXECUTION_SECONDS}}},"input_data":"#
+        r#"{{"source":{source},"resource_limits":{{"max_instructions":{SEALER_MAX_INSTRUCTIONS},"max_memory_mb":{SEALER_MAX_MEMORY_MB},"max_execution_seconds":{SEALER_MAX_EXECUTION_SECONDS}}},"input_data":"#
     );
     push_json_string(&mut out, input);
     // Account ids contain only [a-z0-9._-]: nothing to escape.
@@ -377,7 +377,7 @@ mod tests {
             args,
             json!({
                 "source": {"WasmUrl": {"url": "https://example.com/s.wasm", "hash": "ab".repeat(32), "build_target": "wasm32-wasip1"}},
-                "resource_limits": {"max_instructions": 50_000_000_000u64, "max_execution_seconds": 60},
+                "resource_limits": {"max_instructions": 50_000_000_000u64, "max_memory_mb": 128, "max_execution_seconds": 60},
                 "input_data": input,
                 "secrets_ref": {"profile": "default", "account_id": "owner.testnet"},
                 "response_format": "Text",
