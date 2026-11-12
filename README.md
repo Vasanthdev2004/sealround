@@ -397,12 +397,13 @@ Nothing in this section exists in the code.
 - Per-bid inclusion proofs, so each bidder can verify their bid was counted.
 - An optional anonymized demand-curve reveal after settlement.
 - A TypeScript SDK package with one integration example.
+- Liquidity at the clearing price. Today `claim_proceeds` pays the creator the raise and the creator allocation, and any trading pool is the creator's job. Planned: the creator sets a share of the raise and of the allocation at creation (locked with the other rules); at settlement the contract seeds a Rhea pool with both at the clearing price, so trading opens at the price the sale discovered, and holds the LP tokens until a lock date. An optional vesting schedule for the rest of the creator allocation goes with it.
 
 **P2**
 
 - NFT drops, ticket sales and GPU-slot sales on the same engine.
 - AI agents bidding through the SDK or NEAR Agent Market.
-- Seeding a Rhea pool at the clearing price; a meme.cooking integration.
+- A meme.cooking integration.
 - Stronger sybil resistance for per-person caps.
 
 Also not done yet: a reproducible container build of the sale contract, and fetching a real OutLayer attestation in the browser.

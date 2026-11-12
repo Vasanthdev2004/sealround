@@ -1,5 +1,19 @@
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, Check, Cpu, Globe, Lock, Play, ShieldCheck } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  Cpu,
+  EyeOff,
+  Globe,
+  KeyRound,
+  Layers,
+  Lock,
+  Play,
+  Ruler,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import arena from "@/data/arena-results.json";
 import { ButtonLink } from "@/components/ui/button";
 import { Reveal } from "@/components/visual/reveal";
@@ -16,8 +30,10 @@ export function Landing() {
     <>
       <Hero />
       <BuiltOn />
+      <Compare />
       <Problem />
       <Steps />
+      <Unique />
       <Verify />
       <Launch />
       <FinalCta />
@@ -34,8 +50,10 @@ function Hero() {
           href={appHref("/how")}
           className="anim-blur group inline-flex h-8 items-center gap-2 rounded-full border border-line bg-elev/60 pr-3 pl-1.5 text-label text-muted backdrop-blur transition-colors hover:border-line-strong hover:text-fg"
         >
-          <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-[510] text-accent-bright">New</span>
-          Bids opened in a TEE on NEAR
+          <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-[510] text-accent-bright">
+            Fair mode
+          </span>
+          for token launches on NEAR
           <ArrowRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden />
         </Link>
         <h1 className="mt-6 text-display text-fg sm:text-[clamp(3rem,1.6rem+4.4vw,5.25rem)]">
@@ -47,8 +65,8 @@ function Hero() {
           </span>
         </h1>
         <p className="anim-blur mt-6 max-w-[48ch] text-lead text-muted" style={{ "--i": 3 } as React.CSSProperties}>
-          Token sales where bots and people pay the same price. Every bid stays encrypted until the sale closes, then
-          an enclave sets one clearing price for every winner.
+          Bots can&apos;t snipe what they can&apos;t see. Every bid stays encrypted until the sale closes, an enclave
+          opens them all at once, and every winner pays the same clearing price.
         </p>
         <div className="anim-blur mt-8 flex flex-wrap justify-center gap-3" style={{ "--i": 4 } as React.CSSProperties}>
           <ButtonLink href={appHref()} variant="primary" size="lg">
@@ -84,6 +102,110 @@ function BuiltOn() {
             <span className="ml-auto text-label text-subtle">{note}</span>
           </div>
         ))}
+      </Reveal>
+    </section>
+  );
+}
+
+type Mark = "yes" | "no";
+
+const LAUNCH_TYPES: { name: string; visible: Mark; speed: Mark; onePrice: Mark; how: string; us?: boolean }[] = [
+  { name: "Bonding curve", visible: "yes", speed: "yes", onePrice: "no", how: "Buy in the first block, sell to people later" },
+  { name: "First come, fixed price", visible: "yes", speed: "yes", onePrice: "yes", how: "The fastest bot takes the supply" },
+  { name: "Public auction", visible: "yes", speed: "no", onePrice: "yes", how: "Read every bid, then outbid at the last second" },
+  {
+    name: "Sealround",
+    visible: "no",
+    speed: "no",
+    onePrice: "yes",
+    how: "It can't: there is nothing to read and nothing to race",
+    us: true,
+  },
+];
+
+/** A yes or no cell. The answer that protects buyers is lit; the other is dim. */
+function YesNo({ v, good }: { v: Mark; good: Mark }) {
+  const ok = v === good;
+  const Icon = v === "yes" ? Check : X;
+  return (
+    <span className={ok ? "inline-flex items-center gap-1.5 text-fg" : "inline-flex items-center gap-1.5 text-subtle"}>
+      <Icon className={ok ? "size-4 text-accent-bright" : "size-4"} strokeWidth={2.25} aria-hidden />
+      {v === "yes" ? "Yes" : "No"}
+    </span>
+  );
+}
+
+function Compare() {
+  return (
+    <section className={`${wrap} mt-28 sm:mt-36`}>
+      <SectionTitle
+        title="Not another launchpad. The fair mode for one."
+        lead="Every common way to launch a token rewards whoever is fastest or whoever reads the other bids. Sealround removes both, and any launch can run on it."
+      />
+      {/* Phones: one block per launch type. The table below takes over from 768px. */}
+      <Reveal className="panel mt-10 divide-y divide-line overflow-hidden md:hidden">
+        {LAUNCH_TYPES.map((t) => (
+          <div key={t.name} className={t.us ? "bg-accent-soft px-5 py-4" : "px-5 py-4"}>
+            <h3 className={t.us ? "text-small font-[590] text-fg" : "text-small text-fg"}>{t.name}</h3>
+            <dl className="mt-3 grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 text-label">
+              <dt className="text-subtle">Bids visible before close</dt>
+              <dd>
+                <YesNo v={t.visible} good="no" />
+              </dd>
+              <dt className="text-subtle">Being first pays</dt>
+              <dd>
+                <YesNo v={t.speed} good="no" />
+              </dd>
+              <dt className="text-subtle">One price for everyone</dt>
+              <dd>
+                <YesNo v={t.onePrice} good="yes" />
+              </dd>
+            </dl>
+            <p className={t.us ? "mt-3 text-small font-[510] text-fg" : "mt-3 text-small text-muted"}>{t.how}</p>
+          </div>
+        ))}
+      </Reveal>
+      <Reveal className="panel mt-10 hidden overflow-x-auto md:block">
+        <table className="w-full min-w-[760px] text-left">
+          <thead>
+            <tr className="border-b border-line text-label text-subtle">
+              <th scope="col" className="px-5 py-3 font-normal">
+                Launch type
+              </th>
+              <th scope="col" className="px-5 py-3 font-normal">
+                Bids visible before close
+              </th>
+              <th scope="col" className="px-5 py-3 font-normal">
+                Being first pays
+              </th>
+              <th scope="col" className="px-5 py-3 font-normal">
+                One price for everyone
+              </th>
+              <th scope="col" className="px-5 py-3 font-normal">
+                How bots win
+              </th>
+            </tr>
+          </thead>
+          <tbody className="text-small">
+            {LAUNCH_TYPES.map((t) => (
+              <tr key={t.name} className={t.us ? "bg-accent-soft" : "border-b border-line"}>
+                <th scope="row" className={t.us ? "px-5 py-4 font-[590] text-fg" : "px-5 py-4 font-normal text-muted"}>
+                  {t.name}
+                </th>
+                <td className="px-5 py-4">
+                  <YesNo v={t.visible} good="no" />
+                </td>
+                <td className="px-5 py-4">
+                  <YesNo v={t.speed} good="no" />
+                </td>
+                <td className="px-5 py-4">
+                  <YesNo v={t.onePrice} good="yes" />
+                </td>
+                <td className={t.us ? "px-5 py-4 font-[510] text-fg" : "px-5 py-4 text-muted"}>{t.how}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </Reveal>
     </section>
   );
@@ -129,8 +251,8 @@ function Problem() {
   return (
     <section className={`${wrap} mt-28 sm:mt-36`}>
       <SectionTitle
-        title="Launches are a race. Bots win races."
-        lead={`We ran the same crowd of 200 people and 5 sniper bots through three kinds of launch, ${arena.runs} times. On a sealed, single-price sale, being first is worth nothing.`}
+        title="We aimed sniper bots at three kinds of launch."
+        lead={`The same crowd of 200 people and 5 sniper bots went through each one, ${arena.runs} times. On a sealed, single-price sale, being first is worth nothing.`}
       >
         <ButtonLink href={appHref("/arena")} variant="ghost">
           Open the Bot Arena <ArrowRight className="size-4" aria-hidden />
@@ -143,6 +265,13 @@ function Problem() {
         Averages over {arena.runs} seeded simulations, demand from {arena.demandMin}× to {arena.demandMax}× supply.
         Rerun them with <code className="font-mono text-[12px]">pnpm arena</code>.
       </p>
+      <Reveal className="mt-6 flex flex-col gap-1 border-l-2 border-accent pl-4 sm:flex-row sm:items-baseline sm:gap-3">
+        <span className="num shrink-0 text-num-sm text-fg">0.8 s</span>
+        <p className="max-w-[72ch] text-small text-muted">
+          We also ran a real sniper bot against a sale on a local NEAR chain. It bid 0.8 seconds after the window
+          opened and paid exactly the clearing price, the same as everyone else.
+        </p>
+      </Reveal>
     </section>
   );
 }
@@ -196,6 +325,47 @@ function Steps() {
   );
 }
 
+function Unique() {
+  const items = [
+    {
+      icon: EyeOff,
+      title: "Sealed even from us",
+      body: "Bids are encrypted in your browser to the enclave's key. Not the creator, not the relayer, not Sealround can read one before the sale closes.",
+    },
+    {
+      icon: Ruler,
+      title: "Nothing leaks from a sealed bid",
+      body: "Every sealed bid has the same length, so its size says nothing. A copied bid is refused or penalised, and an invalid bid loses 1%.",
+    },
+    {
+      icon: KeyRound,
+      title: "No admin key, refunds built in",
+      body: "The rules lock when the sale is created. If clearing fails or the enclave times out, every deposit can be taken back.",
+    },
+    {
+      icon: Layers,
+      title: "A stack only NEAR has",
+      body: "A contract that calls a TEE and pins its code hash, USDC from other chains through NEAR Intents, and bids with no gas through a relayer.",
+    },
+  ];
+  return (
+    <section className={`${wrap} mt-28 sm:mt-36`}>
+      <SectionTitle title="What a normal launchpad can't do" />
+      <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {items.map(({ icon: Icon, title, body }, i) => (
+          <Reveal key={title} index={i} className="panel spotlight p-6">
+            <span className="flex size-9 items-center justify-center rounded-[10px] bg-accent-soft text-accent-bright">
+              <Icon className="size-[18px]" strokeWidth={1.75} aria-hidden />
+            </span>
+            <h3 className="mt-5 text-h3 text-fg">{title}</h3>
+            <p className="mt-2 text-small text-muted">{body}</p>
+          </Reveal>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Verify() {
   return (
     <section className={`${wrap} mt-28 sm:mt-36`}>
@@ -230,11 +400,12 @@ function Verify() {
 
 function Launch() {
   const rules = [
+    ["Total supply", "1,000,000 NIGHT, minted once"],
     ["For sale", "600,000 NIGHT"],
     ["Floor price", "0.001 USDC"],
     ["Minimum raise", "50 USDC"],
     ["Bid window", "30 minutes"],
-    ["Deposit per account", "1 to 10 USDC"],
+    ["Unsold tokens", "Burned"],
     ["Admin key", "None"],
   ];
   return (
@@ -244,8 +415,8 @@ function Launch() {
           <Lock className="size-5 text-muted" strokeWidth={1.6} aria-hidden />
           <h2 className="mt-4 text-h2 text-fg">Launch a sale in two minutes</h2>
           <p className="mt-2 max-w-[46ch] text-small text-muted">
-            Pick a supply, a floor price, a minimum raise and a window. The token is minted once with a fixed supply,
-            and every rule locks at launch.
+            Run a sale on its own, or offer it as the fair mode on a launchpad. The token is minted once with a fixed
+            supply, unsold tokens are burned, and every rule locks at launch.
           </p>
           <dl className="mt-6 divide-y divide-line border-y border-line">
             {rules.map(([k, v]) => (
@@ -294,9 +465,9 @@ function FinalCta() {
       <Reveal className="cta-card relative overflow-hidden rounded-stage border border-line px-6 py-14 text-center sm:px-12 sm:py-20">
         <div className="hero-backdrop" aria-hidden />
         <div className="relative">
-          <h2 className="mx-auto max-w-[18ch] text-h1 text-fg">Run a sale bots can&apos;t snipe.</h2>
+          <h2 className="mx-auto max-w-[18ch] text-h1 text-fg">Bots can&apos;t snipe what they can&apos;t see.</h2>
           <p className="mx-auto mt-4 max-w-[46ch] text-lead text-muted">
-            Try it on the simulated chain in your browser. Nothing to install, no wallet needed.
+            Run a full sale on the simulated chain in your browser. Nothing to install, no wallet needed.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <ButtonLink href={appHref()} variant="primary" size="lg">
