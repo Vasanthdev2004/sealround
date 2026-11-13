@@ -41,21 +41,30 @@ export function AllocationSection({ draft, set, error, touch, derived, status }:
         />
       </div>
 
-      <AllocationBar shares={shares} amounts={{ sale: values.sale, creator: values.creator, lp: values.lp }} />
+      <AllocationBar
+        shares={shares}
+        amounts={{ sale: values.sale, creator: values.creator, lp: values.lp }}
+        lpLabel={derived.pool ? "Launch pool" : "LP reserve"}
+      />
 
       <SectionNotices notices={notices} section="allocation" />
     </FormSection>
   );
 }
 
-/** The supply as one stacked bar (for sale, creator, LP reserve) over its three exact amounts. */
+/**
+ * The supply as one stacked bar (for sale, creator, the rest) over its three
+ * exact amounts. The rest is the launch pool's reserve when the sale seeds one.
+ */
 export function AllocationBar({
   shares,
   amounts,
+  lpLabel = "LP reserve",
   className,
 }: {
   shares: Shares | null;
   amounts: { sale?: bigint; creator?: bigint; lp?: bigint };
+  lpLabel?: string;
   className?: string;
 }) {
   const creatorWarn = !!shares && shares.creator > CREATOR_WARN_BPS;
@@ -68,7 +77,7 @@ export function AllocationBar({
       amount: amounts.creator,
       color: creatorWarn ? "bg-warn" : "bg-viz-people",
     },
-    { key: "lp", label: "LP reserve", rest: true, bps: shares?.lp ?? 0n, amount: amounts.lp, color: "bg-fg/25" },
+    { key: "lp", label: lpLabel, rest: true, bps: shares?.lp ?? 0n, amount: amounts.lp, color: "bg-fg/25" },
   ];
   return (
     <div className={cn("flex flex-col gap-3", className)}>
@@ -77,7 +86,7 @@ export function AllocationBar({
         role="img"
         aria-label={
           shares
-            ? `For sale ${pctStr(shares.sale)}, creator ${pctStr(shares.creator)}, LP reserve ${pctStr(shares.lp)}`
+            ? `For sale ${pctStr(shares.sale)}, creator ${pctStr(shares.creator)}, ${lpLabel.toLowerCase()} ${pctStr(shares.lp)}`
             : "Allocation not valid yet"
         }
       >

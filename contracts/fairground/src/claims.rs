@@ -2,6 +2,7 @@
 //!
 //! Each payout is marked done before its promise and marked open again in the
 //! callback if the promise failed, so it can be claimed again and never twice.
+//! While a sale's launch pool is being seeded, no sale token is paid out.
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::json;
@@ -12,6 +13,7 @@ use crate::costs::{
     TOKEN_STORAGE_DEPOSIT, per_bid_reserve,
 };
 use crate::events::emit;
+use crate::liquidity::Liquidity;
 use crate::settle::invalid_bid_penalty;
 use crate::{Error, Fairground, FairgroundExt, Phase, Sale, StepState, ext_ft, promise_succeeded};
 
@@ -44,7 +46,8 @@ pub fn bid_payout(
 /// NEAR given back to the creator: unused bid slots, token registrations no
 /// winner needs, the creator's own registrations it does not need (on the
 /// sale token without an allocation, on the quote token without a raise), and
-/// the token deploy balance if the token never deployed.
+/// the token deploy balance if the token never deployed, and the launch
+/// liquidity reserve no step spent (none of it while the pool is being seeded).
 pub fn reserve_refund(sale: &Sale) -> u128 {
     let unused_slots = sale.terms.max_bids.saturating_sub(sale.bid_count);
     let winners = match sale.phase {
@@ -53,7 +56,7 @@ pub fn reserve_refund(sale: &Sale) -> u128 {
     };
     let unneeded_registrations = sale.bid_count.saturating_sub(winners);
     let token_ready = sale.token_state == StepState::Done;
-    let token_registration = if token_ready && sale.terms.creator_allocation() > 0 {
+    let token_registration = if token_ready && sale.creator_allocation() > 0 {
         0
     } else {
         TOKEN_STORAGE_DEPOSIT
@@ -68,11 +71,13 @@ pub fn reserve_refund(sale: &Sale) -> u128 {
     } else {
         0
     };
+    let liquidity = sale.liquidity.as_ref().map_or(0, Liquidity::near_refund);
     u128::from(unused_slots) * per_bid_reserve(sale.reveal_mode)
         + u128::from(unneeded_registrations) * TOKEN_STORAGE_DEPOSIT
         + token_registration
         + quote_registration
         + deploy_balance
+        + liquidity
 }
 
 #[near]
@@ -80,7 +85,9 @@ impl Fairground {
     /// Pays a bidder what a final sale owes it: tokens (registering it on the
     /// token first, paid from the creator's reserve) and the unspent USDC.
     /// Anyone may push a claim; funds only ever go to the bidder (default: the
-    /// caller). A second claim is a logged no-op returning `false`.
+    /// caller). A second claim is a logged no-op returning `false`. While the
+    /// launch pool is being seeded only the USDC is paid (an error if only
+    /// tokens are left); the tokens follow once it is seeded or abandoned.
     #[handle_result]
     pub fn claim(
         &mut self,
@@ -111,11 +118,21 @@ impl Fairground {
             .and_then(|fills| fills.get(index as usize).copied());
         let record = self.bid_record(num, index).ok_or(Error::NoBid)?;
         let (tokens, refund) = bid_payout(sale, deposit, self.is_penalized(num, index), fill);
-        let tokens = if record.tokens_claimed { 0 } else { tokens };
+        let owed_tokens = if record.tokens_claimed { 0 } else { tokens };
         let refund = if record.refund_claimed { 0 } else { refund };
+        let locked = owed_tokens > 0 && !sale.tokens_unlocked();
+        let tokens = if locked { 0 } else { owed_tokens };
         if tokens == 0 && refund == 0 {
+            if locked {
+                return Err(Error::LiquidityPending);
+            }
             env::log_str(&format!("nothing left to claim for {bidder}"));
             return Ok(PromiseOrValue::Value(false));
+        }
+        if locked {
+            env::log_str(
+                "sale tokens stay locked until the launch pool is seeded or abandoned; claim them then",
+            );
         }
         let memo = Some(format!("fairground {sale_id}"));
         let mut parts = Vec::with_capacity(2);
@@ -186,10 +203,14 @@ impl Fairground {
     }
 
     /// Pays the creator of a final sale (anyone may push it): the raise in USDC
-    /// (settled), the creator allocation in tokens, the unused NEAR reserve;
-    /// and burns the unsold sale tokens. The creator is registered on both
-    /// tokens first, paid from the reserve. Each part happens once; a failed
-    /// part can be claimed again. Returns `false` when nothing is left.
+    /// (settled; less the launch pool's share), the creator allocation in
+    /// tokens, the unused NEAR reserve; and burns the unsold sale tokens (with
+    /// the pool reserve the pool does not take). The creator is registered on
+    /// both tokens first, paid from the reserve. Each part pays what is owed
+    /// minus what was paid, so a failed part can be claimed again, and an
+    /// abandoned pool's USDC and tokens follow in a later call. While the
+    /// launch pool is being seeded the allocation waits. Returns `false` when
+    /// nothing is left.
     #[handle_result]
     pub fn claim_proceeds(&mut self, sale_id: String) -> Result<PromiseOrValue<bool>, Error> {
         let sale = self.sale(&sale_id)?;
@@ -199,43 +220,51 @@ impl Fairground {
                 status: sale.status(env::block_timestamp()).as_str(),
             });
         }
-        let done = sale.proceeds;
+        let paid = sale.proceeds;
         let token_ready = sale.token_state == StepState::Done;
         // A deploy still in flight decides whether its NEAR is refundable.
         let token_settled = sale.token_state != StepState::Pending;
-        let raise = if sale.phase == Phase::Settled && !done.raise_paid {
-            sale.result.total_raised
+        let raise = sale.creator_raise().saturating_sub(paid.raise_paid);
+        let allocation_owed = if token_ready {
+            sale.creator_allocation()
+                .saturating_sub(paid.allocation_paid)
         } else {
             0
         };
-        let allocation = if token_ready && !done.allocation_paid {
-            sale.terms.creator_allocation()
+        let locked = allocation_owed > 0 && !sale.tokens_unlocked();
+        let allocation = if locked { 0 } else { allocation_owed };
+        let burn = if token_ready {
+            sale.unsold().saturating_sub(paid.burned)
         } else {
             0
         };
-        let burn = if token_ready && !done.unsold_burned {
-            sale.unsold()
-        } else {
-            0
-        };
-        let reserve = if token_settled && !done.reserve_returned {
-            reserve_refund(sale)
+        let reserve = if token_settled {
+            reserve_refund(sale).saturating_sub(paid.reserve_returned)
         } else {
             0
         };
         if raise == 0 && allocation == 0 && burn == 0 && reserve == 0 {
+            if locked {
+                return Err(Error::LiquidityPending);
+            }
             env::log_str("nothing left to claim for the creator");
             return Ok(PromiseOrValue::Value(false));
+        }
+        if locked {
+            env::log_str(
+                "the creator allocation stays locked until the launch pool is seeded or abandoned",
+            );
         }
         let memo = Some(format!("fairground {sale_id}"));
         let mut parts = Vec::with_capacity(4);
         if raise > 0 {
-            parts.push(register_and_transfer(
-                &sale.quote_token,
-                &sale.creator,
-                raise,
-                memo.clone(),
-            ));
+            // Only the first raise payment registers the creator; a later one
+            // (an abandoned pool's USDC) finds it registered.
+            parts.push(if paid.raise_paid == 0 {
+                register_and_transfer(&sale.quote_token, &sale.creator, raise, memo.clone())
+            } else {
+                ft_transfer(&sale.quote_token, &sale.creator, raise, memo.clone())
+            });
         }
         if allocation > 0 {
             parts.push(register_and_transfer(
@@ -262,10 +291,10 @@ impl Fairground {
             return Ok(PromiseOrValue::Value(false));
         };
         let proceeds = &mut self.sale_mut(&sale_id)?.proceeds;
-        proceeds.raise_paid |= raise > 0;
-        proceeds.allocation_paid |= allocation > 0;
-        proceeds.unsold_burned |= burn > 0;
-        proceeds.reserve_returned |= reserve > 0;
+        proceeds.raise_paid += raise;
+        proceeds.allocation_paid += allocation;
+        proceeds.burned += burn;
+        proceeds.reserve_returned += reserve;
         let promise = payout.then(
             Self::ext(env::current_account_id())
                 .with_static_gas(ON_PROCEEDS_GAS)
@@ -302,10 +331,15 @@ impl Fairground {
             return false;
         };
         let proceeds = &mut sale.proceeds;
-        proceeds.raise_paid &= raise_ok;
-        proceeds.allocation_paid &= allocation_ok;
-        proceeds.unsold_burned &= burn_ok;
-        proceeds.reserve_returned &= reserve_ok;
+        let unpaid = |amount: U128, ok: bool| if ok { 0 } else { amount.0 };
+        proceeds.raise_paid = proceeds.raise_paid.saturating_sub(unpaid(raise, raise_ok));
+        proceeds.allocation_paid = proceeds
+            .allocation_paid
+            .saturating_sub(unpaid(allocation, allocation_ok));
+        proceeds.burned = proceeds.burned.saturating_sub(unpaid(burn, burn_ok));
+        proceeds.reserve_returned = proceeds
+            .reserve_returned
+            .saturating_sub(unpaid(reserve, reserve_ok));
         let failed: Vec<&str> = [
             ("raise", raise_ok),
             ("allocation", allocation_ok),
@@ -363,6 +397,6 @@ fn register_and_transfer(
 }
 
 /// Joins promises so one callback sees all their results, in order.
-fn join(parts: Vec<Promise>) -> Option<Promise> {
+pub(crate) fn join(parts: Vec<Promise>) -> Option<Promise> {
     parts.into_iter().reduce(Promise::and)
 }

@@ -9,9 +9,10 @@
  * base units (6 dp), prices per WHOLE token.
  */
 
-import { parseUnits } from "@fairground/clearing";
+import { parseUnits, poolPlan, type PoolPlan } from "@fairground/clearing";
 import { MIN_DEPOSIT_FLOOR, invalidBidPenalty, tokenAccountOf } from "@/lib/client/rules";
-import { priceStr, usdcStr } from "@/lib/format";
+import { priceStr, tokenFull, usdcStr } from "@/lib/format";
+import { MAX_RAISE_SHARE_BPS, reserveForSellOut } from "@/lib/liquidity";
 import type { RevealMode, SaleConfig, SaleMeta } from "@/lib/types";
 
 export const DECIMALS = 18;
@@ -56,6 +57,14 @@ export const DURATION_PRESETS: { value: DurationPreset; label: string; testnet?:
 
 export type StartMode = "now" | "scheduled";
 
+/** Launch pool swap fee, basis points. */
+export type PoolFeePreset = "5" | "30" | "100";
+export const POOL_FEE_PRESETS: { value: PoolFeePreset; label: string }[] = [
+  { value: "5", label: "0.05 %" },
+  { value: "30", label: "0.3 %" },
+  { value: "100", label: "1 %" },
+];
+
 /** Raw form state. Strings exactly as typed. */
 export type Draft = {
   name: string;
@@ -79,6 +88,11 @@ export type Draft = {
   revealMode: RevealMode;
   /** Minutes. Used only when `revealMode` is commit-reveal. */
   revealWindow: RevealWindowPreset;
+  /** Seed a launch pool at settlement. The rest of the supply (Allocation) is its reserve. */
+  poolOn: boolean;
+  /** Share of the raise for the pool, percent as typed: "20". */
+  poolShare: string;
+  poolFee: PoolFeePreset;
 };
 
 /** The spec demo values. Name and symbol stay empty: FAIRT is already taken. */
@@ -102,6 +116,9 @@ export const DEFAULT_DRAFT: Draft = {
   maxDeposit: "10",
   revealMode: "tee",
   revealWindow: "10",
+  poolOn: false,
+  poolShare: "20",
+  poolFee: "30",
 };
 
 export type FieldKey =
@@ -117,9 +134,11 @@ export type FieldKey =
   | "startAt"
   | "customMinutes"
   | "minDeposit"
-  | "maxDeposit";
+  | "maxDeposit"
+  | "poolShare"
+  | "poolTokens";
 
-export type SectionId = "token" | "allocation" | "price" | "window" | "limits" | "mode";
+export type SectionId = "token" | "allocation" | "price" | "window" | "limits" | "mode" | "pool";
 
 /** Form order, used to scroll to the first error. */
 export const FIELD_ORDER: FieldKey[] = [
@@ -136,6 +155,8 @@ export const FIELD_ORDER: FieldKey[] = [
   "customMinutes",
   "minDeposit",
   "maxDeposit",
+  "poolShare",
+  "poolTokens",
 ];
 
 export const SECTION_OF: Record<FieldKey, SectionId> = {
@@ -152,6 +173,9 @@ export const SECTION_OF: Record<FieldKey, SectionId> = {
   customMinutes: "window",
   minDeposit: "limits",
   maxDeposit: "limits",
+  poolShare: "pool",
+  // The reserve is the rest of the supply: shown and fixed in the pool section, set through Allocation.
+  poolTokens: "pool",
 };
 
 export const sectionDomId = (s: SectionId) => `create-${s}`;
@@ -171,10 +195,25 @@ export type Ready = {
   /** null = opens at creation. */
   startAt: number | null;
   durationMs: number;
+  /** The launch pool's terms; null = no pool. `tokens` is `lp`. */
+  pool: { shareBps: number; feeBps: number; tokens: bigint } | null;
+};
+
+/** The launch pool as the form stands. */
+export type PoolInsight = {
+  /** Share of the raise, basis points; null until it parses. */
+  shareBps: number | null;
+  feeBps: number;
+  /** Tokens reserved: the rest of the supply. */
+  reserve: bigint | null;
+  /** The reserve a sell-out needs: the share of the sale supply. */
+  sellOut: bigint | null;
+  /** The pool at a sell-out at the floor, with this reserve. */
+  atFloor: PoolPlan | null;
 };
 
 /** Whatever parsed so far. `ceiling: undefined` means invalid, `null` means off. */
-export type Values = Partial<Ready>;
+export type Values = Partial<Omit<Ready, "pool">>;
 
 /** `live` errors show while typing; the rest wait for blur or a review attempt. */
 export type FieldError = { msg: string; live?: boolean };
@@ -223,6 +262,10 @@ export type Derived = {
   insights: Insights;
   shares: Shares | null;
   ready: Ready | null;
+  /** The contract takes launch liquidity: the pool section shows. */
+  poolAvailable: boolean;
+  /** The launch pool, when available and switched on. */
+  pool: PoolInsight | null;
 };
 
 // ---------- parsing ----------
@@ -259,11 +302,25 @@ const minB = (a: bigint, b: bigint) => (a < b ? a : b);
 
 // ---------- derive ----------
 
+/** "20" or "12.5" percent as basis points, 1 to 5000; null when it is not that. */
+function shareBps(raw: string): number | null {
+  const s = raw.trim().replace(/\s*%$/, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  const bps = Math.round(Number(s) * 100);
+  return bps >= 1 && bps <= MAX_RAISE_SHARE_BPS ? bps : null;
+}
+
 /**
  * Parse and check the whole draft. `taken` holds symbols that already have a
  * token account. `now` is null until the first edit, so time checks wait.
+ * `opts.pool`: the contract takes launch liquidity, so `poolOn` counts.
  */
-export function derive(d: Draft, taken: ReadonlySet<string>, now: number | null): Derived {
+export function derive(
+  d: Draft,
+  taken: ReadonlySet<string>,
+  now: number | null,
+  opts: { pool?: boolean } = {},
+): Derived {
   const errors: Derived["errors"] = {};
   const v: Values = {};
   const notices: Notice[] = [];
@@ -443,6 +500,42 @@ export function derive(d: Draft, taken: ReadonlySet<string>, now: number | null)
     });
   }
 
+  // 7. Launch pool: the rest of the supply is its reserve.
+  const poolAvailable = !!opts.pool;
+  let pool: PoolInsight | null = null;
+  if (poolAvailable && d.poolOn) {
+    const bps = shareBps(d.poolShare);
+    if (bps === null) err("poolShare", "Between 0.01 % and 50 % of the raise.", true);
+    const reserve = v.lp ?? null;
+    if (reserve === 0n) {
+      err("poolTokens", "Nothing is left for the pool. Lower the creator allocation or the supply for sale.", true);
+    }
+    const sellOut =
+      bps !== null && v.sale !== undefined && v.floor ? reserveForSellOut(v.sale, v.floor, DECIMALS, bps) : null;
+    const atFloor =
+      bps !== null && reserve !== null && v.sale !== undefined && v.floor
+        ? poolPlan(ceilDiv(v.sale * v.floor, ONE), v.floor, DECIMALS, bps, reserve)
+        : null;
+    pool = { shareBps: bps, feeBps: Number(d.poolFee), reserve, sellOut, atFloor };
+    if (reserve !== null && reserve > 0n && sellOut !== null && sellOut > 0n) {
+      if (reserve < sellOut) {
+        notices.push({
+          id: "pool-short",
+          tone: "neutral",
+          section: "pool",
+          text: `A sell-out fills a reserve of ${tokenFull(sellOut)} tokens. With less, the pool takes fewer tokens and less USDC, still at the clearing price.`,
+        });
+      } else if (reserve > sellOut) {
+        notices.push({
+          id: "pool-burn",
+          tone: "neutral",
+          section: "pool",
+          text: `The pool takes at most ${tokenFull(sellOut)} tokens. The other ${tokenFull(reserve - sellOut)} are burned at payout.`,
+        });
+      }
+    }
+  }
+
   const slots = BigInt(BID_SLOTS);
   const insights: Insights = {
     raiseAtFloor,
@@ -484,18 +577,20 @@ export function derive(d: Draft, taken: ReadonlySet<string>, now: number | null)
           maxDeposit: v.maxDeposit!,
           startAt: v.startAt!,
           durationMs: v.durationMs!,
+          pool: pool && pool.shareBps !== null ? { shareBps: pool.shareBps, feeBps: pool.feeBps, tokens: v.lp! } : null,
         }
       : null;
 
-  return { values: v, errors, notices, insights, shares, ready };
+  return { values: v, errors, notices, insights, shares, ready, poolAvailable, pool };
 }
 
 /**
  * The exact config sent to create_sale. `now` is used when the sale opens at
  * creation. `quoteToken` is the client's USDC contract (`getClient().usdcContract`):
- * the only deposit token the sale takes.
+ * the only deposit token the sale takes. `dex` is the client's launch pool
+ * exchange (`getLiquidityDex()`); without it the sale has no pool.
  */
-export function buildConfig(d: Draft, r: Ready, now: number, quoteToken: string): SaleConfig {
+export function buildConfig(d: Draft, r: Ready, now: number, quoteToken: string, dex: string | null = null): SaleConfig {
   const bidStart = r.startAt ?? now;
   return {
     tokenName: d.name.trim(),
@@ -519,6 +614,9 @@ export function buildConfig(d: Draft, r: Ready, now: number, quoteToken: string)
     maxBids: BID_SLOTS,
     // The contract refuses a reveal window on a TEE sale.
     ...(d.revealMode === "commit_reveal" ? { revealWindowMs: Number(d.revealWindow) * MINUTE } : {}),
+    ...(r.pool && dex
+      ? { liquidity: { dex, raiseShareBps: r.pool.shareBps, poolTokens: r.pool.tokens, feeBps: r.pool.feeBps } }
+      : {}),
   };
 }
 

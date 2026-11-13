@@ -17,6 +17,7 @@ mod config;
 mod costs;
 mod error;
 mod events;
+mod liquidity;
 mod outlayer;
 mod sale;
 mod settle;
@@ -37,10 +38,14 @@ pub use bids::BidRecord;
 pub use config::{Config, SealerSource, SecretsRef};
 pub use costs::MAX_BIDS_PER_SALE;
 pub use error::Error;
+pub use liquidity::{LiquidityParams, LiquidityStage, LiquidityStep};
 pub use sale::{
     CreateSaleParams, FailReason, Phase, RevealMode, Sale, SaleMeta, Status, StepState, UnsoldRule,
 };
-pub use views::{BidView, BidsSummary, FillView, ProceedsView, ResultView, SaleView};
+pub use views::{
+    BidView, BidsSummary, FillView, LiquidityTermsView, LiquidityView, ProceedsView, ResultView,
+    SaleView,
+};
 
 /// Storage prefixes. Per-sale data is keyed by the sale's number (its position
 /// in `sale_ids`), which keeps keys short.
@@ -72,6 +77,13 @@ type BidderKey = (u32, AccountId);
 )]
 trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
+    fn ft_transfer_call(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+        msg: String,
+    ) -> U128;
     fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
     fn burn(&mut self, amount: U128);
 }
@@ -84,6 +96,15 @@ fn promise_succeeded(index: u64) -> bool {
             env::promise_result_checked(index, 4096),
             Ok(_) | Err(PromiseError::TooLong(_))
         )
+}
+
+/// The value of promise result `index` if it succeeded and is at most
+/// `max_len` bytes. Never panics.
+fn promise_value(index: u64, max_len: usize) -> Option<Vec<u8>> {
+    if index >= env::promise_results_count() {
+        return None;
+    }
+    env::promise_result_checked(index, max_len).ok()
 }
 
 /// Fails early, with the amount to attach, when the call's remaining gas
@@ -142,6 +163,7 @@ impl Fairground {
         sealer_code_hash: String,
         sealer_secrets: Option<SecretsRef>,
         allowed_quote_tokens: Vec<AccountId>,
+        dex: Option<AccountId>,
     ) -> Result<Self, Error> {
         let config = Config {
             outlayer,
@@ -149,6 +171,7 @@ impl Fairground {
             sealer_code_hash,
             sealer_secrets,
             allowed_quote_tokens,
+            dex,
         };
         config.validate()?;
         Ok(Self {

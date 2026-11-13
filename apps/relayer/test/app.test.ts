@@ -5,7 +5,7 @@ import { createApp } from "../src/app.ts";
 import { TransactionRefused, type Chain, type Submission, type TxOutcome } from "../src/chain.ts";
 import { DailyNearBudget, ipHasher, memoryLimiters } from "../src/limits.ts";
 import type { LogLine } from "../src/log.ts";
-import { ALICE, CIPHERTEXT, FAIRGROUND, HEAD, POLICY, USDC, bid, bidArgs, call, fakeViews, sale, signDelegate, type DelegateSpec } from "./fixtures.ts";
+import { ALICE, CIPHERTEXT, FAIRGROUND, HEAD, POLICY, USDC, bid, bidArgs, call, fakeViews, liquidityView, proceedsResult, sale, signDelegate, type DelegateSpec } from "./fixtures.ts";
 
 const IP = "203.0.113.9";
 /** What one storage registration reserves with the fake chain: (30 + 5 TGas) x 1e8 + the 0.00125 NEAR minimum. */
@@ -168,6 +168,73 @@ describe("POST /relay", () => {
     await done;
     await new Promise((resolve) => setImmediate(resolve));
     expect((await post("/relay", await aliceDelegate({ nonce: 3n }))).status).toBe(202);
+  });
+
+  it("refuses a no-op creator claim without spending any budget or sender quota", async () => {
+    const results = { fairt: proceedsResult() };
+    const { chain, calls } = fakeChain({}, fakeViews({ sales: { fairt: sale({ status: "settled" }) }, results }));
+    const { post, budget } = makeApp({ chain, senderLimit: 1 });
+    const proceeds = () => aliceDelegate({ receiver: FAIRGROUND, actions: [call("claim_proceeds")] });
+    const refused = await post("/relay", await proceeds());
+    expect(refused).toMatchObject({ status: 400, body: { error: "already_claimed" } });
+    expect(calls).not.toContain("relay");
+    expect(budget.used).toBe(0n);
+    results.fairt = proceedsResult({ total_raised: "100" });
+    expect((await post("/relay", await proceeds())).status).toBe(200);
+  });
+
+  it("allows one in-flight creator payout per sale, including across senders", async () => {
+    let land = (_: TxOutcome | null) => {};
+    const done = new Promise<TxOutcome | null>((resolve) => (land = resolve));
+    const results = { fairt: proceedsResult({ total_raised: "100" }) };
+    let submissions = 0;
+    const { chain } = fakeChain({
+      accessKey: async () => ({ nonce: 0n, permission: "FullAccess", block_height: Number(HEAD), block_hash: "" }),
+      relay: async () => {
+        submissions++;
+        return { txHash: "slow", outcome: null, done };
+      },
+    }, fakeViews({ sales: { fairt: sale({ status: "settled" }) }, results }));
+    const { post } = makeApp({ chain });
+    const pay = (sender: string) => aliceDelegate({ sender, receiver: FAIRGROUND, actions: [call("claim_proceeds")] });
+    expect((await post("/relay", await pay(ALICE))).status).toBe(202);
+    expect(await post("/relay", await pay("bob.test.near"))).toMatchObject({ status: 400, body: { error: "wrong_phase" } });
+    expect(submissions).toBe(1);
+
+    land(outcome);
+    await new Promise((resolve) => setImmediate(resolve));
+    results.fairt = proceedsResult({ total_raised: "100", proceeds: { ...results.fairt.proceeds, raise_paid: true } });
+    expect(await post("/relay", await pay("bob.test.near"))).toMatchObject({ status: 400, body: { error: "already_claimed" } });
+    expect(submissions).toBe(1);
+  });
+
+  it("holds a pool step across senders, then sponsors the next step once the first lands", async () => {
+    let land = (_: TxOutcome | null) => {};
+    const done = new Promise<TxOutcome | null>((resolve) => (land = resolve));
+    const results = { fairt: proceedsResult({ total_raised: "100", liquidity: liquidityView() }) };
+    let submissions = 0;
+    const { chain } = fakeChain({
+      accessKey: async () => ({ nonce: 0n, permission: "FullAccess", block_height: Number(HEAD), block_hash: "" }),
+      relay: async () => {
+        submissions++;
+        return submissions === 1 ? { txHash: "slow", outcome: null, done } : finalSubmission;
+      },
+    }, fakeViews({ sales: { fairt: sale({ status: "settled", liquidity: {} }) }, results }));
+    const { post } = makeApp({ chain });
+    const relay = async (sender: string, method = "seed_liquidity") => post("/relay", await aliceDelegate({
+      sender, receiver: FAIRGROUND, actions: [call(method, 0n, teraToGas(150))],
+    }));
+
+    expect((await relay(ALICE)).status).toBe(202);
+    expect(await relay("bob.test.near")).toMatchObject({ status: 400, body: { error: "wrong_phase" } });
+    expect(await relay("bob.test.near", "claim_proceeds")).toMatchObject({ status: 400, body: { error: "wrong_phase" } });
+    expect(submissions).toBe(1);
+
+    results.fairt = proceedsResult({ liquidity: liquidityView({ next_step: "create_pool" }) });
+    land(outcome);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect((await relay("bob.test.near")).status).toBe(200);
+    expect(submissions).toBe(2);
   });
 
   it("stops at the daily budget with 503, before sending", async () => {
@@ -409,7 +476,9 @@ describe("GET /policy, GET /health, CORS", () => {
     const res = await makeApp().app.request("/policy");
     const policy = (await res.json()) as PolicyResponse;
     expect(policy).toMatchObject({ fairground_contract: FAIRGROUND, usdc_contracts: [USDC, "usdc2.test.near"], bid_deposit: "1", max_actions: 2 });
-    expect(policy.fairground_methods).toEqual(["claim", "claim_proceeds", "clear_onchain", "reveal_bid", "trigger_refund_mode"]);
+    expect(policy.fairground_methods).toEqual([
+      "claim", "claim_proceeds", "clear_onchain", "reveal_bid", "trigger_refund_mode", "seed_liquidity", "abandon_liquidity",
+    ]);
   });
 
   it("reports a balance bucket only", async () => {

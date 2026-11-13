@@ -19,7 +19,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { costOf, formatUnits, parseUnits } from "@fairground/clearing";
+import { costOf, formatUnits, parseUnits, U128_MAX } from "@fairground/clearing";
 import {
   bidOutcome,
   createRelayerClient,
@@ -76,6 +76,7 @@ export type BotErrorCode =
   | "no_bid"
   | "no_receipt"
   | "invalid_terms"
+  | "over_budget"
   | "insufficient_usdc"
   | "victim_has_no_bid"
   | "timeout"
@@ -230,7 +231,12 @@ function parseKey(opts: BotOptions): KeyPair | null {
   }
 }
 
-export async function connect(opts: BotOptions, need: { account: boolean; key: boolean }): Promise<Session> {
+export async function connect(opts: BotOptions, need: {
+  account: boolean;
+  key: boolean;
+  quoteMetadata?: boolean;
+  sponsoredOnly?: boolean;
+}): Promise<Session> {
   const say = opts.say;
   // Local checks first: nothing goes over the network before they pass.
   if (opts.network === "mainnet" && !opts.allowMainnet) {
@@ -275,7 +281,13 @@ export async function connect(opts: BotOptions, need: { account: boolean; key: b
       `There is no sale "${opts.saleId}" on ${opts.contractId}.${ids.length > 0 ? ` Sales there: ${ids.slice(-12).join(", ")}.` : " It has no sales yet."}`,
     );
   }
-  const meta = await rpc.view<{ decimals: number; symbol: string }>(sale.quote_token, "ft_metadata").catch(() => ({ decimals: 6, symbol: "USDC" }));
+  const meta = await rpc.view<{ decimals: number; symbol: string }>(sale.quote_token, "ft_metadata").catch(() => {
+    if (need.quoteMetadata) throw usage("Cannot verify the quote token's units. Check the sale before bidding.");
+    return { decimals: 6, symbol: "USDC" };
+  });
+  if (need.quoteMetadata && (!Number.isInteger(meta.decimals) || meta.decimals < 0 || meta.decimals > 38)) {
+    throw usage("The quote token has unsupported decimals.");
+  }
   const quote = { id: sale.quote_token, decimals: meta.decimals, symbol: meta.symbol };
 
   // 4. The bot account and its key: a full-access key of that account.
@@ -321,16 +333,20 @@ export async function connect(opts: BotOptions, need: { account: boolean; key: b
   if (config.mode !== "near") throw usage("the configuration does not select NEAR mode");
   const signers = staticSigners(signer && opts.accountId ? { [opts.accountId]: signer } : {}, opts.accountId ?? undefined);
   const client = new NearClient(config.near, { signers, cacheMs: 0, waitMs: 60_000, pollMs: 500 });
-  client.subscribeNotices((n) => say(`note: ${n.message}`));
+  client.subscribeNotices((n) => {
+    if (need.sponsoredOnly && n.kind === "paid_fallback") return;
+    say(`note: ${n.message}`);
+  });
 
   let relayerAccount: string | null = null;
   if (opts.relayerUrl && need.key) {
     const policy = await client.getRelayerPolicy();
+    const fallback = need.sponsoredOnly ? "the bid requires sponsorship" : "the bot will pay for its own transactions";
     if (!policy) {
-      say(`warning: the relayer at ${opts.relayerUrl} did not answer GET /policy; the bot will pay for its own transactions.`);
+      say(`warning: the relayer at ${opts.relayerUrl} did not answer GET /policy; ${fallback}.`);
     } else {
       relayerAccount = policy.relayerAccountId;
-      if (!policy.usdcContracts.includes(sale.quote_token)) say(`warning: the relayer does not relay ${sale.quote_token}; the bid will be a transaction the bot pays for.`);
+      if (!policy.usdcContracts.includes(sale.quote_token)) say(`warning: the relayer does not relay ${sale.quote_token}; ${fallback}.`);
     }
   }
   return { opts, chainId, rpc, sale, quote, client, signer, relayerAccount, repoSealerHash: repoSealerHash() };
@@ -343,6 +359,58 @@ const bidOf = (s: Session, bidder: string) => s.rpc.view<BidView | null>(s.opts.
 const ftBalance = async (s: Session, token: string, accountId: string) =>
   BigInt((await s.rpc.view<string | null>(token, "ft_balance_of", { account_id: accountId }).catch(() => "0")) ?? "0");
 
+/** Place one bid in an open enclave sale using the web client's sealing and signing path. */
+export async function budgetedBid(s: Session, budgetInput: string) {
+  const { opts, sale, quote, client } = s;
+  const bidder = opts.accountId!;
+  const deposit = amount("--deposit", opts.deposit, quote.decimals);
+  const budget = amount("--budget", budgetInput, quote.decimals);
+  if (deposit > budget) {
+    throw new BotError("over_budget", "The public deposit exceeds --budget. No bid was sent.");
+  }
+  const maxPrice = amount("--max-price", opts.maxPrice, quote.decimals, { privateLimit: true });
+  const maxSpend = opts.maxSpend === null ? deposit : amount("--max-spend", opts.maxSpend, quote.decimals, { privateLimit: true });
+  const problem = bidTermsProblem({ maxPrice, maxSpend }, deposit, BigInt(sale.floor_price));
+  if (problem || maxPrice > U128_MAX) {
+    throw new BotError("invalid_terms", problem ?? "Max price exceeds the supported range.");
+  }
+  if (sale.reveal_mode !== "Tee") throw usage("bid requires a sale that seals bids to an enclave.");
+  if (sale.status !== "open") throw new BotError("sale_closed", `Sale ${sale.sale_id} is ${sale.status}. Bid only while it is open.`);
+  if (await bidOf(s, bidder)) throw new BotError("already_bid", `${bidder} already has a bid in ${sale.sale_id}.`);
+  if (await ftBalance(s, quote.id, bidder) < deposit) {
+    throw new BotError("insufficient_usdc", `${bidder} does not hold enough ${quote.symbol} for the deposit.`);
+  }
+
+  let placed: BidResult;
+  try {
+    placed = await client.bid(sale.sale_id, bidder, deposit, { maxPrice, maxSpend }, {
+      onPaidFallback: () => {
+        if (opts.relayerUrl) throw new Error("Relayed bid required.");
+      },
+    });
+  } catch (error) {
+    if (error instanceof FairgroundError && error.code === "cancelled") {
+      throw new BotError("bid_failed", "The relayer could not sponsor the bid. No paid transaction was sent.");
+    }
+    const requestId = error instanceof FairgroundError ? error.requestId : null;
+    const request = requestId ? ` Relayer request: ${requestId}.` : "";
+    throw new BotError("bid_failed", `${describe(error)}${request} Check the account's bid with status before retrying.`, 1);
+  }
+  return {
+    command: "bid" as const,
+    ok: true,
+    network: opts.network,
+    contract: opts.contractId,
+    saleId: sale.sale_id,
+    bidder,
+    quote,
+    deposit: placed.deposit.toString(),
+    index: placed.index,
+    txHash: placed.relay?.txHash ?? placed.txHash ?? null,
+    paidBy: placed.relay?.paidBy ?? null,
+  };
+}
+
 /** "1 m 05 s", "3.2 s", "2 h 10 m". */
 export function duration(ms: number): string {
   const abs = Math.abs(ms);
@@ -353,13 +421,14 @@ export function duration(ms: number): string {
 }
 
 /** A readable amount from user input, in base units. */
-function amount(flag: string, value: string | null, decimals: number): bigint {
+function amount(flag: string, value: string | null, decimals: number, { privateLimit = false } = {}): bigint {
   if (value === null || value.trim() === "") throw usage(`${flag} is required.`);
   try {
     const v = parseUnits(value, decimals);
     if (v <= 0n) throw new Error("must be above zero");
     return v;
   } catch (e) {
+    if (privateLimit) throw usage(`${flag} must be a positive amount with at most ${decimals} decimals.`);
     throw usage(`${flag} "${value}" is not an amount with at most ${decimals} decimals (${errorText(e)}).`);
   }
 }
@@ -1062,7 +1131,7 @@ export function ratio(num: bigint, den: bigint, places: number): string {
  * other winner (the contract checks it as spent_equals_tokens_times_price).
  * With --claim, claims the bot's tokens and refund if not yet claimed.
  */
-export async function report(s: Session): Promise<ReportResult> {
+export async function report(s: Session, { readLocalReceipt = true } = {}): Promise<ReportResult> {
   const { opts, client } = s;
   const bot = opts.accountId!;
   let sale = await freshSale(s);
@@ -1106,7 +1175,7 @@ export async function report(s: Session): Promise<ReportResult> {
   const row = rows.find((r) => r.bidder === bot);
   if (!mine || !row) throw new BotError("no_bid", `${bot} has no bid in sale ${opts.saleId}.`);
 
-  const receipt = loadReceipt(opts, bot);
+  const receipt = readLocalReceipt ? loadReceipt(opts, bot) : null;
   const tokenMeta = await s.rpc.view<{ symbol: string; decimals: number }>(sale.token, "ft_metadata").catch(() => ({ symbol: sale.token_symbol, decimals: sale.decimals }));
   const penalty = mine.penalty ?? 0n;
   const exact = mine.tokens * price; // in quote base units x 10^decimals

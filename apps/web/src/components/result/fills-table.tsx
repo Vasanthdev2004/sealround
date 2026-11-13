@@ -70,6 +70,7 @@ export function FillsTable({ sale, fills, account }: { sale: Sale; fills: Result
   }
   const visible = showAll ? rows : rows.slice(0, PAGE);
   const claimed = fills.filter((f) => f.claimed).length;
+  const refundOnly = fills.filter((f) => !f.claimed && f.refundClaimed).length;
 
   const nextSort = () => setSort((s) => (s === "order" ? "desc" : s === "desc" ? "asc" : "order"));
   const SortIcon = sort === "desc" ? ArrowDown : sort === "asc" ? ArrowUp : ArrowUpDown;
@@ -237,6 +238,7 @@ export function FillsTable({ sale, fills, account }: { sale: Sale; fills: Result
               )}
               <span className="num text-muted">{claimed}</span> of <span className="num text-muted">{fills.length}</span>{" "}
               claimed
+              {refundOnly > 0 && <> · <span className="num text-muted">{refundOnly}</span> refund only</>}
             </span>
             {!isNearMode() && (
               <Tag title="Claim transactions run on a simulated chain">
@@ -267,6 +269,7 @@ function Amount({ v, title }: { v: string; title?: string }) {
 function ClaimCell({ f }: { f: ResultFill }) {
   if (f.claimed && f.claimTx) return <TxLink hash={f.claimTx} label="claimed" tag={false} />;
   if (f.claimed) return <span className="text-label text-muted">claimed</span>;
+  if (f.refundClaimed) return <span className="text-label text-muted">refund claimed</span>;
   return <span className="text-label text-subtle">not yet</span>;
 }
 

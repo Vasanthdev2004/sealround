@@ -73,12 +73,14 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<ErrorInfo | null>(null);
   const [liveSwaps, setLiveSwaps] = useState<boolean | null>(null);
+  const [confidential, setConfidential] = useState(false);
   // Registering the account for USDC is normally paid by the relayer; when it cannot, the user is asked first.
   const storage = usePaidFallback();
   const canSimulate = canSimulateSwaps();
   const { mode } = useWallet();
   const onMainnet = mode === "near" && networkName() === "mainnet";
   const liveEnabled = onMainnet && liveSwaps === true;
+  const confidentiality = liveEnabled ? (confidential ? "basic" : "public") : undefined;
   const canSwap = canSimulate || liveEnabled;
 
   useEffect(() => {
@@ -99,7 +101,7 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
   const parsed = parseOriginAmount(amount, origin);
   const amountBase = parsed && "value" in parsed ? parsed.value : null;
   const q = useDryQuote(
-    amountBase !== null ? { originId, amount: amountBase.toString(), recipient: account ?? "", refundTo } : null,
+    amountBase !== null ? { originId, amount: amountBase.toString(), recipient: account ?? "", refundTo, confidentiality } : null,
   );
 
   const showProgress = !!funding && dismissedFundingId !== funding.id && (
@@ -124,7 +126,9 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
       // there is nothing to register and this returns at once.
       await ensureDeliverable(account, { onPaidFallback: storage.onPaidFallback });
       if (liveEnabled) {
-        const rec = await startLiveSwap({ account, saleId: sale.id, origin, amountInBase: amountBase, refundTo: refundAddress });
+        const rec = await startLiveSwap({
+          account, saleId: sale.id, origin, amountInBase: amountBase, refundTo: refundAddress, confidentiality,
+        });
         setWatchId(rec.id);
         return;
       }
@@ -146,7 +150,10 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
     }
   }
 
-  const shown = q.quote ?? (q.previous && q.previous.originId === originId && amountBase !== null ? q.previous : null);
+  const shown = q.quote ?? (
+    q.previous?.originId === originId && q.previous.confidentiality === confidentiality && amountBase !== null
+      ? q.previous : null
+  );
 
   return (
     <Panel
@@ -224,6 +231,25 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
               })}
             </div>
           </div>
+
+          {liveEnabled && (
+            <div>
+              <label className="flex min-h-10 items-center gap-2 text-small text-fg">
+                <input
+                  type="checkbox"
+                  checked={confidential}
+                  disabled={starting}
+                  aria-describedby="fund-confidential-help"
+                  onChange={(event) => setConfidential(event.target.checked)}
+                />
+                Confidential funding
+              </label>
+              <p id="fund-confidential-help" className="text-label text-subtle">
+                1Click hides the public link between the paying wallet and your NEAR account.
+                Your USDC bid deposit on NEAR stays public.
+              </p>
+            </div>
+          )}
 
           <Quote
             quote={shown}

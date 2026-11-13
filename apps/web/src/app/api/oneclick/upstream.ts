@@ -7,6 +7,8 @@
  */
 
 import { parseConfig, type AppConfig } from "@/lib/config";
+import { oneClickSharedQuotaConfigured } from "./quota";
+import { receiptSigningConfigured } from "./receipt";
 import { realSwapsAllowed } from "./shared";
 
 export const ONECLICK_BASE = "https://1click.chaindefuser.com";
@@ -18,7 +20,7 @@ export function upstreamHeaders(json = false): Record<string, string> {
   const h: Record<string, string> = { accept: "application/json" };
   if (json) h["content-type"] = "application/json";
   const jwt = process.env.ONECLICK_JWT;
-  if (jwt) h.authorization = `Bearer ${jwt}`;
+  if (jwt && oneClickSharedQuotaConfigured()) h.authorization = `Bearer ${jwt}`;
   return h;
 }
 
@@ -51,10 +53,11 @@ export function badRequest(message: string): Response {
 
 /**
  * True only when this server may start and track real swaps: NEAR mode on
- * mainnet, paying in Circle's USDC, and ONECLICK_REAL_SWAPS=1 in the server's
- * environment. The config route reports the decision to the browser.
+ * mainnet, paying in Circle's USDC, with the live switch, receipt signing and
+ * shared quotas configured. The config route reports the decision to the browser.
  */
 export function realSwapsOn(): boolean {
+  if (!receiptSigningConfigured() || !oneClickSharedQuotaConfigured()) return false;
   let config: AppConfig;
   try {
     config = parseConfig({

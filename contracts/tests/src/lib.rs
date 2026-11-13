@@ -18,6 +18,7 @@
 
 mod costs;
 mod env;
+mod liquidity;
 mod outlayer;
 mod report;
 mod sale;
@@ -26,6 +27,7 @@ pub use costs::{fairground_const, outlayer_compute_deposit};
 pub use env::{
     Env, EnvOptions, SEALER_CODE_HASH, fairground_config, parallel, u128_field, u128_value,
 };
+pub use liquidity::{LiquidityRecord, LiquidityTerms, pool_plan, step, step_timeout_blocks};
 pub use outlayer::{Served, ensure_success, result_complete, result_now};
 pub use report::{
     GasLine, event, events, gas_cost, outlayer_charged, receipt_gas, rejection_reason, tgas,
@@ -50,6 +52,13 @@ pub const STORAGE_DEPOSIT: u128 = 1_250_000_000_000_000_000_000;
 pub fn res(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
+        .join("res")
+        .join(name)
+}
+
+/// `contracts/tests/res/<name>`: third-party contracts only the tests deploy.
+pub fn test_res(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("res")
         .join(name)
 }

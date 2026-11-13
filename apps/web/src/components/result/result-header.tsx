@@ -10,8 +10,9 @@ import type { Sale } from "@/lib/types";
 /**
  * The top of the result page: a way back, the sale's name with its state, and
  * one line of identity. The description and the rules live on the sale page.
+ * `action` sits at the end of the title row (Share on X).
  */
-export function ResultHeader({ sale }: { sale: Sale }) {
+export function ResultHeader({ sale, action }: { sale: Sale; action?: React.ReactNode }) {
   // Demo accounts exist only on the simulated chain, so they get no explorer link.
   const mock = getClient().mode === "mock";
   const c = sale.config;
@@ -29,6 +30,7 @@ export function ResultHeader({ sale }: { sale: Sale }) {
         <h1 className="min-w-0 text-h1 break-words text-fg">{c.tokenName}</h1>
         <SaleStatusBadge status={sale.status} size="lg" />
         {sale.isJudgeSale && <Tag>demo run</Tag>}
+        {action && <div className="ml-auto max-sm:w-full">{action}</div>}
       </div>
 
       <p className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-small text-subtle sm:mt-3">

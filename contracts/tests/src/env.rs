@@ -14,7 +14,7 @@ use near_workspaces::{Account, AccountId, Contract, Worker};
 use serde_json::{Value, json};
 
 use crate::report::gas_cost;
-use crate::{NEAR, SECOND, res};
+use crate::{NEAR, SECOND, res, test_res};
 
 /// The pinned sealer hash the Fairground config carries. The test is the
 /// worker, so no wasm is ever fetched.
@@ -34,15 +34,21 @@ pub(crate) const PARALLEL: usize = 16;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// How much NEAR the test's parent account starts with.
+/// How much NEAR the test's parent account starts with, and whether to
+/// deploy the Rhea exchange and configure Fairground with it (launch
+/// liquidity).
 #[derive(Clone, Copy, Debug)]
 pub struct EnvOptions {
     pub parent_near: u128,
+    pub dex: bool,
 }
 
 impl Default for EnvOptions {
     fn default() -> Self {
-        Self { parent_near: 400 }
+        Self {
+            parent_near: 400,
+            dex: false,
+        }
     }
 }
 
@@ -55,6 +61,9 @@ pub struct Env {
     pub outlayer: Contract,
     pub usdc: Contract,
     pub fairground: Contract,
+    /// The Rhea exchange (`ref_exchange.wasm`), owned by `parent`, when
+    /// `EnvOptions::dex` is set.
+    pub dex: Option<Contract>,
     /// The sealer's master secret (`PROTECTED_FAIRGROUND_MASTER` in the enclave).
     pub master: [u8; 32],
     /// OutLayer requests this test already answered.
@@ -67,7 +76,7 @@ impl Env {
     }
 
     /// Connects to the sandbox and deploys OutLayer, USDC and Fairground under
-    /// a new parent account.
+    /// a new parent account (and the exchange, with `options.dex`).
     pub async fn with_options(tag: &str, options: EnvOptions) -> Result<Self> {
         let rpc =
             std::env::var("NEAR_SANDBOX_RPC").unwrap_or_else(|_| "http://127.0.0.1:3030".into());
@@ -107,10 +116,19 @@ impl Env {
             .await?
             .into_result()
             .context("mock-ft new")?;
+        let dex = if options.dex {
+            Some(deploy_dex(&parent).await?)
+        } else {
+            None
+        };
         let fairground = deploy(&parent, "fg", 30, "fairground.wasm").await?;
         fairground
             .call("new")
-            .args_json(fairground_config(outlayer.id(), &[usdc.id()]))
+            .args_json(fairground_config(
+                outlayer.id(),
+                &[usdc.id()],
+                dex.as_ref().map(Contract::id),
+            ))
             .transact()
             .await?
             .into_result()
@@ -127,6 +145,7 @@ impl Env {
             outlayer,
             usdc,
             fairground,
+            dex,
             master,
             handled: Mutex::new(Vec::new()),
         })
@@ -374,7 +393,11 @@ impl Env {
 }
 
 /// The `new` arguments for Fairground.
-pub fn fairground_config(outlayer: &AccountId, quote_tokens: &[&AccountId]) -> Value {
+pub fn fairground_config(
+    outlayer: &AccountId,
+    quote_tokens: &[&AccountId],
+    dex: Option<&AccountId>,
+) -> Value {
     json!({
         "outlayer": outlayer,
         "sealer_source": {"WasmUrl": {
@@ -385,6 +408,7 @@ pub fn fairground_config(outlayer: &AccountId, quote_tokens: &[&AccountId]) -> V
         "sealer_code_hash": SEALER_CODE_HASH,
         "sealer_secrets": null,
         "allowed_quote_tokens": quote_tokens,
+        "dex": dex,
     })
 }
 
@@ -402,6 +426,30 @@ async fn deploy(parent: &Account, name: &str, near: u128, wasm: &str) -> Result<
     let code = std::fs::read(res(wasm)).with_context(|| format!("reading contracts/res/{wasm}"))?;
     let account = subaccount(parent, name, near * NEAR).await?;
     Ok(account.deploy(&code).await?.into_result()?)
+}
+
+/// The Rhea exchange at `dex.<parent>`, owned by `parent` (which can pause
+/// it and freeze tokens, as Rhea's owner and guardians can), with no fees for
+/// the exchange or referrals.
+async fn deploy_dex(parent: &Account) -> Result<Contract> {
+    let wasm = "ref_exchange.wasm";
+    let code = std::fs::read(test_res(wasm))
+        .with_context(|| format!("reading contracts/tests/res/{wasm}"))?;
+    let account = subaccount(parent, "dex", 20 * NEAR).await?;
+    let dex = account.deploy(&code).await?.into_result()?;
+    dex.call("new")
+        .args_json(json!({
+            "owner_id": parent.id(),
+            "boost_farm_id": parent.id(),
+            "burrowland_id": parent.id(),
+            "exchange_fee": 0,
+            "referral_fee": 0,
+        }))
+        .transact()
+        .await?
+        .into_result()
+        .context("exchange new")?;
+    Ok(dex)
 }
 
 /// Retries a transaction the RPC rejected (not one that failed on chain):

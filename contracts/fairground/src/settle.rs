@@ -13,6 +13,7 @@ use crate::costs::{
     ON_CLEARING_RESULT_GAS, OWN_WORK_GAS, close_deposit, outlayer_request_gas, request_send_gas,
 };
 use crate::events::{emit, hex};
+use crate::liquidity::{LiquidityStage, deadline_view};
 use crate::outlayer::{self, Outcome, SealerReply, clear_input};
 use crate::sale::SaleTerms;
 use crate::setup::{outcome_label, refund_if_refused};
@@ -301,6 +302,7 @@ impl Fairground {
         sale.closed_at = Some(closed_at);
         sale.phase = Phase::Clearing;
         sale.result.clear_requests = sale.result.clear_requests.saturating_add(1);
+        sale.result.clear_request_block = Some(env::block_height());
         sale.result.input_sha256 = Some(input_sha256);
         if first_close {
             emit_sale_closed(&sale_id, sale);
@@ -615,7 +617,7 @@ impl Fairground {
         self.invalid_bids.insert(num, invalid);
     }
 
-    /// Settles a sale with checked fills.
+    /// Settles a sale with checked fills, and fixes its launch pool's amounts.
     fn settle(
         &mut self,
         sale_id: &str,
@@ -623,6 +625,8 @@ impl Fairground {
         sold: u128,
         raised: u128,
     ) -> Status {
+        let now = env::block_timestamp();
+        let dex = self.config.dex.clone();
         let Some(sale) = self.sales.get_mut(sale_id) else {
             return Status::Failed;
         };
@@ -646,6 +650,24 @@ impl Fairground {
                 "result_sha256": sale.result.result_sha256.as_ref().map(|h| hex(h)),
             }),
         );
+        if let Some(liquidity) = sale.liquidity.as_mut() {
+            let price = sale.result.clearing_price;
+            let deadline = now.saturating_add(sale.settle_timeout);
+            liquidity.plan(raised, price, sale.terms.decimals, deadline);
+            emit(
+                "liquidity_planned",
+                json!({
+                    "sale_id": sale_id,
+                    "dex": dex,
+                    "stage": liquidity.stage,
+                    "usdc": U128(liquidity.usdc),
+                    "tokens": U128(liquidity.tokens),
+                    "price": U128(price),
+                    "unused_tokens": U128(liquidity.pool_tokens - liquidity.tokens),
+                    "deadline": deadline_view(liquidity),
+                }),
+            );
+        }
         self.fills.insert(num, fills);
         Status::Settled
     }
@@ -668,6 +690,9 @@ impl Fairground {
         sale.result.n_winners = 0;
         sale.result.failed_checks = checks.names;
         sale.result.failed_checks_total = checks.total;
+        if let Some(liquidity) = sale.liquidity.as_mut() {
+            liquidity.stage = LiquidityStage::Cancelled;
+        }
         emit(
             "sale_failed",
             json!({

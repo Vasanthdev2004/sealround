@@ -24,7 +24,9 @@ import type { NearConfig } from "../config";
 import { bidCommitment, fromB64, fromHex, newSaleKeypair, sealBid, sealedBidLen, toB64 } from "../crypto";
 import type { NearRpc } from "../near/rpc";
 import { staticSigners } from "../near/signers";
+import type { TxLogEntry } from "../near/tx-log";
 import {
+  allocationLocked,
   createSaleParams,
   eventsFromViews,
   foldStatus,
@@ -36,6 +38,8 @@ import {
   saleFromView,
   type BidView,
   type FillView,
+  type LiquidityView,
+  type RefPoolView,
   type ResultView,
   type SaleView,
 } from "../near/views";
@@ -43,6 +47,7 @@ import type { ClientNotice, PaidReason, SaleConfig } from "../types";
 
 const CONTRACT = "fairground.test.near";
 const USDC_ID = "usdc.test.near";
+const DEX = "ref-finance-101.testnet";
 const USDC = 1_000_000n;
 const TOKEN = 10n ** 18n;
 const TGAS = 1_000_000_000_000n;
@@ -167,6 +172,13 @@ function harness(opts: { signsDelegates?: boolean; relayer?: boolean; cacheMs?: 
     /** get_reserve_refund: NEAR claim_proceeds would return to the creator now. */
     reserveRefund: "0",
     createError: null as string | null,
+    /** get_config; `dex` names the launch pool exchange. */
+    config: { dex: DEX } as { dex?: string | null } | null,
+    /** The exchange's get_pool and get_pool_shares for the sale contract. */
+    pool: null as RefPoolView | null,
+    poolShares: "0",
+    /** The chain's head block time, ms. */
+    headMs: NOW,
   };
   const views: { contract: string; method: string; args: Record<string, unknown> }[] = [];
   const rpc: NearRpc = {
@@ -189,16 +201,21 @@ function harness(opts: { signsDelegates?: boolean; relayer?: boolean; cacheMs?: 
           if (method === "get_fills") return page(chain.fills.get(id) ?? []);
           if (method === "get_close_deposit") return chain.closeDeposit;
           if (method === "get_reserve_refund") return chain.reserveRefund;
+          if (method === "get_config") return chain.config;
           if (method === "get_create_cost") {
             if (chain.createError) throw new FairgroundError("rpc_error", chain.createError, { reason: "view_failed" });
             return chain.createCost;
           }
         }
+        if (contract === DEX) {
+          if (method === "get_pool") return chain.pool;
+          if (method === "get_pool_shares") return chain.poolShares;
+        }
         throw new Error(`unexpected view ${contract}.${method}`);
       };
       return answer() as T;
     },
-    headTimeMs: async () => NOW,
+    headTimeMs: async () => chain.headMs,
   };
 
   /** What landing a transaction does to the chain. Set by each test. */
@@ -1289,5 +1306,314 @@ describe("asking the relayer before signing", () => {
     // The wallet is the reason, whatever state the relayer is in.
     expect(placed.relay).toMatchObject({ paidBy: "user", fallbackReason: "delegates_unsupported" });
     expect(plain.relayer.getPolicy).not.toHaveBeenCalled();
+  });
+});
+
+describe("launch liquidity", () => {
+  const CAROL = "carol.test.near";
+  const ANYONE = "anyone.test.near";
+  const TERMS_VIEW = { dex: DEX, raise_share_bps: 2000, pool_tokens: (20_000n * TOKEN).toString(), fee_bps: 30 };
+  // 20 % of an 8 USDC raise at 0.001 USDC per token.
+  const POOL_USDC = 1_600_000n;
+  const POOL_TOKENS = 1600n * TOKEN;
+  const SHARES = 10n ** 24n;
+  const DEADLINE = NOW + 7_200_000;
+  const PAID = { raise_paid: true, allocation_paid: false, unsold_burned: true, reserve_returned: true };
+  const saleOver: Partial<SaleView> = {
+    status: "settled",
+    closed_at: ns(NOW),
+    refund_mode_at: null,
+    bid_count: 2,
+    creator_allocation: (380_000n * TOKEN).toString(),
+    liquidity: TERMS_VIEW,
+  };
+  const liq = (over: Partial<LiquidityView> = {}): LiquidityView => ({
+    status: "seeding",
+    next_step: "register",
+    in_flight: null,
+    dex: DEX,
+    pool_id: null,
+    usdc: POOL_USDC.toString(),
+    tokens: POOL_TOKENS.toString(),
+    shares: "0",
+    usdc_on_dex: "0",
+    tokens_on_dex: "0",
+    failures: 0,
+    deadline: ns(DEADLINE),
+    ...over,
+  });
+  const seededLiq = () => liq({ status: "seeded", next_step: null, pool_id: 42, shares: SHARES.toString() });
+  const resultWith = (l: LiquidityView, over: Partial<ResultView> = {}) =>
+    resultView({
+      status: "settled",
+      clearing_price: "1000",
+      total_sold: (8000n * TOKEN).toString(),
+      total_raised: (8n * USDC).toString(),
+      // The unsold sale supply and the reserve the pool does not take.
+      unsold: ((600_000n - 8000n + 20_000n - 1600n) * TOKEN).toString(),
+      n_valid: 2,
+      n_winners: 2,
+      liquidity: l,
+      ...over,
+    });
+  const poolBids = () => [bidView(0, ALICE, 5n * USDC), bidView(1, CAROL, 3n * USDC + 33n)];
+  const poolFills: FillView[] = [
+    { index: 0, bidder: ALICE, tokens: (5000n * TOKEN).toString(), spent: "5000000", refund: "0", penalty: "0" },
+    { index: 1, bidder: CAROL, tokens: (3000n * TOKEN).toString(), spent: "3000000", refund: "33", penalty: "0" },
+  ];
+  const refPool = (): RefPoolView => ({
+    pool_kind: "SIMPLE_POOL",
+    token_account_ids: [`fairt.${CONTRACT}`, USDC_ID],
+    amounts: [POOL_TOKENS.toString(), POOL_USDC.toString()],
+    total_fee: 30,
+    shares_total_supply: SHARES.toString(),
+  });
+
+  /** The settled sale with a launch pool, its two winning bids and their fills. */
+  function poolHarness(l: LiquidityView, opts: Parameters<typeof harness>[0] = {}) {
+    const h = harness({ ...opts, sale: { ...saleOver, ...opts.sale } });
+    h.chain.bids.set("fairt", poolBids());
+    h.chain.fills.set("fairt", poolFills);
+    h.chain.results.set("fairt", resultWith(l));
+    return h;
+  }
+
+  /** seed_liquidity with 300 TGas: every step runs and the exchange holds the pool. */
+  const seeds = (h: ReturnType<typeof harness>) => {
+    h.chain.results.set("fairt", resultWith(seededLiq()));
+    h.chain.pool = refPool();
+    h.chain.poolShares = SHARES.toString();
+  };
+
+  it("map the terms, the pool and the locked allocation from the views", () => {
+    const sv = saleView(saleOver);
+    const sale = saleFromView(sv);
+    expect(sale.config).toMatchObject({
+      creatorAllocation: 380_000n * TOKEN,
+      lpReserve: 20_000n * TOKEN,
+      liquidity: { dex: DEX, raiseShareBps: 2000, poolTokens: 20_000n * TOKEN, feeBps: 30 },
+    });
+    expect(saleFromView(saleView()).config.liquidity).toBeUndefined();
+
+    // create_sale names the share, the reserve and the fee; the contract picks the exchange.
+    const params = createSaleParams("fairt", sale.config, { description: "", hue: 1 });
+    expect(params.liquidity).toEqual({ raise_share_bps: 2000, pool_tokens: (20_000n * TOKEN).toString(), fee_bps: 30 });
+    expect("liquidity" in createSaleParams("fairt", { ...sale.config, liquidity: null }, { description: "", hue: 1 })).toBe(false);
+
+    // Being seeded: the allocation is owed but locked, and Carol's refund-only claim is known from this browser's log.
+    const log: TxLogEntry[] = [
+      { saleId: "fairt", kind: "claimed", detail: "refund_claimed", at: NOW + 1000, account: CAROL, amount: "33", txHash: "REFUNDTX" },
+    ];
+    const seeding = resultWith(liq(), { proceeds: PAID });
+    const r = resultFromViews(sv, poolBids(), seeding, poolFills, log, 0n)!;
+    expect(r.liquidity).toEqual({
+      stage: "seeding",
+      nextStep: "register",
+      inFlight: null,
+      dex: DEX,
+      poolId: null,
+      usdc: POOL_USDC,
+      tokens: POOL_TOKENS,
+      shares: 0n,
+      usdcOnDex: 0n,
+      tokensOnDex: 0n,
+      failures: 0,
+      deadline: DEADLINE,
+    });
+    expect(r.proceeds).toEqual({ raisePaid: true, allocationPaid: true, unsoldBurned: true, reserveReturned: true, allocationLocked: true });
+    expect(r.fills[1].refundClaimed).toBe(true);
+    expect(r.fills[0].refundClaimed).toBeUndefined();
+    expect(proceedsLeft(sv, seeding, 0n)).toEqual({ raise: false, allocation: false, burn: false, reserve: false });
+    expect(allocationLocked(sv, seeding)).toBe(true);
+    // The creator's payout row is the raise less the pool's USDC.
+    const seedingEvents = eventsFromViews(sv, poolBids(), seeding, poolFills, log);
+    expect(seedingEvents.find((e) => e.detail === "proceeds_claimed")).toMatchObject({ amount: 8n * USDC - POOL_USDC });
+    expect(seedingEvents.find((e) => e.detail === "proceeds_claimed")?.note).toMatch(/unlocks once the launch pool is seeded/);
+    expect(seedingEvents.find((e) => e.detail === "refund_claimed")).toMatchObject({ account: CAROL, amount: 33n, txHash: "REFUNDTX" });
+    expect(seedingEvents.some((e) => e.detail === "liquidity_seeded")).toBe(false);
+
+    // Seeded: unlocked, and the allocation is owed again until claim_proceeds pays it.
+    const seeded = resultWith(seededLiq(), { proceeds: PAID });
+    const s = resultFromViews(sv, poolBids(), seeded, poolFills, log, 0n)!;
+    expect(s.liquidity).toMatchObject({ stage: "seeded", poolId: 42, shares: SHARES, nextStep: null });
+    expect(s.proceeds).toEqual({ raisePaid: true, allocationPaid: false, unsoldBurned: true, reserveReturned: true });
+    expect(allocationLocked(sv, seeded)).toBe(false);
+    expect(proceedsLeft(sv, seeded, 0n).allocation).toBe(true);
+    // Carol claims her tokens after the pool is seeded: that claim pays no USDC again.
+    const claimedBids = poolBids().map((b) => (b.bidder === CAROL ? { ...b, claimed: true } : b));
+    const later: TxLogEntry[] = [...log, { saleId: "fairt", kind: "claimed", at: NOW + 5000, account: CAROL, amount: "0", txHash: "TOKENSTX" }];
+    const seededEvents = eventsFromViews(sv, claimedBids, seeded, poolFills, later);
+    const pool = seededEvents.find((e) => e.detail === "liquidity_seeded")!;
+    expect(pool).toMatchObject({ kind: "settled", amount: POOL_USDC, approximate: true });
+    expect(pool.note).toMatch(/in pool 42\. The sale contract keeps the LP shares\./);
+    expect(seededEvents.find((e) => e.kind === "claimed" && e.account === CAROL && !e.detail)).toMatchObject({
+      amount: 0n,
+      txHash: "TOKENSTX",
+      note: "Claimed tokens. The unspent USDC was paid earlier.",
+    });
+    expect(resultFromViews(sv, claimedBids, seeded, poolFills, later, 0n)!.fills[1]).toMatchObject({ claimed: true, refundClaimed: true });
+
+    // Abandoned with nothing left on the exchange: the whole raise is the creator's.
+    const abandoned = resultWith(liq({ status: "abandoned", next_step: null }), { proceeds: { ...PAID, raise_paid: false } });
+    const abandonedEvents = eventsFromViews(sv, poolBids(), abandoned, poolFills, []);
+    expect(abandonedEvents.find((e) => e.detail === "liquidity_abandoned")?.note).toMatch(/goes to the creator and its tokens are burned/);
+    expect(resultFromViews(sv, poolBids(), abandoned, poolFills, [], 0n)!.proceeds?.allocationLocked).toBeUndefined();
+  });
+
+  it("read the exchange: the dex from get_config, the pool and the contract's LP shares", async () => {
+    const h = poolHarness(seededLiq());
+    h.chain.pool = refPool();
+    h.chain.poolShares = SHARES.toString();
+    expect(await h.client.getLiquidityDex()).toBe(DEX);
+    expect(await h.client.getPool("fairt")).toMatchObject({
+      dex: DEX,
+      poolId: 42,
+      tokenIds: [`fairt.${CONTRACT}`, USDC_ID],
+      amounts: [POOL_TOKENS, POOL_USDC],
+      feeBps: 30,
+      sharesTotal: SHARES,
+      contractShares: SHARES,
+    });
+    expect(h.views.find((v) => v.method === "get_pool")).toMatchObject({ contract: DEX, args: { pool_id: 42 } });
+    expect(h.views.find((v) => v.method === "get_pool_shares")).toMatchObject({ contract: DEX, args: { pool_id: 42, account_id: CONTRACT } });
+    // No pool yet, or a contract without launch liquidity.
+    expect(await poolHarness(liq()).client.getPool("fairt")).toBeNull();
+    const plain = harness();
+    plain.chain.config = {};
+    expect(await plain.client.getLiquidityDex()).toBeNull();
+  });
+
+  it("seeds from the caller's wallet with 300 TGas and no deposit when the relayer does not list it", async () => {
+    const h = poolHarness(liq(), { accounts: [ANYONE] });
+    const signer = h.signers[ANYONE];
+    signer.sendTransaction.mockImplementation(async (action: FairgroundAction) => {
+      if (action.methodName === "seed_liquidity") seeds(h);
+      return outcome("SEEDTX");
+    });
+    const r = await h.client.seedLiquidity("fairt", ANYONE);
+    expect(r).toMatchObject({ txHash: "SEEDTX", relay: { paidBy: "user" }, liquidity: { stage: "seeded", poolId: 42, shares: SHARES } });
+    expect(signer.sendTransaction.mock.calls[0][0]).toEqual({
+      receiverId: CONTRACT,
+      methodName: "seed_liquidity",
+      args: { sale_id: "fairt" },
+      gas: 300n * TGAS,
+      deposit: 0n,
+    });
+    expect(signer.signDelegate).not.toHaveBeenCalled();
+    expect(h.relayer.relay).not.toHaveBeenCalled();
+    expect((await h.client.getEvents("fairt")).find((e) => e.detail === "liquidity_seeded")?.txHash).toBe("SEEDTX");
+    expect(await failure(h.client.seedLiquidity("fairt", ANYONE))).toMatchObject({ code: "invalid", reason: "wrong_stage" });
+    expect(await failure(h.client.abandonLiquidity("fairt", ANYONE))).toMatchObject({ code: "invalid", reason: "wrong_stage" });
+  });
+
+  it("is gasless at the relayer's gas cap when its policy lists the method", async () => {
+    const h = poolHarness(liq());
+    const base = await h.relayer.getPolicy();
+    h.relayer.getPolicy.mockResolvedValue({ ...base, fairground_methods: [...base.fairground_methods, "seed_liquidity"] });
+    h.relayer.relay.mockImplementation(async () => {
+      seeds(h);
+      return { tx_hash: "RELAYTX", status: "succeeded", outcome: { failures: [], events: [], relayer_cost: "1" } };
+    });
+    const r = await h.client.seedLiquidity("fairt", ALICE);
+    expect(r).toMatchObject({ txHash: "RELAYTX", relay: { paidBy: "relayer" }, liquidity: { stage: "seeded" } });
+    expect(h.signer.signDelegate.mock.calls[0][0]).toMatchObject({ methodName: "seed_liquidity", gas: 150n * TGAS, deposit: 0n });
+    expect(h.signer.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("checks the stage and the deadline before signing, and reports a failed step as retryable", async () => {
+    const busy = poolHarness(liq({ next_step: null, in_flight: "create_pool" }));
+    expect(await failure(busy.client.seedLiquidity("fairt", ALICE))).toMatchObject({ reason: "liquidity_busy" });
+    const early = poolHarness(liq());
+    expect(await failure(early.client.abandonLiquidity("fairt", ALICE))).toMatchObject({ reason: "too_early" });
+    const late = poolHarness(liq({ next_step: null }));
+    late.chain.headMs = DEADLINE;
+    expect(await failure(late.client.seedLiquidity("fairt", ALICE))).toMatchObject({ reason: "too_late" });
+    for (const h of [busy, early, late]) expect(h.signer.sendTransaction).not.toHaveBeenCalled();
+    expect(await failure(harness({ sale: { status: "settled" } }).client.seedLiquidity("fairt", ALICE))).toMatchObject({ reason: "no_liquidity" });
+
+    // The deposit step fails on the exchange: the contract counts it and the same call runs it again.
+    const h = poolHarness(liq({ next_step: "deposit", pool_id: 42 }));
+    h.signer.sendTransaction.mockImplementation(async () => {
+      h.chain.results.set("fairt", resultWith(liq({ next_step: "deposit", pool_id: 42, failures: 1 })));
+      return outcome("FAILTX", [], { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: E22" } } } });
+    });
+    const e = await failure(h.client.seedLiquidity("fairt", ALICE));
+    expect(e).toMatchObject({ code: "tx_failed", reason: "liquidity_step_failed" });
+    expect(e.message).toBe('"Deposit USDC and tokens" failed on the exchange. Nothing was lost: run it again.');
+  });
+
+  it("gives up a step whose answer never came, and reads the exchange before anything else", async () => {
+    // A deposit that waited too long: it does not block, and giving it up (failures + 1) is not this call's failure.
+    const stale = liq({ next_step: "reconcile", in_flight: "deposit", pool_id: 42, failures: 0 });
+    const h = poolHarness(stale);
+    h.signer.sendTransaction.mockImplementation(async () => {
+      h.chain.results.set("fairt", resultWith(liq({ next_step: "add_liquidity", pool_id: 42, failures: 1 })));
+      return outcome("RECONCILETX");
+    });
+    expect(await h.client.seedLiquidity("fairt", ALICE)).toMatchObject({
+      txHash: "RECONCILETX",
+      liquidity: { stage: "seeding", nextStep: "add_liquidity", inFlight: null, failures: 1 },
+    });
+    expect(h.signer.sendTransaction.mock.calls[0][0]).toMatchObject({ methodName: "seed_liquidity", gas: 300n * TGAS });
+
+    // The same, and a step after the read fails too: one failure is this call's, without naming a step it cannot know.
+    const twice = poolHarness(stale);
+    twice.signer.sendTransaction.mockImplementation(async () => {
+      twice.chain.results.set("fairt", resultWith(liq({ next_step: "deposit", pool_id: 42, failures: 2 })));
+      return outcome("FAILTX");
+    });
+    const e = await failure(twice.client.seedLiquidity("fairt", ALICE));
+    expect(e).toMatchObject({ code: "tx_failed", reason: "liquidity_step_failed" });
+    expect(e.message).toBe("A step failed on the exchange. Nothing was lost: run it again.");
+
+    // Abandoned while unsure: all of the pool's USDC stays from the creator until the exchange is read,
+    // and abandon_liquidity is still open with nothing on the exchange.
+    const sv = saleView(saleOver);
+    const unsureView = resultWith(liq({ status: "abandoned", next_step: "reconcile", pool_id: 42 }), { proceeds: PAID });
+    expect(eventsFromViews(sv, poolBids(), unsureView, poolFills, []).find((e) => e.detail === "proceeds_claimed")).toMatchObject({
+      amount: 8n * USDC - POOL_USDC,
+    });
+    const read = resultWith(liq({ status: "abandoned", next_step: null, pool_id: 42 }), { proceeds: PAID });
+    expect(eventsFromViews(sv, poolBids(), read, poolFills, []).find((e) => e.detail === "proceeds_claimed")).toMatchObject({ amount: 8n * USDC });
+    const reading = poolHarness(liq({ status: "abandoned", next_step: "reconcile", pool_id: 42 }));
+    reading.signer.sendTransaction.mockImplementation(async () => {
+      reading.chain.results.set("fairt", resultWith(liq({ status: "abandoned", next_step: null, pool_id: 42 })));
+      return outcome("READTX");
+    });
+    expect(await reading.client.abandonLiquidity("fairt", ALICE)).toMatchObject({ txHash: "READTX", liquidity: { stage: "abandoned", nextStep: null } });
+    expect(reading.signer.sendTransaction.mock.calls[0][0]).toMatchObject({ methodName: "abandon_liquidity", gas: 300n * TGAS, deposit: 0n });
+  });
+
+  it("abandons after the deadline: the tokens unlock and what sat on the exchange comes back", async () => {
+    const h = poolHarness(liq({ next_step: null, pool_id: 42, usdc_on_dex: POOL_USDC.toString(), tokens_on_dex: POOL_TOKENS.toString() }));
+    h.chain.headMs = DEADLINE + 1;
+    h.signer.sendTransaction.mockImplementation(async () => {
+      h.chain.results.set("fairt", resultWith(liq({ status: "abandoned", next_step: null, pool_id: 42 })));
+      return outcome("ABANDONTX");
+    });
+    const r = await h.client.abandonLiquidity("fairt", ALICE);
+    expect(r).toMatchObject({ txHash: "ABANDONTX", liquidity: { stage: "abandoned", usdcOnDex: 0n } });
+    expect(h.signer.sendTransaction.mock.calls[0][0]).toMatchObject({ methodName: "abandon_liquidity", gas: 300n * TGAS, deposit: 0n });
+    expect((await h.client.getEvents("fairt")).find((e) => e.detail === "liquidity_abandoned")?.txHash).toBe("ABANDONTX");
+    expect(await failure(h.client.abandonLiquidity("fairt", ALICE))).toMatchObject({ reason: "already_done" });
+  });
+
+  it("pays a winner's unspent USDC only while the pool is being seeded", async () => {
+    const h = poolHarness(liq(), { accounts: [CAROL] });
+    h.chain.usdc.set(CAROL, 0n);
+    h.relayer.relay.mockImplementation(async () => {
+      h.chain.usdc.set(CAROL, 33n);
+      return {
+        tx_hash: "REFUNDTX",
+        status: "succeeded",
+        outcome: { failures: [], events: [{ event: "claimed", data: { bidder: CAROL, tokens: "0", refund: "33", failed: [] } }], relayer_cost: "1" },
+      };
+    });
+    expect(await h.client.claim("fairt", CAROL)).toMatchObject({ tokens: 0n, refund: 33n, txHash: "REFUNDTX" });
+    expect((await h.client.getResult("fairt"))!.fills[1]).toMatchObject({ claimed: false, refundClaimed: true });
+    expect(await failure(h.client.claim("fairt", CAROL))).toMatchObject({ code: "invalid", reason: "liquidity_pending" });
+    // Alice spent her whole deposit: nothing to pay until the tokens unlock.
+    expect(await failure(h.client.claim("fairt", ALICE))).toMatchObject({ reason: "liquidity_pending" });
+    expect(h.relayer.relay).toHaveBeenCalledTimes(1);
   });
 });

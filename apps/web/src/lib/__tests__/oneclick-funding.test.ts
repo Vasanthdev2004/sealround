@@ -6,6 +6,10 @@ import { getFundings, type OneClickStatus } from "@/lib/funding";
 import { fetchLiveSwapsEnabled, originById, REAL_POLL_MS, resumeLiveSwaps, startLiveSwap } from "@/lib/oneclick";
 
 vi.mock("next/server", () => ({ connection: async () => {} }));
+vi.mock("@/app/api/oneclick/quota", () => ({
+  oneClickSharedQuotaConfigured: () => true,
+  checkOneClickQuota: async () => null,
+}));
 
 const ACCOUNT = "bidder.near";
 const SALE = "test-sale";
@@ -76,6 +80,7 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_NEAR_NETWORK", "mainnet");
   vi.stubEnv("NEXT_PUBLIC_USDC_CONTRACT", undefined);
   vi.stubEnv("ONECLICK_REAL_SWAPS", "1");
+  vi.stubEnv("ONECLICK_RECEIPT_SECRET", "a".repeat(64));
   const storage = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => storage.get(key) ?? null,

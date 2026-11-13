@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AllowedCall, FairgroundMethod } from "../src/policy.ts";
 import { checkOnChain, type ViewCall } from "../src/preflight.ts";
-import { ALICE, FAIRGROUND, USDC, fakeViews, sale } from "./fixtures.ts";
+import { ALICE, FAIRGROUND, USDC, fakeViews, liquidityView, proceedsResult, sale } from "./fixtures.ts";
 
 const NOW = 1_000n;
 const bid = (overrides: Partial<Extract<AllowedCall, { kind: "bid" }>> = {}): AllowedCall => ({
@@ -63,9 +63,122 @@ describe("checkOnChain: Fairground calls", () => {
     expect(await run([fairgroundCall("claim")], view)).toBe(reason);
   });
 
-  it("passes claim_proceeds only on a final sale", async () => {
-    expect(await run([fairgroundCall("claim_proceeds")], fakeViews({ sales: { fairt: sale({ status: "failed" }) } }))).toBeNull();
-    expect(await run([fairgroundCall("claim_proceeds")], fakeViews({ sales: { fairt: sale({ status: "revealing" }) } }))).toBe("wrong_phase");
+  describe("claim_proceeds", () => {
+    const payout = (
+      saleFields: Record<string, unknown> = {},
+      resultFields: Record<string, unknown> = {},
+      reserve: unknown = "0",
+    ) => run([fairgroundCall("claim_proceeds")], fakeViews({
+      sales: { fairt: sale({ status: "settled", ...saleFields }) },
+      results: { fairt: proceedsResult(resultFields) },
+      reserves: { fairt: reserve },
+    }));
+    const pool = { liquidity: { pool_tokens: "100" } };
+    const seeding = liquidityView({ usdc_on_dex: "20" });
+
+    it("refuses a sale that is not final", async () => {
+      expect(await payout({ status: "revealing" })).toBe("wrong_phase");
+    });
+
+    it.each([
+      ["a settled raise without liquidity", {}, { total_raised: "100" }, "0"],
+      ["the creator's allocation", { creator_allocation: "100" }, {}, "0"],
+      ["a burn on a failed sale", { status: "failed" }, { status: "failed", unsold: "100" }, "0"],
+      ["a reserve refund on a sale with no token", { status: "failed", token_setup: "failed" }, { status: "failed" }, "100"],
+      ["the creator's share while the pool is seeding", pool, { total_raised: "100", liquidity: seeding }, "0"],
+      ["raise released after exchange withdrawal", pool, {
+        total_raised: "50", liquidity: { ...seeding, status: "abandoned", next_step: null, usdc_on_dex: "0" },
+      }, "0"],
+    ])("sponsors %s", async (_label, fields, result, reserve) => {
+      expect(await payout(fields, result, reserve)).toBeNull();
+    });
+
+    it("refuses zero amounts even if all the flags are false", async () => {
+      expect(await payout()).toBe("already_claimed");
+    });
+
+    it("refuses a completed payout even if the original amounts are nonzero", async () => {
+      expect(await payout({ creator_allocation: "100" }, {
+        total_raised: "100",
+        unsold: "10",
+        proceeds: { raise_paid: true, allocation_paid: true, unsold_burned: true, reserve_returned: true },
+      })).toBe("already_claimed");
+    });
+
+    it("refuses a locked allocation when the pool holds the full raise, but sponsors an outstanding burn", async () => {
+      const fields = { ...pool, creator_allocation: "100" };
+      const result = { total_raised: "50", liquidity: seeding };
+      expect(await payout(fields, result)).toBe("wrong_phase");
+      expect(await payout(fields, { ...result, unsold: "1" })).toBeNull();
+    });
+
+    it("refuses a claim that owes only funds still on the DEX", async () => {
+      expect(await payout(pool, {
+        total_raised: "20", liquidity: { ...seeding, status: "abandoned", next_step: "withdraw" },
+      })).toBe("already_claimed");
+    });
+
+    it("holds the whole pool share while abandoned exchange balances are uncertain", async () => {
+      for (const fields of [{ next_step: "reconcile" }, { next_step: null, in_flight: "reconcile" }]) {
+        expect(await payout(pool, {
+          total_raised: "50",
+          liquidity: { ...seeding, status: "abandoned", usdc_on_dex: "0", ...fields },
+        })).toBe("already_claimed");
+      }
+    });
+
+    it("waits for token setup before treating a reserve as due", async () => {
+      expect(await payout({ token_setup: "pending" }, {}, "100")).toBe("wrong_phase");
+    });
+
+    it("uses the wallet fallback when the payout cannot be established", async () => {
+      expect(await run([fairgroundCall("claim_proceeds")], fakeViews({ sales: final }))).toBe("method_not_allowed");
+      expect(await payout({}, { status: "revealing" })).toBe("method_not_allowed");
+      expect(await payout(pool)).toBe("method_not_allowed");
+      expect(await payout({}, { total_raised: "not a number" })).toBe("method_not_allowed");
+      expect(await payout({}, {}, { refund: "100" })).toBe("method_not_allowed");
+    });
+  });
+
+  describe("launch pool", () => {
+    const preflight = (method: FairgroundMethod, fields: Record<string, unknown> = {}, saleFields: Record<string, unknown> = {}) =>
+      run([fairgroundCall(method)], fakeViews({
+        sales: { fairt: sale({ status: "settled", liquidity: {}, ...saleFields }) },
+        results: { fairt: proceedsResult({ liquidity: liquidityView(fields) }) },
+      }));
+
+    it("sponsors seeding only before the deadline and with a step ready", async () => {
+      expect(await preflight("seed_liquidity", { next_step: "deposit" })).toBeNull();
+      expect(await preflight("seed_liquidity", { deadline: String(NOW) })).toBe("wrong_phase");
+      expect(await preflight("seed_liquidity", { status: "seeded", next_step: null })).toBe("wrong_phase");
+      expect(await preflight("seed_liquidity", { next_step: null })).toBe("wrong_phase");
+      expect(await preflight("seed_liquidity", {}, { status: "open" })).toBe("wrong_phase");
+      expect(await preflight("seed_liquidity", {}, { liquidity: null })).toBe("wrong_phase");
+    });
+
+    it("sponsors abandoning at the deadline, and only while an abandoned pool still has work", async () => {
+      expect(await preflight("abandon_liquidity", { deadline: String(NOW), next_step: null })).toBeNull();
+      expect(await preflight("abandon_liquidity")).toBe("wrong_phase");
+      expect(await preflight("abandon_liquidity", { status: "abandoned", next_step: "withdraw" })).toBeNull();
+      expect(await preflight("abandon_liquidity", { status: "abandoned", next_step: null })).toBe("wrong_phase");
+      expect(await preflight("abandon_liquidity", { status: "seeded", next_step: null })).toBe("wrong_phase");
+    });
+
+    it("waits for a live callback and sponsors recovery once the contract offers reconcile", async () => {
+      const busy = { in_flight: "deposit", next_step: null };
+      const lost = { ...busy, next_step: "reconcile" };
+      expect(await preflight("seed_liquidity", busy)).toBe("wrong_phase");
+      expect(await preflight("abandon_liquidity", { ...busy, deadline: String(NOW) })).toBe("wrong_phase");
+      expect(await preflight("seed_liquidity", lost)).toBeNull();
+      expect(await preflight("abandon_liquidity", { ...lost, deadline: String(NOW) })).toBeNull();
+      expect(await preflight("abandon_liquidity", { ...lost, status: "abandoned" })).toBeNull();
+    });
+
+    it("keeps wallet fallback for older deployments or unreadable views", async () => {
+      expect(await preflight("seed_liquidity", {}, { liquidity: undefined })).toBe("method_not_allowed");
+      expect(await preflight("seed_liquidity", { deadline: "invalid" })).toBe("method_not_allowed");
+      expect(await preflight("seed_liquidity", { next_step: undefined })).toBe("method_not_allowed");
+    });
   });
 
   it("passes a reveal of the sender's unrevealed bid inside the reveal window", async () => {
@@ -111,7 +224,7 @@ describe("checkOnChain: Fairground calls", () => {
   });
 
   it("checks every call of a delegate", async () => {
-    const view = fakeViews({ sales: { fairt: sale({ status: "settled" }) }, bids: { [ALICE]: { revealed: true, claimed: false } } });
+    const view = fakeViews({ sales: final, results: { fairt: proceedsResult({ total_raised: "1" }) } });
     expect(await run([fairgroundCall("claim_proceeds"), { ...fairgroundCall("claim"), saleId: "other" }], view)).toBe("unknown_sale");
   });
 });

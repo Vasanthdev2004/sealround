@@ -3,29 +3,50 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Check, ChevronDown, RefreshCw, X } from "lucide-react";
 import { Tag } from "@/components/ui/badge";
-import type { CheckState } from "@/components/ui/bits";
+import { TxLink, type CheckState } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 import { getClient } from "@/lib/client";
-import { randomHex } from "@/lib/crypto";
-import { accountUrl, shortHash, txUrl } from "@/lib/format";
-import type { Attestation, Sale, SaleResult } from "@/lib/types";
+import { ago, dateTime, shortHash, txUrl } from "@/lib/format";
+import { useNow } from "@/lib/hooks";
+import type { AttestedRun, MissingRun, RunCheckId, RunKind, Sale, SaleResult, SaleVerification } from "@/lib/types";
+import { BidInclusionDetail, useBidSetCheck } from "./bid-inclusion";
+import { Chain, Evidence, Note } from "./evidence";
 
-type Run = {
-  attempt: number;
-  nonce: string;
-  attestation?: Attestation;
-  error?: string;
-};
+type Fetched = { attempt: number; verification: SaleVerification | null; error?: string };
 
-/** How many checks have been revealed for a given attempt. */
+/** How many rows have been revealed for a given attempt. */
 type Shown = { attempt: number; n: number };
 
-const CHECKS = 5;
-/** Gap between two checks ticking, so the sequence reads (5 x 240 ms). */
-const STEP_MS = 240;
+/** Gap between two rows ticking, so the sequence reads. */
+const STEP_MS = 110;
+
+/** The checks of each enclave run (near/attestation.ts), in the order they show. */
+const RUN_ROWS: { id: RunCheckId; label: string; pending: string }[] = [
+  { id: "build", label: "Attested build is the sealer the contract pins", pending: "Comparing build hashes." },
+  { id: "executed", label: "The worker measured the same build", pending: "Comparing the measured build." },
+  { id: "input", label: "Input hash matches the request on chain", pending: "Hashing the request's input." },
+  { id: "output", label: "Output hash matches what the contract received", pending: "Hashing the returned bytes." },
+  { id: "task", label: "The TDX quote commits to this record", pending: "Recomputing the task hash." },
+  { id: "measurements", label: "Enclave measurements are approved on chain", pending: "Asking the register contract." },
+  { id: "request", label: "The request came from the sale contract, for this sale", pending: "Reading the request." },
+  { id: "key", label: "The job's answer names the sale's key", pending: "Comparing keys." },
+];
+
+const RUN_NAME: Record<RunKind, string> = { clear: "Clearing", key: "Sale key" };
+
+type Row = {
+  key: string;
+  label: string;
+  state: CheckState;
+  /** The word for a check that did not run here. */
+  idle: string;
+  pending: string;
+  href?: string;
+  body: React.ReactNode;
+};
 
 const timeStr = (at: number) =>
   new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -33,51 +54,58 @@ const timeStr = (at: number) =>
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** A run's state for one check: pass, fail, or null when it could not run here. */
+function runOk(run: AttestedRun | MissingRun, id: RunCheckId): boolean | null {
+  return run.found ? (run.checks.find((c) => c.id === id)?.ok ?? null) : null;
+}
+
 /**
- * The five checks from the spec, run in this browser. OutLayer's attestation
- * takes no nonce (contracts/DESIGN.md, spec deviation 1), so the first check
- * ties the attested run to this sale instead: its input and output hashes must
- * equal the ones the contract stored.
- * Results tick in one by one, in order, each time the checks run.
+ * The checks run in this browser. In NEAR mode they are real: the panel finds
+ * the transaction behind each enclave run (the sale key run and the clearing
+ * run), fetches OutLayer's attestation for it and checks it against the chain
+ * (near/attestation.ts, a port of enclave/deploy/Verify-Attestation.ps1). The
+ * bid set is recomputed from get_bids. The mock runs the same rows over a
+ * simulated, unsigned attestation and says so.
  *
- * The panel leads with the outcome ("5 of 5 checks passed") and one line
- * saying what the checks ran against: a fetched attestation, a simulated one,
- * or only the values the contract stored. The checks follow as a ledger.
+ * The panel leads with the outcome ("11 of 11 checks passed"), what the
+ * checks ran against and how old the evidence is (OutLayer takes no nonce).
+ * The checks follow as a ledger, each with its evidence; the raw quote and
+ * what is not checked here close it.
  */
 export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult }) {
   const [attempt, setAttempt] = useState(0);
-  const [run, setRun] = useState<Run | null>(null);
+  const [fetched, setFetched] = useState<Fetched | null>(null);
   const [shown, setShown] = useState<Shown>({ attempt: -1, n: 0 });
   const [open, setOpen] = useState(false);
+  const now = useNow(30_000);
+  const bidSet = useBidSetCheck(sale);
   /** Commit-reveal: the contract cleared the revealed bids itself, with no enclave. */
   const onchain = result.clearedBy === "onchain";
+  const total = (onchain ? 1 : RUN_ROWS.length) + 3;
 
   useEffect(() => {
     let cancelled = false;
     const timers: number[] = [];
-    const nonce = randomHex(16);
     const reveal = () => {
       if (reducedMotion()) {
-        setShown({ attempt, n: CHECKS });
+        setShown({ attempt, n: total });
         return;
       }
-      for (let i = 1; i <= CHECKS; i++) {
+      for (let i = 1; i <= total; i++) {
         timers.push(window.setTimeout(() => !cancelled && setShown({ attempt, n: i }), i * STEP_MS));
       }
     };
-    // A sale the contract cleared itself (commit-reveal) never ran an enclave: there is no attestation to ask for.
-    const asked: Promise<Attestation | undefined> = onchain
-      ? Promise.resolve(undefined)
-      : getClient().getAttestation(sale.id, nonce);
+    // A sale the contract cleared itself (commit-reveal) never ran an enclave: there is nothing to verify.
+    const asked: Promise<SaleVerification | null> = onchain ? Promise.resolve(null) : getClient().verifySale(sale.id);
     asked.then(
-      (attestation) => {
+      (verification) => {
         if (cancelled) return;
-        setRun({ attempt, nonce, attestation });
+        setFetched({ attempt, verification });
         reveal();
       },
       (e: unknown) => {
         if (cancelled) return;
-        setRun({ attempt, nonce, error: e instanceof Error ? e.message : String(e) });
+        setFetched({ attempt, verification: null, error: e instanceof Error ? e.message : String(e) });
         reveal();
       },
     );
@@ -85,99 +113,238 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
       cancelled = true;
       timers.forEach((t) => window.clearTimeout(t));
     };
-  }, [sale.id, attempt, onchain]);
+  }, [sale.id, attempt, onchain, total]);
 
-  const fetched = !!run && run.attempt === attempt;
+  const current = fetched && fetched.attempt === attempt ? fetched : null;
   const revealed = shown.attempt === attempt ? shown.n : 0;
-  const att = fetched ? run.attestation : undefined;
-  const fetchError = fetched ? run.error : undefined;
+  const v = current?.verification ?? null;
+  const fetchError = current?.error;
   const client = getClient();
-  const expected = client.expectedCodeHash();
+  const simulated = client.mode === "mock" || !!v?.simulated;
   const timedOut = result.failReason === "settle_timeout";
-  // On the mock chain the attestation is signed by nothing and the settle
-  // transaction has no explorer page: say so up front, and link nowhere fake.
-  const simulated = client.mode === "mock" || !!att?.simulated;
   const settleHref = simulated || !result.settleTx || txUrl(result.settleTx) === "#" ? undefined : txUrl(result.settleTx);
-  // Against a real contract the app reads what the contract stored (the pinned
-  // code hash, the sale key, the hashes of the run's input and output). It
-  // fetches no attestation of its own, so the checks that need one say so
-  // instead of passing or failing on values that were never compared.
-  const fromChain = att?.source === "chain";
+  // Clearing first: it is what the result rests on.
+  const runs = v ? [v.clear, v.key].filter((r): r is AttestedRun | MissingRun => r !== null) : [];
+  const attested = runs.filter((r): r is AttestedRun => r.found);
+  const missing = runs.filter((r): r is MissingRun => !r.found);
 
-  // 1. The attested run is this sale's run: its input and output hashes equal the ones the contract stored.
-  const storedIn = result.inputSha256 ?? "";
-  const storedOut = result.resultSha256 ?? "";
-  const runOk =
-    !!att && !!att.outputHash && att.outputHash === storedOut && (!storedIn || att.inputHash === storedIn);
-  const r1: CheckState = onchain || fromChain || timedOut ? "idle" : runOk ? "pass" : "fail";
-  // 2. Code hash
-  const codeOk = !!att && !!expected && att.codeHash === expected;
-  const r2: CheckState = onchain || (fromChain && !expected) ? "idle" : codeOk ? "pass" : "fail";
-  // 3. Public key
-  const keyOk = !!att && att.reportedPubkey === sale.sealerPubkey;
-  const r3: CheckState = onchain || fromChain ? "idle" : keyOk ? "pass" : "fail";
-  // 4. Bid-set hash
+  // ---------- the rows ----------
+
+  const rows: Row[] = [];
+  if (onchain) {
+    rows.push({
+      key: "enclave",
+      label: "Enclave runs",
+      state: "idle",
+      idle: "Not applicable",
+      pending: "",
+      body: <Note>No enclave ran: the contract cleared the revealed bids itself.</Note>,
+    });
+  } else {
+    for (const def of RUN_ROWS) {
+      const oks = runs.map((r) => runOk(r, def.id));
+      const state: CheckState = !current
+        ? "pending"
+        : oks.some((o) => o === false)
+          ? "fail"
+          : oks.length > 0 && oks.every((o) => o === true)
+            ? "pass"
+            : "idle";
+      rows.push({
+        key: def.id,
+        label: def.label,
+        state,
+        idle: oks.some((o) => o === true) ? "In part" : runs.length || fetchError ? "Not run" : "Not applicable",
+        pending: def.pending,
+        href: attested.length === 1 && attested[0].verifierUrl ? attested[0].verifierUrl : undefined,
+        body: fetchError ? (
+          <Note>Not run: the evidence could not be fetched.</Note>
+        ) : runs.length === 0 ? (
+          <Note>No enclave run to check.</Note>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {runs.map((r) => (
+              <div key={r.kind} className="flex flex-col gap-x-3 sm:grid sm:grid-cols-[4.5rem_minmax(0,1fr)]">
+                <span className="text-label text-subtle">{RUN_NAME[r.kind]}</span>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  {r.found ? (
+                    (r.checks.find((c) => c.id === def.id)?.items ?? []).map((item, i) => <Evidence key={i} item={item} />)
+                  ) : (
+                    <Note tone="subtle">Not run</Note>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ),
+      });
+    }
+  }
+
+  // The bid set the enclave (or the contract) cleared is the one frozen at close.
   const hashOk = !!sale.bidSetHash && result.bidSetHash === sale.bidSetHash;
-  const r4: CheckState = timedOut || onchain ? "idle" : hashOk ? "pass" : "fail";
-  // 5. Contract checks
+  rows.push({
+    key: "bid-set",
+    label: "Result's bid-set hash equals the frozen set",
+    state: timedOut || onchain ? "idle" : hashOk ? "pass" : "fail",
+    idle: "Not applicable",
+    pending: "Comparing bid-set hashes.",
+    href: settleHref,
+    body: onchain ? (
+      <Note>
+        The contract cleared the bid set it froze at close,{" "}
+        <span className="font-mono">{shortHash(sale.bidSetHash ?? "none", 6)}</span>, with no result from outside.
+      </Note>
+    ) : timedOut ? (
+      <Note>No enclave result. The sale moved to refunds after the settle timeout.</Note>
+    ) : (
+      <Chain
+        values={[
+          { label: "frozen at close", value: sale.bidSetHash ?? "none" },
+          { label: "result", value: result.bidSetHash || "none" },
+        ]}
+        ok={hashOk}
+      />
+    ),
+  });
+
+  rows.push({
+    key: "inclusion",
+    label: "Recomputed bid set matches the frozen hash",
+    state: bidSet.state,
+    idle: bidSet.error ? "Not run" : "Not applicable",
+    pending: "Recomputing the bid set.",
+    body: bidSet.check ? (
+      <BidInclusionDetail sale={sale} check={bidSet.check} bids={bidSet.bids} />
+    ) : (
+      <Note tone={bidSet.error ? "bad" : "muted"}>
+        {bidSet.error ? `Could not verify the bid set: ${bidSet.error}` : "The sale has no frozen bid set."}
+      </Note>
+    ),
+  });
+
   const failing = result.checks.filter((ch) => !ch.passed);
-  const onlyMinRaise =
-    result.status === "failed" && failing.length === 1 && failing[0].id === "raise_at_least_min";
+  const onlyMinRaise = result.status === "failed" && failing.length === 1 && failing[0].id === "raise_at_least_min";
   // The same check row also stands for "something was sold": a sale with no valid bid fails it without missing a raise.
   const noValidBids = result.failReason === "no_valid_bids";
-  const r5: CheckState =
-    result.checks.length === 0 ? "idle" : failing.length === 0 || onlyMinRaise ? "pass" : "fail";
+  rows.push({
+    key: "contract",
+    label: onlyMinRaise ? "The contract correctly moved the sale to refunds" : "Contract-side checks",
+    state: result.checks.length === 0 ? "idle" : failing.length === 0 || onlyMinRaise ? "pass" : "fail",
+    idle: "Not applicable",
+    pending: "Reading the checks again.",
+    href: settleHref,
+    body: (
+      <>
+        <Note>
+          {result.checks.length === 0
+            ? "No enclave result to check. Refunds need no checks."
+            : onlyMinRaise
+              ? `${result.checks.length - 1} of ${result.checks.length} passed. ${
+                  noValidBids ? "No bid was valid, so nothing was sold" : "Minimum raise not met"
+                }: the contract correctly moved the sale to refunds.`
+              : `${result.checks.length - failing.length} of ${result.checks.length} passed.`}
+        </Note>
+        {result.checks.length > 0 && (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="mt-1 -ml-3"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              aria-controls="contract-checks"
+              icon={
+                <ChevronDown
+                  className={cn("size-3.5 transition-transform duration-200", open && "rotate-180")}
+                  strokeWidth={1.75}
+                />
+              }
+            >
+              {open ? "Hide" : "Show"} the {result.checks.length} checks
+            </Button>
+            {open && (
+              <ul id="contract-checks" className="anim-fade mt-1 divide-y divide-line border-t border-line">
+                {result.checks.map((ch) => {
+                  const expectedFail = onlyMinRaise && ch.id === "raise_at_least_min";
+                  return (
+                    <li key={ch.id} className="flex items-start gap-2.5 py-2">
+                      {ch.passed ? (
+                        <Check className="mt-[3px] size-3.5 shrink-0 text-ok" strokeWidth={2.5} aria-label="passed" />
+                      ) : (
+                        <X
+                          className={cn("mt-[3px] size-3.5 shrink-0", expectedFail ? "text-warn" : "text-bad")}
+                          strokeWidth={2.5}
+                          aria-label="failed"
+                        />
+                      )}
+                      <div className="min-w-0 text-small">
+                        <span className={ch.passed ? "text-muted" : "text-fg"}>{ch.label}</span>
+                        {expectedFail && (
+                          <span className="mt-0.5 block text-label text-subtle">
+                            {noValidBids
+                              ? "Expected on this sale: no bid was valid, so nothing was sold and the contract moved it to refunds instead of settling."
+                              : "Expected on this sale: the raise fell short, so the contract refunded everyone instead of settling."}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </>
+        )}
+      </>
+    ),
+  });
 
-  const finals = [r1, r2, r3, r4, r5];
-  const states: CheckState[] = finals.map((s, i) => (i < revealed ? s : "pending"));
-  const done = revealed >= CHECKS;
-  const applicable = finals.filter((s) => s !== "idle");
-  const passed = applicable.filter((s) => s === "pass").length;
-  // Checks that do apply to this sale but could not be run here, because no
-  // attestation was fetched. They are not passes: the verdict counts them out
-  // loud and never turns fully green while any is left.
-  const unchecked = fromChain && !onchain ? [r1, r2, r3].filter((s) => s === "idle").length : 0;
-  // A check the attestation would answer: not applicable when no enclave ran, not run when none was fetched.
-  const attIdle = onchain ? "Not applicable" : "Not run";
+  // ---------- the verdict ----------
 
-  // Where the checks ran and against what. This one line tells fetched
-  // evidence from simulated evidence and from evidence this build cannot fetch.
+  const states: CheckState[] = rows.map((r, i) => (i < revealed ? r.state : "pending"));
+  const done = revealed >= rows.length && rows.every((r) => r.state !== "pending");
+  const notRun = rows.filter((r) => r.state === "idle" && r.idle !== "Not applicable").length;
+  const passed = rows.filter((r) => r.state === "pass").length;
+  const counted = rows.filter((r) => r.state === "pass" || r.state === "fail").length + notRun;
+
   const against = onchain
     ? ". The contract cleared this sale itself from the revealed bids, so no enclave ran"
-    : fromChain
-      ? " against the values the contract stored"
+    : fetchError
+      ? `. Fetching the evidence failed: ${fetchError}`
       : simulated
         ? " against an unsigned, simulated attestation"
-        : " against a freshly fetched attestation";
-  const left =
-    unchecked > 0
-      ? ` ${unchecked} need OutLayer's attestation, which this build does not fetch.`
-      : applicable.length < CHECKS
-        ? ` ${CHECKS - applicable.length} do not apply here.`
-        : "";
+        : attested.length
+          ? ` against OutLayer's attestation${attested.length > 1 ? "s" : ""} ${attested.map((r) => `#${r.attestationId}`).join(" and ")} and the chain`
+          : " against the chain";
   const how = !done
     ? onchain
       ? "Reading the contract's result again."
-      : fetched
-        ? "Comparing the attestation with the chain."
-        : "Fetching the attestation."
-    : `Run in your browser${att ? ` at ${timeStr(att.fetchedAt)}` : ""}${against}.${left}`;
+      : current
+        ? "Comparing the attestations with the chain."
+        : "Finding the runs' transactions and fetching OutLayer's attestations."
+    : `Run in your browser at ${timeStr(v?.checkedAt ?? now)}${against}.`;
 
   return (
     <Panel
+      id="verification"
       title={
         // As tall as the button beside it, so the two share a centre line.
         <span className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1">
           Verified {simulated && <Tag>simulated</Tag>}
-          {unchecked > 0 && <Tag tone="warn">in part</Tag>}
+          {done && notRun > 0 && <Tag tone="warn">in part</Tag>}
         </span>
       }
       action={
         <Button
           size="sm"
-          onClick={() => setAttempt((a) => a + 1)}
-          disabled={!done}
-          icon={<RefreshCw className={cn("size-3.5", !done && "animate-spin")} strokeWidth={1.75} />}
+          aria-label="Re-run checks"
+          aria-disabled={!done}
+          onClick={() => {
+            if (!done) return;
+            bidSet.refetch();
+            setAttempt((a) => a + 1);
+          }}
+          icon={<RefreshCw className={cn("size-3.5", !done && "motion-safe:animate-spin")} strokeWidth={1.75} aria-hidden />}
         >
           <span className="hidden sm:inline">Re-run checks</span>
           <span className="sm:hidden">Re-run</span>
@@ -185,249 +352,162 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
       }
       bodyClassName="p-0"
     >
-      <div className="px-5 pt-5 pb-4" aria-live="polite">
-        <div className="text-h2 text-fg">
+      <div className="px-5 pt-5 pb-4">
+        <p className="sr-only" role="status">
+          {done ? `${passed} of ${counted} checks passed${notRun ? `, ${notRun} not run` : ""}.` : "Verification in progress."}
+        </p>
+        <div className="text-h2 text-fg" aria-hidden>
           {!done ? (
             <>
-              Checking <span className="num">{Math.min(revealed + 1, CHECKS)}</span> of{" "}
-              <span className="num">{CHECKS}</span>
+              Checking <span className="num">{Math.min(revealed + 1, rows.length)}</span> of{" "}
+              <span className="num">{rows.length}</span>
             </>
           ) : (
             <>
-              <span className="num">{passed}</span> of <span className="num">{applicable.length + unchecked}</span>{" "}
-              checks passed
-              {unchecked > 0 && (
+              <span className="num">{passed}</span> of <span className="num">{counted}</span> checks passed
+              {notRun > 0 && (
                 <>
-                  , <span className="num">{unchecked}</span> not run
+                  , <span className="num">{notRun}</span> not run
                 </>
               )}
             </>
           )}
         </div>
         <p className="mt-1 max-w-[64ch] text-small text-muted">{how}</p>
+        {done && (attested.length > 0 || missing.length > 0) && (
+          <dl className="mt-3 flex flex-col gap-1 text-label">
+            {attested.map((r) => (
+              <div key={r.kind} className="flex flex-wrap items-baseline gap-x-2">
+                <dt className="text-subtle">{RUN_NAME[r.kind]} run</dt>
+                <dd className="text-muted">
+                  {r.blockHeight !== null && (
+                    <>
+                      block <span className="num">{r.blockHeight.toLocaleString("en-US")}</span>,{" "}
+                    </>
+                  )}
+                  {simulated ? "simulated, " : ""}
+                  <span className="num">{dateTime(r.at)}</span>, <span className="num">{ago(r.at, now)}</span>
+                </dd>
+              </div>
+            ))}
+            {missing.map((r) => (
+              <div key={r.kind} className="flex flex-wrap items-baseline gap-x-2">
+                <dt className="text-subtle">{RUN_NAME[r.kind]} run</dt>
+                <dd className="text-warn">Not checked. {r.message}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {done && attested.length > 0 && !simulated && (
+          <p className="mt-1 text-label text-subtle">
+            OutLayer takes no nonce, so these are when the runs happened, not a fresh challenge.
+          </p>
+        )}
       </div>
 
       <ol className="divide-y divide-line border-t border-line">
-        <ProofRow
-          n={1}
-          state={states[0]}
-          idle={timedOut && !onchain ? "Not applicable" : attIdle}
-          label="Attested run's input and output hashes match what the contract stored"
-          pending="Comparing the run's hashes."
-          href={onchain || fromChain ? undefined : att?.url}
-        >
-          {onchain ? (
-            <Note>No enclave ran for this sale.</Note>
-          ) : fromChain ? (
-            <Note>
-              This build reads the hashes the contract stored and does not fetch OutLayer&apos;s attestation itself,
-              so there is nothing independent to compare them with.
-            </Note>
-          ) : timedOut ? (
-            <Note>The sale timed out before a run settled it.</Note>
-          ) : fetchError ? (
-            <Note tone="bad">Fetch failed: {fetchError}</Note>
-          ) : (
-            <>
-              <Pair a={["attested output", shortHash(att?.outputHash ?? "", 6)]} b={["on chain", shortHash(storedOut, 6)]} ok={runOk} />
-              {!runOk && <Note>The attestation describes a different run than the one the contract settled.</Note>}
-            </>
-          )}
-        </ProofRow>
-        <ProofRow
-          n={2}
-          state={states[1]}
-          idle={attIdle}
-          label={
-            fromChain
-              ? "Enclave code hash pinned in the contract equals our reproducible build"
-              : "Enclave code hash equals our reproducible build"
-          }
-          pending="Comparing code hashes."
-          href={onchain || fromChain ? undefined : att?.url}
-        >
-          {onchain ? (
-            <Note>The contract ran the clearing rule itself.</Note>
-          ) : fromChain && !expected ? (
-            <Note>
-              No reference build hash is set for this deployment. The contract pins{" "}
-              <span className="font-mono">{shortHash(att?.codeHash ?? "", 6)}</span> and only accepts results for it.
-            </Note>
-          ) : att ? (
-            <Pair
-              a={[fromChain ? "pinned" : "attested", shortHash(att.codeHash, 6)]}
-              b={["public build", shortHash(expected, 6)]}
-              ok={codeOk}
-            />
-          ) : (
-            <Note>No attestation to compare.</Note>
-          )}
-        </ProofRow>
-        <ProofRow
-          n={3}
-          state={states[2]}
-          idle={attIdle}
-          label="Sealer public key on chain matches the attestation"
-          pending="Comparing public keys."
-          href={
-            simulated || onchain || fromChain || accountUrl(client.contractId) === "#"
-              ? undefined
-              : accountUrl(client.contractId)
-          }
-        >
-          {onchain ? (
-            <Note>A commit-reveal sale has no sealer key.</Note>
-          ) : fromChain ? (
-            <Note>
-              This needs the attestation. The contract itself refused any result not opened with this sale&apos;s key{" "}
-              <span className="font-mono">{shortHash(sale.sealerPubkey, 6)}</span> (see the contract checks below).
-            </Note>
-          ) : att ? (
-            <Pair
-              a={["on chain", shortHash(sale.sealerPubkey, 6)]}
-              b={["attested", shortHash(att.reportedPubkey, 6)]}
-              ok={keyOk}
-            />
-          ) : (
-            <Note>No attestation to compare.</Note>
-          )}
-        </ProofRow>
-        <ProofRow
-          n={4}
-          state={states[3]}
-          idle="Not applicable"
-          label="Result's bid-set hash equals the contract's stored hash"
-          pending="Comparing bid-set hashes."
-          href={settleHref}
-        >
-          {onchain ? (
-            <Note>
-              The contract cleared the bid set it froze at close,{" "}
-              <span className="font-mono">{shortHash(sale.bidSetHash ?? "none", 6)}</span>, with no result from outside.
-            </Note>
-          ) : timedOut ? (
-            <Note>No enclave result. The sale moved to refunds after the settle timeout.</Note>
-          ) : (
-            <Pair
-              a={["stored at close", shortHash(sale.bidSetHash ?? "none", 6)]}
-              b={["reported", shortHash(result.bidSetHash, 6)]}
-              ok={hashOk}
-            />
-          )}
-        </ProofRow>
-        <ProofRow
-          n={5}
-          state={states[4]}
-          idle="Not applicable"
-          label="All contract-side checks passed"
-          pending="Reading the checks again."
-          href={settleHref}
-        >
-          <Note>
-            {result.checks.length === 0
-              ? "No enclave result to check. Refunds need no checks."
-              : onlyMinRaise
-                ? `${result.checks.length - 1} of ${result.checks.length} passed. ${
-                    noValidBids ? "No bid was valid, so nothing was sold" : "Minimum raise not met"
-                  }: the contract correctly moved the sale to refunds.`
-                : `${result.checks.length - failing.length} of ${result.checks.length} passed.`}
-          </Note>
-          {result.checks.length > 0 && (
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="mt-1 -ml-3"
-                onClick={() => setOpen((o) => !o)}
-                aria-expanded={open}
-                aria-controls="contract-checks"
-                icon={
-                  <ChevronDown
-                    className={cn("size-3.5 transition-transform duration-200", open && "rotate-180")}
-                    strokeWidth={1.75}
-                  />
-                }
-              >
-                {open ? "Hide" : "Show"} the {result.checks.length} checks
-              </Button>
-              {open && (
-                <ul id="contract-checks" className="anim-fade mt-1 divide-y divide-line border-t border-line">
-                  {result.checks.map((ch) => {
-                    const expectedFail = onlyMinRaise && ch.id === "raise_at_least_min";
-                    return (
-                      <li key={ch.id} className="flex items-start gap-2.5 py-2">
-                        {ch.passed ? (
-                          <Check className="mt-[3px] size-3.5 shrink-0 text-ok" strokeWidth={2.5} aria-label="passed" />
-                        ) : (
-                          <X
-                            className={cn("mt-[3px] size-3.5 shrink-0", expectedFail ? "text-warn" : "text-bad")}
-                            strokeWidth={2.5}
-                            aria-label="failed"
-                          />
-                        )}
-                        <div className="min-w-0 text-small">
-                          <span className={ch.passed ? "text-muted" : "text-fg"}>{ch.label}</span>
-                          {expectedFail && (
-                            <span className="mt-0.5 block text-label text-subtle">
-                              {noValidBids
-                                ? "Expected on this sale: no bid was valid, so nothing was sold and the contract moved it to refunds instead of settling."
-                                : "Expected on this sale: the raise fell short, so the contract refunded everyone instead of settling."}
-                            </span>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </>
-          )}
-        </ProofRow>
+        {rows.map((r, i) => (
+          <ProofRow
+            key={r.key}
+            n={i + 1}
+            state={states[i]}
+            idle={r.idle}
+            label={r.label}
+            pending={r.pending}
+            href={r.href}
+          >
+            {r.body}
+          </ProofRow>
+        ))}
       </ol>
 
-      {/* The raw evidence on the recessed surface: the quote, or what stands in for it. */}
-      <div className="border-t border-line bg-inset px-5 py-4">
+      {/* The raw evidence on the recessed surface: the transactions, the quote, and what is not checked here. */}
+      <div className="flex flex-col gap-3 border-t border-line bg-inset px-5 py-4">
         {onchain ? (
           <p className="text-label text-muted">
             No TDX quote: this sale was cleared on chain. Anyone can replay it from the public reveals with the
             reference clearing code.
           </p>
-        ) : fromChain ? (
-          // No quote was fetched; show what the contract holds about the run instead.
-          <dl className="space-y-1.5 text-label">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <dt className="text-subtle">Clearing input, sha256</dt>
-              <dd className="font-mono text-muted" title={att?.inputHash}>
-                {att?.inputHash ? shortHash(att.inputHash, 8) : "not stored"}
-              </dd>
-            </div>
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <dt className="text-subtle">Clearing output, sha256</dt>
-              <dd className="font-mono text-muted" title={att?.outputHash}>
-                {att?.outputHash ? shortHash(att.outputHash, 8) : "not stored"}
-              </dd>
-            </div>
-            <p className="pt-1 text-subtle">
-              Stored by the contract. OutLayer&apos;s attestation covers the same two hashes; compare them there to
-              check the run yourself.
-            </p>
-          </dl>
+        ) : !current ? (
+          <div className="space-y-1.5">
+            <Skeleton className="h-3 w-full" rounded="sm" />
+            <Skeleton className="h-3 w-2/3" rounded="sm" />
+          </div>
         ) : (
           <>
-            <div className="text-label text-subtle">TDX quote, truncated</div>
-            {att ? (
-              <p className="cipher mt-1.5 line-clamp-2">{att.quote}</p>
-            ) : (
-              <div className="mt-2 space-y-1.5">
-                <Skeleton className="h-3 w-full" rounded="sm" />
-                <Skeleton className="h-3 w-2/3" rounded="sm" />
+            {attested.length > 0 && (
+              <ul className="flex flex-col gap-1 text-label">
+                {attested.map((r) => (
+                  <li key={r.kind} className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-subtle">{r.method ?? RUN_NAME[r.kind]}</span>
+                    <TxLink hash={r.txHash} simulated={simulated} />
+                    {!simulated && (
+                      <span className="text-subtle">
+                        by <span className="[overflow-wrap:anywhere]">{r.signer}</span>, {foundBy(r)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {attested[0] && (
+              <div>
+                <div className="text-label text-subtle">
+                  TDX quote{simulated ? ", simulated" : `, ${RUN_NAME[attested[0].kind].toLowerCase()} run`}, truncated
+                </div>
+                <p className="cipher mt-1.5 line-clamp-2">{attested[0].quote}</p>
               </div>
             )}
+            <p className="text-label text-subtle">
+              {simulated ? (
+                "Simulated: there is no quote whose signature could be checked."
+              ) : (
+                <>
+                  Not checked here: the quote&apos;s signature chain up to Intel.
+                  {attested.some((r) => r.verifierUrl) && (
+                    <>
+                      {" "}
+                      OutLayer&apos;s verifier checks it in your browser:{" "}
+                      {attested
+                        .filter((r) => r.verifierUrl)
+                        .map((r, i) => (
+                          <span key={r.kind}>
+                            {i > 0 && ", "}
+                            <a
+                              href={r.verifierUrl!}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-0.5 text-muted underline decoration-line-strong underline-offset-2 transition-colors hover:text-fg"
+                            >
+                              {RUN_NAME[r.kind].toLowerCase()} run <ArrowUpRight className="size-3" aria-hidden />
+                            </a>
+                          </span>
+                        ))}
+                      .
+                    </>
+                  )}
+                </>
+              )}
+            </p>
           </>
         )}
       </div>
     </Panel>
   );
+}
+
+/** How the run's transaction was found, in a few words. */
+function foundBy(r: AttestedRun): string {
+  switch (r.txSource) {
+    case "block_scan":
+      return `found in block ${r.scannedBlock?.toLocaleString("en-US") ?? "?"}`;
+    case "tx_log":
+      return "sent from this browser";
+    case "outlayer_jobs":
+      return "found in OutLayer's job list";
+    default:
+      return "simulated";
+  }
 }
 
 /** One numbered check in the ledger: what was checked, its state, and the proof underneath. */
@@ -444,7 +524,7 @@ function ProofRow({
   state: CheckState;
   /** The word for a check that did not run: it does not apply to this sale, or it could not be run here. */
   idle: string;
-  label: React.ReactNode;
+  label: string;
   /** What the row says while it is still checking. */
   pending: string;
   href?: string;
@@ -453,7 +533,7 @@ function ProofRow({
   const tone = { pass: "text-ok", fail: "text-bad", pending: "text-muted", idle: "text-subtle" }[state];
   const word = { pass: "Passed", fail: "Failed", pending: "Checking", idle }[state];
   return (
-    <li className="grid grid-cols-[1rem_minmax(0,1fr)] items-baseline gap-x-2.5 px-5 py-3">
+    <li className="grid grid-cols-[1.25rem_minmax(0,1fr)] items-baseline gap-x-2 px-5 py-3">
       <span className="num text-label text-subtle" aria-hidden>
         {n}
       </span>
@@ -467,7 +547,7 @@ function ProofRow({
                 target="_blank"
                 rel="noreferrer"
                 className="ml-2 inline-flex items-center gap-0.5 text-label text-muted underline decoration-line-strong underline-offset-2 transition-colors hover:text-fg"
-                aria-label="Open the source of this check"
+                aria-label={`Source for ${label}`}
               >
                 source <ArrowUpRight className="size-3" aria-hidden />
               </a>
@@ -486,30 +566,5 @@ function ProofRow({
         </div>
       </div>
     </li>
-  );
-}
-
-/** Two hashes on one mono line with = or ≠ between them. It wraps on phones. */
-function Pair({ a, b, ok }: { a: [string, string]; b: [string, string]; ok: boolean }) {
-  return (
-    <p className="cipher flex flex-wrap items-baseline gap-x-2">
-      <span>
-        <span className="font-sans text-label text-subtle">{a[0]}</span> {a[1]}
-      </span>
-      <span className={ok ? "text-ok" : "text-bad"} role="img" aria-label={ok ? "equals" : "does not equal"}>
-        {ok ? "=" : "≠"}
-      </span>
-      <span>
-        <span className="font-sans text-label text-subtle">{b[0]}</span> {b[1]}
-      </span>
-    </p>
-  );
-}
-
-function Note({ children, tone = "muted" }: { children: React.ReactNode; tone?: "muted" | "subtle" | "bad" }) {
-  return (
-    <p className={cn("text-label", { muted: "text-muted", subtle: "text-subtle", bad: "text-bad" }[tone])}>
-      {children}
-    </p>
   );
 }

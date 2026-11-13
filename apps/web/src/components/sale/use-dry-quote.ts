@@ -10,7 +10,7 @@ type State = {
   field: QuoteInputError["field"] | null;
 };
 
-type KeyTuple = [OriginId, string, string, string, number];
+type KeyTuple = [OriginId, string, string, string, NonNullable<DryQuoteInput["confidentiality"]> | null, number];
 
 /**
  * Debounced live dry quote for `input`. Refreshes itself when the quote goes
@@ -20,15 +20,15 @@ export function useDryQuote(input: DryQuoteInput | null, debounceMs = 450) {
   const [tick, setTick] = useState(0);
   const [state, setState] = useState<State | null>(null);
   const key = input
-    ? JSON.stringify([input.originId, input.amount, input.recipient, input.refundTo, tick] satisfies KeyTuple)
+    ? JSON.stringify([input.originId, input.amount, input.recipient, input.refundTo, input.confidentiality ?? null, tick] satisfies KeyTuple)
     : null;
 
   useEffect(() => {
     if (!key) return;
-    const [originId, amount, recipient, refundTo] = JSON.parse(key) as KeyTuple;
+    const [originId, amount, recipient, refundTo, confidentiality] = JSON.parse(key) as KeyTuple;
     let cancelled = false;
     const t = setTimeout(() => {
-      getDryQuote({ originId, amount, recipient, refundTo })
+      getDryQuote({ originId, amount, recipient, refundTo, confidentiality: confidentiality ?? undefined })
         .then((quote) => {
           if (!cancelled) setState({ key, quote, error: null, field: null });
         })

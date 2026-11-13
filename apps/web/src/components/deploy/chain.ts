@@ -12,10 +12,12 @@ export const TESTNET = {
   explorerAccount: "https://testnet.nearblocks.io/address/",
   // Same list as enclave/deploy/templates/new-args.testnet.json.
   quoteTokens: ["usdc.fakes.testnet", "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"],
+  // The Rhea exchange launch pools are seeded on (Rhea v1.9.19 on testnet).
+  dex: "ref-finance-101.testnet",
 };
 
-/** contracts/res/fairground.wasm, 546,747 bytes (AGENTS.md "Pinned hashes"). */
-export const PINNED_CONTRACT_SHA256 = "bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800";
+/** contracts/res/fairground.wasm, 616,196 bytes (AGENTS.md "Pinned hashes"). */
+export const PINNED_CONTRACT_SHA256 = "e93c42759bd63edfba428cf16f043bdad1ae2f3a54d45ca8f9f41e74fe65a941";
 /** enclave/res/fairground_sealer.wasm, the job the contract pins. */
 export const PINNED_SEALER_SHA256 = "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb";
 
@@ -149,6 +151,8 @@ export type NewArgs = {
   sealer_code_hash: string;
   sealer_secrets: { profile: string; account_id: string };
   allowed_quote_tokens: string[];
+  /** null turns launch liquidity off. */
+  dex: string | null;
 };
 
 /** The `new` arguments, the same shape as enclave/deploy/templates/new-args.testnet.json. */
@@ -159,6 +163,7 @@ export function newArgs(owner: string, project: string, sealerSha: string, profi
     sealer_code_hash: sealerSha,
     sealer_secrets: { profile, account_id: owner },
     allowed_quote_tokens: TESTNET.quoteTokens,
+    dex: TESTNET.dex,
   };
 }
 

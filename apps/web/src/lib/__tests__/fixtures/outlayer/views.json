@@ -1,0 +1,132 @@
+{
+ "get_config": {
+  "outlayer": "outlayer.testnet",
+  "sealer_source": {
+   "Project": {
+    "project_id": "itzbeast.testnet/fairground-sealer",
+    "version_key": "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb"
+   }
+  },
+  "sealer_code_hash": "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb",
+  "sealer_secrets": {
+   "profile": "default",
+   "account_id": "itzbeast.testnet"
+  },
+  "allowed_quote_tokens": [
+   "usdc.fakes.testnet",
+   "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"
+  ]
+ },
+ "get_sale": {
+  "sale_id": "smoke-11120830",
+  "status": "settled",
+  "creator": "itzbeast.testnet",
+  "token": "smoke-11120830.fairground.itzbeast.testnet",
+  "quote_token": "usdc.fakes.testnet",
+  "token_name": "Fairground Smoke Test",
+  "token_symbol": "SMOKE",
+  "decimals": 18,
+  "icon": null,
+  "description": "Deployment smoke test. Not a real sale.",
+  "website": null,
+  "total_supply": "1000000000000000000000",
+  "sale_supply": "600000000000000000000",
+  "creator_allocation": "400000000000000000000",
+  "floor_price": "2000",
+  "max_price": null,
+  "min_raise": "0",
+  "bid_start": "1794472392425000000",
+  "bid_end": "1794472992425000000",
+  "min_deposit": "1000000",
+  "max_deposit_per_account": "2000000",
+  "max_bids": 2,
+  "reveal_mode": "Tee",
+  "reveal_window": null,
+  "reveal_end": null,
+  "settle_timeout": "3600000000000",
+  "refund_mode_at": null,
+  "unsold_rule": "Burn",
+  "sealer_code_hash": "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb",
+  "sealer_pubkey": "23f724b0486f476385c25d29d8071fde2abcb8b058e341b8da6a23d09329d942",
+  "token_setup": "done",
+  "sealer_key_setup": "done",
+  "created_at": "1794472294958082765",
+  "closed_at": "1794473306887958893",
+  "bid_count": 1,
+  "total_deposits": "1000000",
+  "bid_set_hash": "4019e54cc1dc35323be5145d0238dd930c6ccf6715f82038f5395df07d055608"
+ },
+ "get_result": {
+  "sale_id": "smoke-11120830",
+  "status": "settled",
+  "fail_reason": null,
+  "clearing_price": "2000",
+  "total_sold": "500000000000000000000",
+  "total_raised": "1000000",
+  "unsold": "100000000000000000000",
+  "n_valid": 1,
+  "n_invalid": 0,
+  "n_winners": 1,
+  "failed_checks": [],
+  "failed_checks_total": 0,
+  "result_sha256": "200b469f734c5257fac7bcbc63d6df858f2c0b01afb0bd180225aa7bc1f9ee3d",
+  "input_sha256": "f0d83af918185e84542c95aa9646b86c4ffbf54336d775b0e763870d9211b285",
+  "clear_requests": 1,
+  "clear_attempts": 0,
+  "total_penalties": "0",
+  "proceeds": {
+   "raise_paid": true,
+   "allocation_paid": true,
+   "unsold_burned": true,
+   "reserve_returned": true
+  }
+ },
+ "get_bids": [
+  {
+   "index": 0,
+   "bidder": "itzbeast.testnet",
+   "deposit": "1000000",
+   "payload": "mmNyl20i5Gb6oEAD4Tj8xiF/Pcb8m2V60oeQCOQER2Kmc9+tYLd/2Mljytk91mjjo89IfUXdnysiZCP1erVunhJf8Ev5X4LtmGxh1HJjyfaN+uNkatEbL2rGwxkpZYnglmkMFUrr7M+Pzjs/gTibPNe8CoJe3hbvJcK7JKg6XTIoVG+IcdUfrUZy8XRvlZAgdwtAddph96KYMPYgK/2eReLwRs1j4TXetaqC/qbrutGOLax2i+FUu2l70JBQWe/brg7kmPdANjb7QAH39PHlMiw/cF+FWLHvQlEStdUPdnL/abl3iBoZh7r4h6IR1Z4bO+0R7cmHWK1ujC9mVMQ=",
+   "placed_at": "1794472499655960893",
+   "revealed": false,
+   "claimed": true
+  }
+ ],
+ "is_measurements_approved": {
+  "key": {
+   "measurements": {
+    "mrtd": "7fe60787222bd394cb516abca2435f22f035ab2cc9c0a4b4b3b148e46297f3d931a237b72f359052c6e657d8c1409173",
+    "rtmr0": "573aadb4d478839c803c4b1d3e03dd748976b63a89622f377e32a54dd60546e88ec2097f595ceafc324f48a0d0d31db6",
+    "rtmr1": "e7b3ffa0e72b50557d85f7ecd8dc98a4ffc3dd6f82d01f122ef522d61361abeac310d70d2877e56be9c9408d9bcc320c",
+    "rtmr2": "764489f277a8540189761e72b4238ba36d4d647e11bd958d8ab5522af2a4867b0ff63e06b0c4967f1857236244040a5d",
+    "rtmr3": "d85416a5a567dd0313fd66c309f736ec608d1e0e0c246d069517a616bd3d01d6a6bef8f2f6467d239ce3754de16f99b6"
+   },
+   "approved": true
+  },
+  "clear": {
+   "measurements": {
+    "mrtd": "7fe60787222bd394cb516abca2435f22f035ab2cc9c0a4b4b3b148e46297f3d931a237b72f359052c6e657d8c1409173",
+    "rtmr0": "573aadb4d478839c803c4b1d3e03dd748976b63a89622f377e32a54dd60546e88ec2097f595ceafc324f48a0d0d31db6",
+    "rtmr1": "e7b3ffa0e72b50557d85f7ecd8dc98a4ffc3dd6f82d01f122ef522d61361abeac310d70d2877e56be9c9408d9bcc320c",
+    "rtmr2": "764489f277a8540189761e72b4238ba36d4d647e11bd958d8ab5522af2a4867b0ff63e06b0c4967f1857236244040a5d",
+    "rtmr3": "528235764e42c8ec9bbd3d58543dddba5f2eb43f18ad580385bd03991bbeaded7fde1b0f24697a4506742a44a7f7b884"
+   },
+   "approved": true
+  }
+ },
+ "block_heights": {
+  "2sHGRtGxPDdwWkWjkMXwQoihUJ78DYjANfBxtk6mHK9n": 277338464,
+  "2SarbkcReSHrb2sXVsG2cKbdm2kvZpLN7ctqyRZdUnve": 277338465,
+  "6SNcZFFKRH31jkPCLH8iMJ6XqkRYTaMJUxZpd3V7gVRx": 277338466,
+  "5NnzxdjkXar22dG4jt6kLbGLfsPLFPBsfyDKS4SVeSLb": 277338467,
+  "81GV16UeGQU5ESToGqiuY8byTesiwnuCXagHoXDisbAc": 277338475,
+  "82diwUsPz8zyc9RcM3NWyuADN4jrCtUgtBUDBr8KK93e": 277338476,
+  "BXSVkV2Rc3JWPaEUDkBpvVeGV6uT7QYrCuodX8buwu27": 277338477,
+  "6nfajzDMac1acFCGmLcDVaBRjFL8jma161fZx4u1b3um": 277340196,
+  "FN7sgpUDNHeQD8eJ2MwifoSGms7k7jD4MWs6g13w3Ucd": 277340197,
+  "67Lv4buuSDfmn8X2jGqf25WrNapxhsMLQVDmwbERT2CQ": 277340206,
+  "FjHZ2R3oBzPkYwKwwSL5eh1q5uuT9FrrNA6amiY1JpD5": 277340207,
+  "7UwdcmsvNHFYqyWES3V76TihFMcpHU7EZgJLVgpZTi1u": 277340208,
+  "ETHwLZhbaPcS9x3a46ZaFBQzdN2arpgJM9B3LwoJxQox": 277340198
+ }
+}

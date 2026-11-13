@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getConfig } from "@/app/api/oneclick/config/route";
 import { POST as postQuote } from "@/app/api/oneclick/quote/route";
+import { issueReceipt } from "@/app/api/oneclick/receipt";
 import { NEAR_USDC_ASSET, NEAR_USDC_CONTRACT } from "@/app/api/oneclick/shared";
 import { GET as getStatus } from "@/app/api/oneclick/status/route";
 import { POST as postSubmit } from "@/app/api/oneclick/submit/route";
 import { POST as postSwap } from "@/app/api/oneclick/swap/route";
 
 vi.mock("next/server", () => ({ connection: async () => {} }));
+vi.mock("@/app/api/oneclick/quota", () => ({
+  oneClickSharedQuotaConfigured: () => true,
+  checkOneClickQuota: async () => null,
+}));
 
 const BASE_USDC = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
 const DEPOSIT = `0x${"1".repeat(40)}`;
@@ -15,10 +20,10 @@ const TX_HASH = `0x${"3".repeat(64)}`;
 const UPSTREAM = "https://1click.chaindefuser.com/v0";
 const fetchStub = vi.fn<typeof fetch>();
 
-function post(path: string, body: unknown): Request {
+function post(path: string, body: unknown, token?: string): Request {
   return new Request(`http://localhost/api/oneclick/${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
   });
 }
@@ -28,6 +33,8 @@ function status(depositAddress: string): Request {
   url.searchParams.set("depositAddress", depositAddress);
   return new Request(url);
 }
+
+const tracking = () => issueReceipt({ address: DEPOSIT, recipient: "recipient.near", kind: "evm" }).token;
 
 function quoteTerms() {
   return {
@@ -62,6 +69,7 @@ function mockQuote(terms: ReturnType<typeof quoteTerms>) {
 
 function enableMainnet() {
   vi.stubEnv("ONECLICK_REAL_SWAPS", "1");
+  vi.stubEnv("ONECLICK_RECEIPT_SECRET", "a".repeat(64));
   vi.stubEnv("NEXT_PUBLIC_FAIRGROUND_CONTRACT", "sealround.near");
   vi.stubEnv("NEXT_PUBLIC_NEAR_NETWORK", "mainnet");
 }
@@ -70,7 +78,7 @@ beforeEach(() => {
   fetchStub.mockReset();
   vi.stubGlobal("fetch", fetchStub);
   for (const name of [
-    "ONECLICK_REAL_SWAPS", "ONECLICK_JWT", "NEXT_PUBLIC_FAIRGROUND_CONTRACT", "NEXT_PUBLIC_NEAR_NETWORK",
+    "ONECLICK_REAL_SWAPS", "ONECLICK_JWT", "ONECLICK_RECEIPT_SECRET", "NEXT_PUBLIC_FAIRGROUND_CONTRACT", "NEXT_PUBLIC_NEAR_NETWORK",
     "NEXT_PUBLIC_NEAR_RPC_URL", "NEXT_PUBLIC_USDC_CONTRACT", "NEXT_PUBLIC_RELAYER_URL", "NEXT_PUBLIC_SEALER_CODE_HASH",
   ]) vi.stubEnv(name, undefined);
 });
@@ -126,7 +134,7 @@ describe("1Click proxy", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("authorization")).toBeNull();
-    expect(await response.json()).toEqual(fixture);
+    expect(await response.json()).toMatchObject({ ...fixture, tracking: { token: expect.any(String), expiresAt: expect.any(Number) } });
     const [url, request] = fetchStub.mock.calls[0];
     expect(url).toBe(`${UPSTREAM}/quote`);
     expect(new Headers(request?.headers).get("authorization")).toBe("Bearer local-fixture-token");
@@ -159,10 +167,15 @@ describe("1Click proxy", () => {
 
   it("polls the upstream deposit without caching status or forwarding other query fields", async () => {
     enableMainnet();
-    const fixture = { status: "SUCCESS", swapDetails: { amountOut: "24990000" } };
+    const updatedAt = new Date().toISOString();
+    const fixture = {
+      status: "SUCCESS", updatedAt, quoteResponse: mockQuote(quoteTerms()), swapDetails: { amountOut: "24990000" },
+    };
     fetchStub.mockResolvedValue(Response.json(fixture));
-    const response = await getStatus(new Request(`${status(DEPOSIT).url}&depositMemo=ignore&jwt=ignore`));
-    expect(await response.json()).toEqual(fixture);
+    const response = await getStatus(new Request(`${status(DEPOSIT).url}&depositMemo=ignore&jwt=ignore`, {
+      headers: { authorization: `Bearer ${tracking()}` },
+    }));
+    expect(await response.json()).toEqual({ status: "SUCCESS", updatedAt: Date.parse(updatedAt), amountOut: "24990000" });
     expect(response.headers.get("cache-control")).toBe("no-store");
     const [url, request] = fetchStub.mock.calls[0];
     expect(String(url)).toBe(`${UPSTREAM}/status?depositAddress=${DEPOSIT}`);
@@ -171,8 +184,8 @@ describe("1Click proxy", () => {
 
   it("rejects malformed deposits and transaction hashes before contacting 1Click", async () => {
     enableMainnet();
-    expect((await getStatus(status("https://elsewhere.invalid/"))).status).toBe(400);
-    const request = post("submit", { depositAddress: DEPOSIT, txHash: "not-a-transaction" });
+    expect((await getStatus(status("https://elsewhere.invalid/"))).status).toBe(403);
+    const request = post("submit", { depositAddress: DEPOSIT, txHash: "not-a-transaction" }, tracking());
     expect((await postSubmit(request)).status).toBe(400);
     expect(fetchStub).not.toHaveBeenCalled();
   });
@@ -181,8 +194,8 @@ describe("1Click proxy", () => {
     enableMainnet();
     fetchStub.mockResolvedValue(Response.json({ status: "KNOWN_DEPOSIT_TX" }));
     const terms = { depositAddress: DEPOSIT, txHash: TX_HASH };
-    const response = await postSubmit(post("submit", { ...terms, nearSenderAccount: "ignore" }));
-    expect(await response.json()).toEqual({ status: "KNOWN_DEPOSIT_TX" });
+    const response = await postSubmit(post("submit", { ...terms, nearSenderAccount: "ignore" }, tracking()));
+    expect(response.status).toBe(204);
     const [url, request] = fetchStub.mock.calls[0];
     expect(url).toBe(`${UPSTREAM}/deposit/submit`);
     expect(JSON.parse(String(request?.body))).toEqual(terms);

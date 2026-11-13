@@ -51,6 +51,8 @@ pub struct SaleSpec {
     pub reveal_window: Option<u64>,
     /// Seconds.
     pub settle_timeout: u64,
+    /// `create_sale`'s `liquidity` argument, as JSON.
+    pub liquidity: Option<Value>,
 }
 
 impl SaleSpec {
@@ -82,6 +84,7 @@ impl SaleSpec {
                 Mode::CommitReveal => Some(60),
             },
             settle_timeout: 600,
+            liquidity: None,
         }
     }
 
@@ -121,6 +124,7 @@ impl SaleSpec {
                 self.reveal_window
                     .map(|w| Value::from((w * SECOND).to_string())),
             ),
+            ("liquidity", self.liquidity.clone()),
         ];
         for (key, value) in optional {
             if let Some(value) = value {

@@ -18,12 +18,16 @@ import {
   bidSetHash,
   clear,
   ClearingError,
+  MAX_POOL_FEE_BPS,
+  MAX_RAISE_SHARE_BPS,
+  poolPlan,
   type Bid as ClearingBid,
   type InvalidReason,
   type SaleParams,
 } from "@fairground/clearing";
 import type {
-  Attestation,
+  AttestationFact,
+  AttestedRun,
   Balances,
   BidRecord,
   BidResult,
@@ -34,9 +38,15 @@ import type {
   ClientCapabilities,
   ClientNotice,
   CreateOptions,
+  DexPool,
+  LiquidityState,
+  LiquidityStep,
+  LiquidityWriteResult,
   RelayerPolicyInfo,
   RelayInfo,
   RevealTerms,
+  RunCheck,
+  RunKind,
   Sale,
   SaleConfig,
   SaleEvent,
@@ -44,6 +54,7 @@ import type {
   SaleMeta,
   SaleResult,
   SaleStatus,
+  SaleVerification,
   SaleWithRelay,
   StorageResult,
   WriteResult,
@@ -61,6 +72,7 @@ import {
   toB64,
 } from "../crypto";
 import { getBidSecret, saveBidSecret } from "../bid-secrets";
+import { locksTokens, poolUsdcKept, SEED_STEPS, STAGE_LABEL, stepPhrase } from "../liquidity";
 import { makeBots, makeCrowd, type CrowdBidder } from "./crowd";
 import { bidRejected, BID_REJECT_MESSAGES, FairgroundError } from "./errors";
 import type { BidPayload, FairgroundClient, JudgeProgress } from "./index";
@@ -95,9 +107,14 @@ export const CONTRACT_ID = "fairground.testnet";
 export const USDC_TOKEN = "usdc.fakes.testnet";
 /** Scope of the mock's commit-reveal secrets in lib/bid-secrets, so they never mix with a real contract's. */
 export const MOCK_SECRETS_SCOPE = `mock:${CONTRACT_ID}`;
-/** Stand-in for the hash of our reproducible fairground-sealer build. */
+/**
+ * The sha256 of our reproducible fairground-sealer build (enclave/res), the
+ * build the real contract pins. The simulated enclave claims to run it.
+ */
 export const SEALER_CODE_HASH =
-  "7f3a9c2e51d84b06a1e9f0c3d27b8e4f6a5c1d903e2b7f48c6a0d15e9b3f2a71";
+  "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb";
+/** The placeholder earlier builds stored on every sale; read as SEALER_CODE_HASH. */
+const OLD_SEALER_CODE_HASH = "7f3a9c2e51d84b06a1e9f0c3d27b8e4f6a5c1d903e2b7f48c6a0d15e9b3f2a71";
 
 const USDC = 1_000_000n;
 const TOKEN = 10n ** 18n;
@@ -106,6 +123,12 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 /** What a guest account is given again when state from an earlier build is replaced. */
 const WELCOME_USDC = 100n * USDC;
+/** The exchange the simulated chain pretends to seed launch pools on: Rhea on testnet. */
+export const MOCK_DEX = "ref-finance-101.testnet";
+/** LP shares a new Ref simple pool mints for its first liquidity (INIT_SHARES_SUPPLY). */
+const INIT_POOL_SHARES = 10n ** 24n;
+/** How long each simulated seeding step takes. */
+const STEP_MS = 450;
 
 type Phase = "bidding" | "clearing" | "revealing" | "settled" | "failed";
 /** Fields of Sale that `view` derives from the rest on every read. */
@@ -143,7 +166,11 @@ type State = {
   faucetKeys?: Record<string, true>;
   /** Ids of rolling copies of the live demo sale ("fairt-2", ...), in order. */
   rolled?: string[];
+  /** What claim_proceeds has paid per sale (the contract's `proceeds`), so a part owed later is paid then. */
+  paid?: Record<string, ProceedsPaid>;
 };
+
+type ProceedsPaid = { raise: bigint; burned: bigint; allocation: boolean; reserve: boolean };
 
 /** The demo sales seeded on first visit. Their times are relative to that visit. */
 const SEEDED_IDS = ["lantern", "driftwood", "ashfall", "kiln", "fairt", "moth"];
@@ -274,6 +301,19 @@ export class MockClient implements FairgroundClient {
     } else if (!this.hasLiveSeed(Date.now())) {
       await this.refreshSeed(Date.now());
       this.persist();
+    }
+    // Sales stored by builds that used a placeholder build hash.
+    for (const s of Object.values(this.state.sales)) {
+      if (s.sealerCodeHash === OLD_SEALER_CODE_HASH) s.sealerCodeHash = SEALER_CODE_HASH;
+    }
+    // A seeding step cut off by a closed page: its callback never ran, so count it failed and let it run again.
+    for (const r of Object.values(this.state.results)) {
+      const l = r.liquidity;
+      if (l?.inFlight) {
+        l.nextStep = l.inFlight;
+        l.inFlight = null;
+        l.failures += 1;
+      }
     }
     if (typeof window !== "undefined") {
       window.addEventListener("storage", (e) => {
@@ -1052,14 +1092,16 @@ export class MockClient implements FairgroundClient {
     const totalRaised = fills.reduce((a, f) => a + f.spent, 0n);
     const totalPenalties = fills.reduce((a, f) => a + f.penalty, 0n);
     const failedNames = o.failed ?? [];
+    const clearingPrice = o.price ?? c.floorPrice;
+    const liquidity = c.liquidity ? plannedPool(c, settled, totalRaised, clearingPrice, at) : null;
     const result: SaleResult = {
       status: settled ? "settled" : "failed",
       ...(settled ? {} : { failReason: appFailReason(o.failReason) }),
-      clearingPrice: o.price ?? c.floorPrice,
+      clearingPrice,
       fills,
       totalSold,
       totalRaised,
-      unsold: unsoldOf({ final: true, settled, tokenDeployed: true, saleSupply: c.saleSupply, totalSold }),
+      unsold: unsoldWithPool(c, settled, totalSold, liquidity),
       oversubscribed: o.oversubscribed ?? false,
       nValid: o.nValid ?? bids.length,
       nInvalid: o.nInvalid ?? 0,
@@ -1078,7 +1120,12 @@ export class MockClient implements FairgroundClient {
       inputSha256: o.inputSha256 ?? null,
       clearedBy: o.clearedBy,
       proceeds: { raisePaid: false, allocationPaid: false, unsoldBurned: false, reserveReturned: false },
+      ...(liquidity ? { liquidity } : {}),
     };
+    if (liquidity && locksTokens(liquidity) && c.creatorAllocation > 0n) {
+      // claim_proceeds cannot pay the allocation while the pool is being seeded.
+      result.proceeds = { ...result.proceeds!, allocationPaid: true, allocationLocked: true };
+    }
     this.s.results[saleId] = result;
     sale.phase = settled ? "settled" : "failed";
     sale.settledAt = at;
@@ -1253,7 +1300,26 @@ export class MockClient implements FairgroundClient {
     if (bid.claimed) throw invalid("Already claimed.", "already_claimed");
     const fill = result.fills[bid.index];
     const txHash = fakeTxHash();
-    this.credit(bidder, fill.refund, saleId, fill.tokens);
+    // While the launch pool is being seeded the sale tokens stay locked: a claim pays only the USDC (claims.rs `claim`).
+    if (fill.tokens > 0n && locksTokens(result.liquidity)) {
+      if (fill.refundClaimed || fill.refund === 0n) {
+        throw invalid(
+          "Your tokens unlock once the launch pool is seeded (or abandoned after its deadline). Anyone can seed it from the result page.",
+          "liquidity_pending",
+        );
+      }
+      this.credit(bidder, fill.refund);
+      fill.refundClaimed = true;
+      this.log(
+        saleId,
+        "claimed",
+        `Claimed ${fmt(fill.refund)} USDC unspent. The tokens unlock once the launch pool is seeded.`,
+        { at, account: bidder, amount: fill.refund, txHash, detail: "refund_claimed" },
+      );
+      return { saleId, bidder, tokens: 0n, refund: fill.refund, txHash };
+    }
+    const refund = fill.refundClaimed ? 0n : fill.refund;
+    this.credit(bidder, refund, saleId, fill.tokens);
     bid.claimed = true;
     bid.claimTx = txHash;
     fill.claimed = true;
@@ -1263,13 +1329,15 @@ export class MockClient implements FairgroundClient {
       saleId,
       "claimed",
       fill.tokens > 0n
-        ? `Claimed tokens and ${fmt(fill.refund)} USDC unspent.`
+        ? fill.refundClaimed
+          ? "Claimed tokens. The unspent USDC was paid earlier."
+          : `Claimed tokens and ${fmt(fill.refund)} USDC unspent.`
         : penalty > 0n
           ? `Claimed ${fmt(fill.refund)} USDC: the deposit less the 1 % penalty for a void bid.`
           : `Claimed full refund of ${fmt(fill.refund)} USDC.`,
-      { at, account: bidder, amount: fill.refund, txHash },
+      { at, account: bidder, amount: refund, txHash },
     );
-    return { saleId, bidder, tokens: fill.tokens, refund: fill.refund, txHash };
+    return { saleId, bidder, tokens: fill.tokens, refund, txHash };
   }
 
   async claimProceeds(saleId: string, caller: string): Promise<WriteResult> {
@@ -1281,29 +1349,219 @@ export class MockClient implements FairgroundClient {
     }
     await txLatency();
     const txHash = this.claimProceedsInternal(sale, Date.now());
-    if (!txHash) throw invalid("The creator's proceeds were already paid.", "already_claimed");
+    if (!txHash) {
+      if (this.s.results[saleId]?.proceeds?.allocationLocked) {
+        throw invalid(
+          "Nothing to pay out now: the creator allocation unlocks once the launch pool is seeded (or abandoned after its deadline).",
+          "liquidity_pending",
+        );
+      }
+      throw invalid("The creator's proceeds were already paid.", "already_claimed");
+    }
     this.commit();
     return { txHash, relay: simRelay(txHash) };
   }
 
-  /** claim_proceeds (claims.rs): each part is paid once. Returns null when nothing was left. */
+  /** What claim_proceeds paid so far. State saved before this record existed has only the flags: read them. */
+  private paidOf(sale: StoredSale, result: SaleResult): ProceedsPaid {
+    const all = (this.s.paid ??= {});
+    const p = result.proceeds;
+    return (all[sale.id] ??= {
+      raise: p?.raisePaid && result.status === "settled" ? result.totalRaised - poolUsdcKept(result.liquidity) : 0n,
+      burned: p?.unsoldBurned ? result.unsold : 0n,
+      allocation: !!p?.allocationPaid && !p.allocationLocked && !!p.reserveReturned,
+      reserve: !!p?.reserveReturned,
+    });
+  }
+
+  /**
+   * The proceeds flags from what was paid and what is owed now: the raise less
+   * the launch pool's USDC, the burn (the unsold sale supply and the reserve
+   * the pool did not take), the allocation (locked while the pool is being
+   * seeded), the NEAR reserve. A part owed later (after abandonment) clears
+   * its flag again.
+   */
+  private refreshProceeds(sale: StoredSale, result: SaleResult) {
+    const paid = this.paidOf(sale, result);
+    // The first claim_proceeds always returns the NEAR reserve; until then every flag is false, as finalize sets them.
+    const claimed = paid.reserve;
+    const raiseOwed = result.status === "settled" ? result.totalRaised - poolUsdcKept(result.liquidity) : 0n;
+    const allocationOwed = sale.config.creatorAllocation > 0n && !paid.allocation;
+    const allocationLocked = allocationOwed && locksTokens(result.liquidity);
+    result.proceeds = {
+      raisePaid: claimed && paid.raise >= raiseOwed,
+      allocationPaid: allocationLocked || (claimed && !allocationOwed),
+      unsoldBurned: claimed && paid.burned >= result.unsold,
+      reserveReturned: claimed,
+      ...(allocationLocked ? { allocationLocked: true } : {}),
+    };
+  }
+
+  /** claim_proceeds (claims.rs): each part is paid once, as far as it is owed. Returns null when nothing was left. */
   private claimProceedsInternal(sale: StoredSale, at: number): string | null {
     const result = this.s.results[sale.id];
     if (!result) return null;
-    const p = (result.proceeds ??= { raisePaid: false, allocationPaid: false, unsoldBurned: false, reserveReturned: false });
-    if (p.raisePaid && p.allocationPaid && p.unsoldBurned && p.reserveReturned) return null;
-    const raise = !p.raisePaid && result.status === "settled" ? result.totalRaised : 0n;
+    const paid = this.paidOf(sale, result);
+    const l = result.liquidity ?? null;
+    const locked = locksTokens(l);
+    const raiseOwed = result.status === "settled" ? result.totalRaised - poolUsdcKept(l) : 0n;
+    const raise = raiseOwed > paid.raise ? raiseOwed - paid.raise : 0n;
+    const burn = result.unsold > paid.burned ? result.unsold - paid.burned : 0n;
+    const allocation = sale.config.creatorAllocation > 0n && !paid.allocation && !locked;
+    const reserve = !paid.reserve;
+    if (raise === 0n && burn === 0n && !allocation && !reserve) return null;
     if (raise > 0n) this.credit(sale.creator, raise);
-    p.raisePaid = p.allocationPaid = p.unsoldBurned = p.reserveReturned = true;
+    paid.raise += raise;
+    paid.burned += burn;
+    if (allocation) paid.allocation = true;
+    paid.reserve = true;
+    this.refreshProceeds(sale, result);
+    const allocationLeft = sale.config.creatorAllocation > 0n && !paid.allocation;
     const e = this.log(
       sale.id,
       "claimed",
       result.status === "settled"
-        ? `Creator paid: ${fmt(raise)} USDC raised and the creator allocation. Unsold tokens burned.`
+        ? allocationLeft
+          ? `Creator paid ${fmt(raise)} USDC of the raise. The creator allocation unlocks once the launch pool is seeded.`
+          : raise > 0n
+            ? `Creator paid: ${fmt(raise)} USDC raised and the creator allocation. Unsold tokens burned.`
+            : "Creator allocation paid. Unsold tokens burned."
         : "Creator allocation paid. The unsold sale tokens were burned.",
       { at, account: sale.creator, detail: "proceeds_claimed", ...(raise > 0n ? { amount: raise } : {}) },
     );
     return e.txHash;
+  }
+
+  // ---------- launch liquidity ----------
+
+  async getLiquidityDex(): Promise<string | null> {
+    return MOCK_DEX;
+  }
+
+  async getPool(saleId: string): Promise<DexPool | null> {
+    await this.ready();
+    const sale = this.s.sales[saleId];
+    const l = this.s.results[saleId]?.liquidity;
+    if (!sale || !l || l.poolId === null) return null;
+    // Nothing trades on the simulated pool: its reserves are what was added.
+    const filled = l.stage === "seeded";
+    return {
+      dex: l.dex,
+      poolId: l.poolId,
+      tokenIds: [sale.tokenAccount, USDC_TOKEN],
+      amounts: filled ? [l.tokens, l.usdc] : [0n, 0n],
+      feeBps: sale.config.liquidity?.feeBps ?? 0,
+      sharesTotal: l.shares,
+      contractShares: l.shares,
+      readAt: Date.now(),
+      simulated: true,
+    };
+  }
+
+  private liquidityOf(saleId: string): { sale: StoredSale; result: SaleResult; l: LiquidityState } {
+    const sale = this.sale(saleId);
+    const result = this.s.results[saleId];
+    const l = result?.liquidity;
+    if (!result || !l) throw invalid("This sale has no launch pool.", "no_liquidity");
+    return { sale, result, l };
+  }
+
+  /** A wallet transaction in NEAR mode (the relayer does not list these methods): simulated, paid by the caller. */
+  private paidRelay(txHash: string): RelayInfo {
+    return { ...simRelay(txHash), paidBy: "user" };
+  }
+
+  async seedLiquidity(saleId: string, caller: string): Promise<LiquidityWriteResult> {
+    await this.ready();
+    const { l } = this.liquidityOf(saleId);
+    if (l.stage !== "seeding") {
+      throw invalid(`Cannot seed the launch pool: it is ${STAGE_LABEL[l.stage].toLowerCase()}.`, "wrong_stage");
+    }
+    if (l.inFlight) throw invalid("A launch pool step is still waiting for its result. Try again in a few seconds.", "liquidity_busy");
+    if (l.deadline !== null && Date.now() >= l.deadline) {
+      throw invalid("The seeding deadline has passed. Anyone can now abandon the launch pool.", "too_late");
+    }
+    const txHash = await this.seedInternal(saleId, caller);
+    return { txHash, relay: this.paidRelay(txHash), liquidity: { ...this.liquidityOf(saleId).l } };
+  }
+
+  /**
+   * seed_liquidity with 300 TGas: each step's callback starts the next, so
+   * one call runs them all. Each step shows as in flight for a moment.
+   */
+  private async seedInternal(saleId: string, caller: string, onStep?: (step: LiquidityStep) => void): Promise<string> {
+    const txHash = fakeTxHash();
+    for (;;) {
+      const { l } = this.liquidityOf(saleId);
+      const step = l.nextStep;
+      if (l.stage !== "seeding" || !step || step === "withdraw") break;
+      onStep?.(step);
+      l.inFlight = step;
+      l.nextStep = null;
+      this.commit();
+      await delay(STEP_MS);
+      // The state may have been replaced meanwhile (another tab): act on the current one.
+      const { sale, result, l: now } = this.liquidityOf(saleId);
+      now.inFlight = null;
+      if (step === "create_pool") now.poolId = poolIdOf(saleId);
+      if (step === "deposit") {
+        now.usdcOnDex = now.usdc;
+        now.tokensOnDex = now.tokens;
+      }
+      if (step === "add_liquidity") {
+        now.usdcOnDex = 0n;
+        now.tokensOnDex = 0n;
+        now.shares = INIT_POOL_SHARES;
+        now.stage = "seeded";
+        now.nextStep = null;
+        this.refreshProceeds(sale, result);
+        this.log(
+          saleId,
+          "settled",
+          `Launch pool seeded at the clearing price: ${fmt(now.usdc)} USDC and ${fmtTokens(now.tokens, sale.config.decimals)} ${sale.config.tokenSymbol} in pool ${now.poolId}. The sale contract keeps the LP shares.`,
+          { account: caller, amount: now.usdc, txHash, detail: "liquidity_seeded" },
+        );
+      } else {
+        now.nextStep = SEED_STEPS[SEED_STEPS.indexOf(step) + 1] ?? null;
+      }
+      this.commit();
+    }
+    return txHash;
+  }
+
+  async abandonLiquidity(saleId: string, caller: string): Promise<LiquidityWriteResult> {
+    await this.ready();
+    const { sale, result, l } = this.liquidityOf(saleId);
+    if (l.stage !== "seeding" && l.stage !== "abandoned") {
+      throw invalid(`Cannot abandon the launch pool: it is ${STAGE_LABEL[l.stage].toLowerCase()}.`, "wrong_stage");
+    }
+    if (l.stage === "abandoned" && l.usdcOnDex === 0n && l.tokensOnDex === 0n) {
+      throw invalid("The launch pool is already abandoned and nothing is left on the exchange.", "already_done");
+    }
+    if (l.inFlight) throw invalid("A launch pool step is still waiting for its result. Try again in a few seconds.", "liquidity_busy");
+    if (l.stage === "seeding" && l.deadline !== null && Date.now() < l.deadline) {
+      throw invalid(`The launch pool can be abandoned from ${new Date(l.deadline).toLocaleString("en-GB")}, if it is not seeded by then.`, "too_early");
+    }
+    await txLatency();
+    const txHash = fakeTxHash();
+    const first = l.stage === "seeding";
+    l.stage = "abandoned";
+    l.nextStep = null;
+    // What sat on the exchange comes back; the pool's USDC goes to the creator and its tokens are burned.
+    l.usdcOnDex = 0n;
+    l.tokensOnDex = 0n;
+    result.unsold = unsoldWithPool(sale.config, true, result.totalSold, l);
+    this.refreshProceeds(sale, result);
+    if (first) {
+      this.log(
+        saleId,
+        "settled",
+        `Launch pool not seeded by its deadline and abandoned. Its ${fmt(l.usdc)} USDC goes to the creator and its tokens are burned.`,
+        { account: caller, txHash, detail: "liquidity_abandoned" },
+      );
+    }
+    this.commit();
+    return { txHash, relay: this.paidRelay(txHash), liquidity: { ...l } };
   }
 
   /** The mock has no setup phase, so there is never a step to retry. */
@@ -1316,22 +1574,90 @@ export class MockClient implements FairgroundClient {
 
   // ---------- attestation ----------
 
-  async getAttestation(saleId: string, nonce: string): Promise<Attestation> {
+  /**
+   * The checks NEAR mode runs (near/attestation.ts), with the same rows, over
+   * a simulated run: there is no OutLayer, no TDX quote and no register
+   * contract here, so the quote and measurement rows say "simulated". The
+   * hashes are real sha256 of the mock's own sealer input and output.
+   */
+  async verifySale(saleId: string): Promise<SaleVerification> {
     await this.ready();
     await delay(400 + Math.random() * 400);
     const sale = this.sale(saleId);
     const result = this.s.results[saleId];
+    const tee = sale.config.revealMode === "tee";
+    const pk = this.s.keys[saleId]?.pk ?? sale.sealerPubkey;
+    const closer = (this.s.events[saleId] ?? []).findLast((e) => e.kind === "closed")?.account ?? sale.creator;
+
+    const run = async (kind: RunKind): Promise<AttestedRun> => {
+      const clearing = kind === "clear";
+      const op = clearing ? "clear" : "pubkey";
+      const input = clearing
+        ? (result?.inputSha256 ?? "")
+        : await sha256Hex(JSON.stringify({ v: 1, op, contract: CONTRACT_ID, sale_id: saleId }));
+      const output = clearing
+        ? (result?.resultSha256 ?? "")
+        : await sha256Hex(JSON.stringify(JSON.stringify({ v: 1, ok: true, op, sale_id: saleId, pubkey: pk })));
+      const eq = (values: [string, string][]): AttestationFact => ({
+        kind: "equal",
+        values: values.map(([label, value]) => ({ label, value })),
+        ok: values.every(([, v]) => !!v && v === values[0][1]),
+      });
+      const fact = (label: string, value: string, ok = true): AttestationFact => ({ kind: "fact", label, value, ok });
+      const checks: RunCheck[] = [
+        { id: "build", items: [eq([["attested", SEALER_CODE_HASH], ["contract pins", sale.sealerCodeHash], ["public build", SEALER_CODE_HASH]])] },
+        { id: "executed", items: [eq([["measured", SEALER_CODE_HASH], ["contract pins", sale.sealerCodeHash]])] },
+        {
+          id: "input",
+          items: [eq([["sha256(input)", input], ["attested", input], ...(clearing ? ([["contract stored", input]] as [string, string][]) : [])])],
+        },
+        {
+          id: "output",
+          items: [eq([["sha256(output)", output], ["attested", output], ...(clearing ? ([["contract stored", output]] as [string, string][]) : [])])],
+        },
+        { id: "task", items: [fact("task hash", "simulated: no TDX quote")] },
+        { id: "measurements", items: [fact("register contract", "simulated: no TEE")] },
+        {
+          id: "request",
+          items: [
+            fact("sent by", CONTRACT_ID),
+            fact("for", `${saleId}, op ${op}`),
+            fact("source", `fairground-sealer @ ${SEALER_CODE_HASH}`),
+          ],
+        },
+        {
+          id: "key",
+          items: [
+            eq([[clearing ? "job opened bids with" : "job made", pk], ["sale key", sale.sealerPubkey]]),
+            fact("answer for", `${saleId}, op ${op}`),
+          ],
+        },
+      ].map((c) => ({ ...c, ok: c.items.every((i) => i.ok) }) as RunCheck);
+      return {
+        kind,
+        found: true,
+        simulated: true,
+        attestationId: 0,
+        taskId: 0,
+        requestId: null,
+        txHash: clearing ? (result?.settleTx ?? "") : sale.createTx,
+        signer: clearing ? closer : sale.creator,
+        method: clearing ? "close_sale" : "create_sale",
+        txSource: "simulated",
+        blockHeight: null,
+        at: clearing ? (sale.settledAt ?? sale.closedAt ?? Date.now()) : sale.createdAt,
+        quote: toB64(fromHex(randomHex(96))),
+        verifierUrl: null,
+        checks,
+      };
+    };
+
     return {
-      nonce,
-      codeHash: sale.sealerCodeHash,
-      reportedPubkey: sale.sealerPubkey,
-      inputHash: result?.inputSha256 ?? "",
-      outputHash: result?.resultSha256 ?? "",
-      quote: randomHex(48),
-      fetchedAt: Date.now(),
-      url: "https://outlayer.fastnear.com/",
       simulated: true,
-      source: "simulated",
+      checkedAt: Date.now(),
+      pinnedWasm: sale.sealerCodeHash,
+      key: tee ? await run("key") : null,
+      clear: tee && result?.clearedBy === "enclave" && result.resultSha256 ? await run("clear") : null,
     };
   }
 
@@ -1436,6 +1762,18 @@ export class MockClient implements FairgroundClient {
 
     progress({ step: "clearing", saleId, bidsPlaced: placed, message: "Enclave decrypts every bid and computes one clearing price." });
     await this.clearing.get(saleId);
+
+    // Anyone may seed the launch pool; here the judge run does it at once.
+    if (this.s.results[saleId]?.liquidity?.stage === "seeding") {
+      await this.seedInternal(saleId, "judge.testnet", (step) =>
+        progress({
+          step: "clearing",
+          saleId,
+          bidsPlaced: placed,
+          message: `Settled. Seeding the launch pool at the clearing price: ${stepPhrase(step)}.`,
+        }),
+      );
+    }
 
     progress({ step: "done", saleId, bidsPlaced: placed, message: "Settled. Bots and people paid the same price." });
     return saleId;
@@ -1611,6 +1949,52 @@ function fmt(v: bigint): string {
   return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
+/** Whole tokens with separators, up to 2 decimals: "20,000". */
+function fmtTokens(v: bigint, decimals: number): string {
+  const one = 10n ** BigInt(decimals);
+  const whole = (v / one).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const cents = ((v % one) * 100n) / one;
+  return cents > 0n ? `${whole}.${cents.toString().padStart(2, "0").replace(/0$/, "")}` : whole;
+}
+
+/**
+ * The launch pool a sale gets when it becomes final (settle.rs, liquidity.rs
+ * `pool_plan`): cancelled when the sale failed, skipped when the plan comes to
+ * zero, else seeding until `settleTimeoutMs` after settlement.
+ */
+function plannedPool(c: SaleConfig, settled: boolean, raise: bigint, price: bigint, at: number): LiquidityState {
+  const terms = c.liquidity!;
+  const empty = {
+    dex: terms.dex,
+    poolId: null,
+    inFlight: null,
+    shares: 0n,
+    usdcOnDex: 0n,
+    tokensOnDex: 0n,
+    failures: 0,
+    simulated: true,
+  } as const;
+  if (!settled) return { ...empty, stage: "cancelled", nextStep: null, usdc: 0n, tokens: 0n, deadline: null };
+  const plan = poolPlan(raise, price, c.decimals, terms.raiseShareBps, terms.poolTokens);
+  if (plan.tokens === 0n) return { ...empty, stage: "skipped", nextStep: null, usdc: 0n, tokens: 0n, deadline: null };
+  return { ...empty, stage: "seeding", nextStep: "register", ...plan, deadline: at + c.settleTimeoutMs };
+}
+
+/** Tokens claim_proceeds burns (sale.rs `unsold`): the unsold sale supply plus the reserve the pool does not keep. */
+function unsoldWithPool(c: SaleConfig, settled: boolean, totalSold: bigint, l: LiquidityState | null): bigint {
+  const salePart = unsoldOf({ final: true, settled, tokenDeployed: true, saleSupply: c.saleSupply, totalSold });
+  if (!c.liquidity || !l) return salePart;
+  const kept = l.stage === "seeding" || l.stage === "seeded" ? l.tokens : l.stage === "abandoned" ? l.tokensOnDex : 0n;
+  return salePart + c.liquidity.poolTokens - kept;
+}
+
+/** A pool id that looks like one on the exchange, the same for a sale every time. */
+function poolIdOf(saleId: string): number {
+  let h = 0;
+  for (let i = 0; i < saleId.length; i++) h = (h * 31 + saleId.charCodeAt(i)) % 9000;
+  return 1000 + h;
+}
+
 /** The sealer's clear answer as text, in the DESIGN field order (its sha256 is the attestation's output hash). */
 function sealerOutputText(out: SealerClearOutput): string {
   return JSON.stringify({
@@ -1628,15 +2012,22 @@ function sealerOutputText(out: SealerClearOutput): string {
   });
 }
 
+/**
+ * The judge-mode sale. It seeds a launch pool with 20 % of the raise: a sell-out
+ * gives the pool 20 % as many tokens as were sold, so its 20,000-token reserve
+ * covers the 100,000 for sale. The sale terms that decide the clearing (supply
+ * for sale, floor, deposits, window) are the same as before the pool.
+ */
 function judgeConfig(n: number, now: number, windowMs: number): SaleConfig {
   return {
     tokenName: `Judge Run ${n}`,
     tokenSymbol: `JDG${n}`,
     decimals: 18,
-    totalSupply: 1_000_000n * TOKEN,
+    totalSupply: 220_000n * TOKEN,
     saleSupply: 100_000n * TOKEN,
     creatorAllocation: 100_000n * TOKEN,
-    lpReserve: 800_000n * TOKEN,
+    lpReserve: 20_000n * TOKEN,
+    liquidity: { dex: MOCK_DEX, raiseShareBps: 2_000, poolTokens: 20_000n * TOKEN, feeBps: 30 },
     floorPrice: 1_000n, // 0.001 USDC
     maxPrice: null,
     minRaise: 50n * USDC,
@@ -1675,6 +2066,20 @@ export function validateConfig(c: SaleConfig, existing: { config: SaleConfig }[]
   if (c.saleSupply <= 0n) fail("Sale supply must be positive.");
   if (c.saleSupply + c.creatorAllocation > c.totalSupply) fail("Sale supply plus creator allocation exceeds total supply.");
   if (c.lpReserve !== c.totalSupply - c.saleSupply - c.creatorAllocation) fail("LP reserve must be the remainder.");
+  if (c.liquidity) {
+    // liquidity.rs `LiquidityParams::validate`, plus the mock's own: the remainder is the pool's reserve.
+    const l = c.liquidity;
+    if (!Number.isInteger(l.raiseShareBps) || l.raiseShareBps < 1 || l.raiseShareBps > MAX_RAISE_SHARE_BPS) {
+      fail("invalid liquidity.raise_share_bps: must be between 1 and 5000 (0.01 % to 50 % of the raise)");
+    }
+    if (l.poolTokens <= 0n || c.saleSupply + l.poolTokens > c.totalSupply) {
+      fail("invalid liquidity.pool_tokens: must satisfy 0 < pool_tokens <= total_supply - sale_supply");
+    }
+    if (!Number.isInteger(l.feeBps) || l.feeBps < 1 || l.feeBps > MAX_POOL_FEE_BPS) {
+      fail("invalid liquidity.fee_bps: must be between 1 and 1000 (0.01 % to 10 %)");
+    }
+    if (l.poolTokens !== c.lpReserve) fail("The launch pool reserve must be the LP reserve.");
+  }
   if (c.floorPrice <= 0n) fail("Floor price must be positive.");
   if (c.maxPrice !== null && c.maxPrice < c.floorPrice) fail("Max price must be at least the floor.");
   if (c.minRaise < 0n) fail("Minimum raise cannot be negative.");

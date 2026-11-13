@@ -37,11 +37,23 @@ export type MarketOutcome = {
   proceeds: bigint[];
 };
 
-export function runMarket(crowd: Agent[], launch: LaunchOutcome, cfg: ArenaConfig): MarketOutcome {
+/**
+ * `seed`: open the pool with these reserves instead of the configured depth
+ * (a creator's launch pool, see creator.ts). Left out, the pool is the one
+ * every Arena run uses.
+ */
+export function runMarket(
+  crowd: Agent[],
+  launch: LaunchOutcome,
+  cfg: ArenaConfig,
+  seed?: { usdc: bigint; tokens: bigint },
+): MarketOutcome {
   const one = oneToken(cfg);
   const depth = scale(supplyValue(cfg), cfg.poolDepthShare);
   const openPrice = launch.finalPrice;
-  const pool = new ConstantProductPool(depth, (depth * one) / openPrice, one);
+  const pool = seed
+    ? new ConstantProductPool(seed.usdc, seed.tokens, one)
+    : new ConstantProductPool(depth, (depth * one) / openPrice, one);
 
   const zeros = () => crowd.map(() => 0n);
   const out: MarketOutcome = {

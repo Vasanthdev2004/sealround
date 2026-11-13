@@ -66,7 +66,7 @@ clearing TS, 386 relayer, 263 relayer client, 103 web, 21/21 e2e scenarios.
   Stop the dev server first, or skip the build.
 - **Next.js 16 differs from what you know.** Read the guide in
   `apps/web/node_modules/next/dist/docs/` before writing Next code.
-- **Pinned hashes.** `contracts/res/fairground.wasm` (sha256 `bfc2f800…a800`)
+- **Pinned hashes.** `contracts/res/fairground.wasm` (sha256 `e93c4275…a941`)
   and `enclave/res/fairground_sealer.wasm` (sha256 `f8408a87…d8cb`) are
   pinned in docs, the contract and the web config. Any change under
   `contracts/fairground`, `crates/*` or `enclave/job` changes a hash: rebuild

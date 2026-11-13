@@ -108,6 +108,8 @@ export async function buildWorld(runDir: string, say: (line: string) => void): P
       sealer_code_hash: sealerHash,
       sealer_secrets: null,
       allowed_quote_tokens: [usdc.id],
+      // No exchange on the e2e chain: launch liquidity is off (contracts/tests covers it).
+      dex: null,
     },
     gas: teraToGas(50),
   });

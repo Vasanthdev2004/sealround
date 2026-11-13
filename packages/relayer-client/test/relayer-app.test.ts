@@ -65,7 +65,9 @@ const sale = (overrides: Record<string, unknown> = {}) => ({
 const SALES: Record<string, ReturnType<typeof sale>> = {
   sealed: sale(),
   committed: sale({ reveal_mode: "CommitReveal" }),
-  final: sale({ status: "settled", refund_mode_at: null }),
+  final: sale({ status: "settled", refund_mode_at: null, token_setup: "done", creator_allocation: "0" }),
+  seed: sale({ status: "settled", liquidity: {} }),
+  abandon: sale({ status: "settled", liquidity: {} }),
   revealing: sale({ status: "revealing", reveal_mode: "CommitReveal", reveal_end: "9000000000000000000" }),
   /** Its reveal window ended at the fake head time (1000 ns): ready for clear_onchain. */
   revealed: sale({ status: "revealing", reveal_mode: "CommitReveal", reveal_end: "1000" }),
@@ -81,6 +83,23 @@ function inProcessRelayer({ budget = 10n ** 24n, revealMode = "Tee", maxGas = PO
   const relayed: SignedDelegate[] = [];
   const views: Record<string, (args: Record<string, unknown>) => unknown> = {
     get_sale: (args) => SALES[String(args["sale_id"])] ?? sale({ reveal_mode: revealMode }),
+    get_result: ({ sale_id }) => {
+      if (sale_id === "seed" || sale_id === "abandon") {
+        const seed = sale_id === "seed";
+        return {
+          sale_id, status: "settled",
+          liquidity: { status: "seeding", next_step: seed ? "deposit" : null, in_flight: null, deadline: seed ? "1001" : "1000" },
+        };
+      }
+      return sale_id === "final" ? {
+        sale_id,
+        status: "settled",
+        total_raised: "1000000",
+        unsold: "0",
+        proceeds: { raise_paid: false, allocation_paid: false, unsold_burned: false, reserve_returned: false },
+      } : null;
+    },
+    get_reserve_refund: () => "0",
     get_bid: () => ({ revealed: false, claimed: false }),
     ft_balance_of: () => ((1n << 128n) - 1n).toString(),
   };
@@ -129,6 +148,9 @@ const relayable: Array<[string, FairgroundAction]> = [
   ["a reveal", revealAction(FAIRGROUND, "revealing", { maxPrice: 2_500n, maxSpend: 10n ** 8n, salt: "c".repeat(32) })],
   ["clear_onchain", clearOnchainAction(FAIRGROUND, "revealed")],
   ["trigger_refund_mode", triggerRefundModeAction(FAIRGROUND, "stale")],
+  // The web client builds pool calls directly from the relayer policy.
+  ["seed_liquidity", { receiverId: FAIRGROUND, methodName: "seed_liquidity", args: { sale_id: "seed" }, gas: 150n * TGAS, deposit: 0n }],
+  ["abandon_liquidity", { receiverId: FAIRGROUND, methodName: "abandon_liquidity", args: { sale_id: "abandon" }, gas: 150n * TGAS, deposit: 0n }],
 ];
 
 describe("the client against the real relayer app", () => {
@@ -269,7 +291,7 @@ describe("the client against the real relayer app", () => {
       fairground_contract: FAIRGROUND,
       usdc_contracts: [USDC],
       bid_deposit: "1",
-      fairground_methods: ["claim", "claim_proceeds", "clear_onchain", "reveal_bid", "trigger_refund_mode"],
+      fairground_methods: ["claim", "claim_proceeds", "clear_onchain", "reveal_bid", "trigger_refund_mode", "seed_liquidity", "abandon_liquidity"],
     });
     expect(await client.sponsorStorage("dave.test.near")).toEqual({ status: "registered", token_id: USDC, tx_hash: "StorageTx" });
   });

@@ -80,7 +80,11 @@ export type SaleConfig = {
   saleSupply: bigint;
   /** Tokens sent to the creator at settlement. Disclosed up front. */
   creatorAllocation: bigint;
-  /** totalSupply - saleSupply - creatorAllocation. Held for an LP. */
+  /**
+   * totalSupply - saleSupply - creatorAllocation. With `liquidity` set, these
+   * are the sale tokens set aside for the launch pool (its `poolTokens`);
+   * without it the mock holds them for an LP and NEAR mode has none.
+   */
   lpReserve: bigint;
   floorPrice: bigint;
   /** Optional ceiling; bounds the total raise to saleSupply * maxPrice. */
@@ -102,6 +106,77 @@ export type SaleConfig = {
   maxBids?: number;
   /** Commit-reveal only: reveal window after the close, ms (contract default 10 minutes, 1 minute to 7 days). */
   revealWindowMs?: number;
+  /** Launch liquidity: a pool seeded at the clearing price at settlement. Absent or null: none. */
+  liquidity?: LiquidityTerms | null;
+};
+
+/** Launch liquidity terms, fixed at creation (contract `create_sale` `liquidity`). */
+export type LiquidityTerms = {
+  /** The exchange account the pool is seeded on (Rhea, formerly Ref Finance). */
+  dex: string;
+  /** Share of the raise that goes into the pool, basis points (1 to 5000). */
+  raiseShareBps: number;
+  /** Sale tokens set aside for the pool, base units. Equal to the config's lpReserve. */
+  poolTokens: bigint;
+  /** The pool's swap fee, basis points (1 to 1000). */
+  feeBps: number;
+};
+
+/**
+ * waiting: the sale is not final. seeding: settled with a pool to seed, sale
+ * tokens locked. seeded: the pool holds its amounts. skipped: the amounts
+ * came to zero, no pool. cancelled: the sale failed. abandoned: not seeded by
+ * the deadline, so the pool's USDC goes to the creator and its tokens burn.
+ */
+export type LiquidityStage = "waiting" | "seeding" | "seeded" | "skipped" | "cancelled" | "abandoned";
+/**
+ * One step of seed_liquidity (or abandon_liquidity's withdraw). `reconcile`
+ * reads the exchange again after a step whose answer never came (the contract
+ * gives such a step up after 600 blocks).
+ */
+export type LiquidityStep = "register" | "create_pool" | "deposit" | "add_liquidity" | "withdraw" | "reconcile";
+
+/** Launch liquidity progress (contract get_result `liquidity`). */
+export type LiquidityState = {
+  stage: LiquidityStage;
+  /** What seed_liquidity (seeding) or abandon_liquidity (abandoned) would run now. */
+  nextStep: LiquidityStep | null;
+  /** The step waiting for its result. With `nextStep` "reconcile" it waited too long and will be given up. */
+  inFlight: LiquidityStep | null;
+  dex: string;
+  poolId: number | null;
+  /** USDC and sale tokens the pool gets, base units (zero when skipped or cancelled). */
+  usdc: bigint;
+  tokens: bigint;
+  /** LP shares the sale contract holds. They never leave it. */
+  shares: bigint;
+  /** Deposited on the exchange, not yet in the pool or withdrawn. */
+  usdcOnDex: bigint;
+  tokensOnDex: bigint;
+  /** Steps that failed so far. Each can be run again. */
+  failures: number;
+  /** Seeding is possible until, and abandon_liquidity from, this time (ms). Null before settlement. */
+  deadline: number | null;
+  /** True in the mock: no exchange was called. */
+  simulated?: boolean;
+};
+
+/** A launch pool as the exchange reports it (Ref `get_pool` and `get_pool_shares`). */
+export type DexPool = {
+  dex: string;
+  poolId: number;
+  /** Token accounts in the pool, in the exchange's order. */
+  tokenIds: string[];
+  /** Reserves, matching `tokenIds`. */
+  amounts: bigint[];
+  feeBps: number;
+  sharesTotal: bigint;
+  /** LP shares the sale contract holds. */
+  contractShares: bigint;
+  /** When the exchange was read (ms). */
+  readAt: number;
+  /** True in the mock: no exchange was read. */
+  simulated?: boolean;
 };
 
 export type SaleMeta = {
@@ -186,26 +261,121 @@ export type ContractCheck = {
   passed: boolean;
 };
 
+/**
+ * What the contract's views hold about the enclave run (NearClient
+ * `getAttestation`, used by the sandbox end-to-end run): the pinned code hash,
+ * the stored sale key and the sha256 of the clearing input and output. No
+ * quote is fetched (`nonce` and `quote` are ""). The UI uses `verifySale`.
+ */
 export type Attestation = {
-  /** Random nonce the app sent, hex. */
   nonce: string;
   codeHash: string;
-  /** Public key the attestation reports for this sale, hex. */
+  /** Public key the contract stored for this sale, hex. */
   reportedPubkey: string;
   inputHash: string;
   outputHash: string;
-  /** TDX quote, truncated for display. */
   quote: string;
   fetchedAt: number;
-  /** Where a judge can see the raw attestation. */
   url: string;
   simulated: boolean;
-  /**
-   * Where the fields come from. "simulated": the mock. "chain": read from the
-   * contract's views (code hash, sale key, input/output sha256); there is no
-   * TDX quote in that case (`quote` is "").
-   */
   source?: "simulated" | "chain";
+};
+
+// ---------- verification of the enclave runs (near/attestation.ts) ----------
+
+/** The five TDX registers OutLayer's register contract approves, hex. */
+export type TeeMeasurements = { mrtd: string; rtmr0: string; rtmr1: string; rtmr2: string; rtmr3: string };
+
+/**
+ * One run of the sealer job on OutLayer: the sale key run (create_sale, or
+ * retry_setup after a failed one; op "pubkey") or the clearing run
+ * (close_sale; op "clear").
+ */
+export type RunKind = "key" | "clear";
+
+/**
+ * The checks of one run (Verify-Attestation.ps1):
+ * - build: the attested wasm_hash is the build the contract pins;
+ * - executed: the worker's measured executed_wasm_sha256 is that build;
+ * - input / output: sha256 of the request's input and of the returned bytes,
+ *   recomputed from the transaction, equal the attested hashes (and, for a
+ *   clear, the contract's input_sha256 and result_sha256);
+ * - task: the TDX quote's report_data commits to this attestation record;
+ * - measurements: the quote's MRTD and RTMR0-3 are approved on chain;
+ * - request: the request came from the sale contract, for this sale, with the
+ *   pinned source, in the attested block;
+ * - key: the job's answer names the sale's key.
+ */
+export type RunCheckId = "build" | "executed" | "input" | "output" | "task" | "measurements" | "request" | "key";
+
+/** One piece of evidence: values that must all be equal, or one fact checked on its own. */
+export type AttestationFact =
+  | { kind: "equal"; values: { label: string; value: string }[]; ok: boolean }
+  | { kind: "fact"; label: string; value: string; ok: boolean };
+
+/** One check of one run. `ok` null: it could not be run here; its items say why. */
+export type RunCheck = { id: RunCheckId; ok: boolean | null; items: AttestationFact[] };
+
+/**
+ * How the transaction behind a run was found: by scanning the block the
+ * contract recorded for the request, from this browser's own log of what it
+ * sent, from OutLayer's public job list, or simulated (the mock).
+ */
+export type RunTxSource = "block_scan" | "tx_log" | "outlayer_jobs" | "simulated";
+
+/** A run whose attestation was fetched and checked. */
+export type AttestedRun = {
+  kind: RunKind;
+  found: true;
+  simulated: boolean;
+  /** OutLayer's attestation record id, its task (job) id and request id. */
+  attestationId: number;
+  taskId: number;
+  requestId: number | null;
+  /** The transaction that led to the run, and its signer. */
+  txHash: string;
+  signer: string;
+  /** The Fairground method it called (create_sale, retry_setup, close_sale). */
+  method: string | null;
+  txSource: RunTxSource;
+  /** The block scanned when `txSource` is "block_scan". */
+  scannedBlock?: number;
+  /** Block height and time (ms) of the attested run. OutLayer takes no nonce: this is how old the evidence is. */
+  blockHeight: number | null;
+  at: number;
+  /** The TDX quote, base64. */
+  quote: string;
+  /** OutLayer's verifier page for this run (it checks the quote's signature chain up to Intel). */
+  verifierUrl: string | null;
+  checks: RunCheck[];
+};
+
+/** A run that could not be checked, and why. */
+export type MissingRun = {
+  kind: RunKind;
+  found: false;
+  /**
+   * no_service: no OutLayer attestation service on this network (a local sandbox);
+   * not_found: the transaction behind the run could not be found;
+   * no_attestation: OutLayer has no attestation for it;
+   * failed: reading it failed (network, RPC).
+   */
+  reason: "no_service" | "not_found" | "no_attestation" | "failed";
+  message: string;
+};
+
+/** Every check this browser ran on a sale's enclave runs. */
+export type SaleVerification = {
+  /** The mock: an unsigned, simulated attestation. */
+  simulated: boolean;
+  /** When the checks ran, this browser's clock. */
+  checkedAt: number;
+  /** The build the contract pins (get_sale.sealer_code_hash). */
+  pinnedWasm: string;
+  /** The sale key run; null when the sale has none (commit-reveal). */
+  key: AttestedRun | MissingRun | null;
+  /** The clearing run; null when no clearing result reached the contract. */
+  clear: AttestedRun | MissingRun | null;
 };
 
 /** One bid's outcome. `refund` is net of `penalty`. */
@@ -221,6 +391,11 @@ export type ResultFill = Fill & {
   penalty?: bigint;
   /** Commit-reveal: whether the bidder revealed in time (an unrevealed bid is invalid). */
   revealed?: boolean;
+  /**
+   * The USDC part is paid but the tokens are not: the launch pool is being
+   * seeded and sale tokens stay locked. `claimed` stays false until they are paid.
+   */
+  refundClaimed?: boolean;
 };
 
 /**
@@ -242,6 +417,12 @@ export type ProceedsState = {
   unsoldBurned: boolean;
   /** The unused NEAR reserve. */
   reserveReturned: boolean;
+  /**
+   * The launch pool is being seeded, so the allocation cannot be paid yet.
+   * `allocationPaid` is then true, so all four flags true still means
+   * "nothing claim_proceeds can pay now".
+   */
+  allocationLocked?: boolean;
 };
 
 export type SaleResult = Omit<ClearingResult, "fills" | "failReason"> & {
@@ -273,6 +454,8 @@ export type SaleResult = Omit<ClearingResult, "fills" | "failReason"> & {
   clearedBy?: "enclave" | "onchain" | "none";
   /** Which creator payouts claim_proceeds has made. */
   proceeds?: ProceedsState;
+  /** Launch liquidity progress; absent or null for a sale without it. */
+  liquidity?: LiquidityState | null;
 };
 
 export type SaleEventKind =
@@ -303,9 +486,19 @@ export type SaleEvent = {
    * "bid_revealed" (kind "bid"), "proceeds_claimed" (kind "claimed", the
    * account is the creator, the amount the raise paid), "clearing_failed"
    * (kind "clearing_requested": an attempt ended without a result and
-   * close_sale can retry), "sale_ready" (kind "created").
+   * close_sale can retry), "sale_ready" (kind "created"), "liquidity_seeded"
+   * and "liquidity_abandoned" (kind "settled": the launch pool's outcome),
+   * "refund_claimed" (kind "claimed": the USDC part of a claim while the sale
+   * tokens are locked).
    */
-  detail?: "bid_revealed" | "proceeds_claimed" | "clearing_failed" | "sale_ready";
+  detail?:
+    | "bid_revealed"
+    | "proceeds_claimed"
+    | "clearing_failed"
+    | "sale_ready"
+    | "liquidity_seeded"
+    | "liquidity_abandoned"
+    | "refund_claimed";
   /**
    * True when `at` is not the block time. In NEAR mode some events are
    * derived from views that do not record when they happened: `at` is then
@@ -398,6 +591,8 @@ export type BidResult = BidRecord & WithRelay & {
 export type ClaimResult = ClaimReceipt & WithRelay;
 export type SaleWithRelay = Sale & WithRelay;
 export type WriteResult = WithRelay & { txHash: string };
+/** seed_liquidity or abandon_liquidity: the transaction and the progress it left. */
+export type LiquidityWriteResult = WriteResult & { liquidity: LiquidityState };
 
 /** USDC storage registration (NEP-145) of an account, before USDC can be delivered to it. */
 export type StorageResult = {

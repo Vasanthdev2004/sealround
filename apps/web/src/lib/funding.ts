@@ -1,5 +1,7 @@
 "use client";
 
+import type { FundingMode, ONECLICK_STATUSES } from "@/app/api/oneclick/shared";
+
 /**
  * Cross-chain funding records (1Click / NEAR Intents). Stored per browser so
  * the where's-my-money panel can show every hop on the sale and result pages.
@@ -7,14 +9,7 @@
  */
 
 /** Every status 1Click's /v0/status can return. */
-export type OneClickStatus =
-  | "PENDING_DEPOSIT"
-  | "KNOWN_DEPOSIT_TX"
-  | "PROCESSING"
-  | "SUCCESS"
-  | "INCOMPLETE_DEPOSIT"
-  | "REFUNDED"
-  | "FAILED";
+export type OneClickStatus = (typeof ONECLICK_STATUSES)[number];
 
 export const ONECLICK_STATUS_TEXT: Record<OneClickStatus, string> = {
   PENDING_DEPOSIT: "Waiting for your deposit",
@@ -54,6 +49,8 @@ export type FundingRecord = {
   correlationId?: string;
   providerUpdatedAt?: number;
   statusCheckFailed?: boolean;
+  /** Absent on older and simulated receipts. */
+  confidentiality?: FundingMode;
   /** True when this swap was simulated (testnet has no Intents). */
   simulated: boolean;
 };

@@ -47,20 +47,29 @@ import { bidCommitment, randomHex, sealBid } from "../crypto";
 import { browserSigners, type SignerSource } from "../near/signers";
 import { createRpc, type NearRpc } from "../near/rpc";
 import { TxLog } from "../near/tx-log";
+import { verifySaleRuns, type FoundTx } from "../near/attestation-sources";
 import {
+  allocationLocked,
   bidFromView,
   commitmentHexOf,
   createSaleParams,
   eventsFromViews,
+  liquidityFromView,
+  nsToMs,
+  poolFromView,
   proceedsLeft,
   resultFromViews,
   retrySetupDeposit,
   saleFromView,
   type BidView,
   type FillView,
+  type LiquidityView,
+  type RefPoolView,
   type ResultView,
   type SaleView,
 } from "../near/views";
+import { dateTime } from "../format";
+import { STAGE_LABEL, STEP_LABEL } from "../liquidity";
 import type {
   Attestation,
   Balances,
@@ -71,6 +80,8 @@ import type {
   ClientCapabilities,
   ClientNotice,
   CreateOptions,
+  DexPool,
+  LiquidityWriteResult,
   PaidReason,
   RelayerPolicyInfo,
   RelayInfo,
@@ -79,7 +90,9 @@ import type {
   SaleConfig,
   SaleEvent,
   SaleMeta,
+  RunKind,
   SaleResult,
+  SaleVerification,
   SaleWithRelay,
   StorageResult,
   WriteOptions,
@@ -116,7 +129,17 @@ const WALLET_GAS = {
   retry_setup: 300n * TGAS,
   storage_deposit: 30n * TGAS,
   mint: 30n * TGAS,
+  // Each launch liquidity step's callback starts the next while the gas lasts: 300 TGas runs them all.
+  seed_liquidity: 300n * TGAS,
+  abandon_liquidity: 300n * TGAS,
 } as const;
+/** A relayed seed or abandon call stays under the relayer's gas cap: it runs one or two steps, and a second call the rest. */
+const RELAYED_LIQUIDITY_GAS = 150n * TGAS;
+/** Launch liquidity stages that keep the sale tokens locked (liquidity.rs `locks_tokens`). */
+const LOCKING: ReadonlySet<string> = new Set(["waiting", "seeding"]);
+const LIQUIDITY_BUSY = "A launch pool step is still waiting for its result. Try again in a few seconds.";
+/** A step waits for its answer. One that waited too long does not block: the next call gives it up (next_step `reconcile`). */
+const busy = (v: Pick<LiquidityView, "in_flight" | "next_step">): boolean => v.in_flight !== null && v.next_step !== "reconcile";
 /** The largest page the contract's list views return. */
 const PAGE = 200;
 /** How long a relayer policy answer is trusted before asking again. */
@@ -164,6 +187,9 @@ export class NearClient implements FairgroundClient {
   private readonly cacheMs: number;
   private readonly waitMs: number;
   private readonly pollMs: number;
+  private readonly fetchImpl: typeof fetch | undefined;
+  /** Transactions behind each sale's enclave runs, once found: re-running the checks skips the search. */
+  private readonly runTxs = new Map<string, Partial<Record<RunKind, FoundTx>>>();
   private readonly cache = new Map<string, { at: number; value: Promise<unknown> }>();
   private readonly listeners = new Set<() => void>();
   private readonly noticeListeners = new Set<(n: ClientNotice) => void>();
@@ -188,6 +214,7 @@ export class NearClient implements FairgroundClient {
     this.cacheMs = opts.cacheMs ?? 3000;
     this.waitMs = opts.waitMs ?? 30_000;
     this.pollMs = opts.pollMs ?? 1000;
+    this.fetchImpl = opts.fetch;
     this.capabilities = {
       judgeMode: false,
       faucet: config.network !== "mainnet",
@@ -384,13 +411,11 @@ export class NearClient implements FairgroundClient {
   }
 
   /**
-   * What the contract's views hold about the enclave run. No TDX quote is
-   * fetched and the nonce is not used (`nonce` and `quote` come back ""): the
-   * code hash is the one pinned in the contract at deploy, the public key the
-   * one the contract stored from the attested key call, and the two hashes
-   * are the sha256 of the clearing input and of the sealer's output as the
-   * contract received them, which equal OutLayer's attestation `input_hash`
-   * and `output_hash` for the run.
+   * What the contract's views hold about the enclave run, and nothing more:
+   * the pinned code hash, the stored sale key, and the sha256 of the clearing
+   * input and output as the contract received them. No quote is fetched.
+   * Kept for the sandbox end-to-end run (scripts/e2e), which has no OutLayer
+   * attestation service; the UI uses `verifySale`.
    */
   async getAttestation(saleId: string, nonce: string): Promise<Attestation> {
     void nonce;
@@ -403,10 +428,55 @@ export class NearClient implements FairgroundClient {
       outputHash: result?.result_sha256 ?? "",
       quote: "",
       fetchedAt: Date.now(),
-      url: "https://outlayer.fastnear.com/",
+      url: "https://app.outlayer.ai/executions",
       simulated: false,
       source: "chain",
     };
+  }
+
+  /**
+   * Checks the sale's enclave runs against OutLayer's attestations and the
+   * chain (near/attestation-sources.ts). Read-only. The transactions found
+   * are kept, so re-running the checks fetches the evidence again without
+   * searching again. A local sandbox has no OutLayer attestation service.
+   */
+  async verifySale(saleId: string): Promise<SaleVerification> {
+    const network = this.config.network;
+    if (network === "sandbox") {
+      const [sale, result] = await Promise.all([this.requireSaleView(saleId), this.resultView(saleId)]);
+      const tee = sale.reveal_mode === "Tee";
+      const none = (kind: RunKind) => ({
+        kind,
+        found: false as const,
+        reason: "no_service" as const,
+        message: "A local sandbox has no OutLayer attestation service: its runs come from a mock OutLayer.",
+      });
+      return {
+        simulated: false,
+        checkedAt: Date.now(),
+        pinnedWasm: sale.sealer_code_hash,
+        key: tee && sale.sealer_pubkey ? none("key") : null,
+        clear: tee && result?.result_sha256 ? none("clear") : null,
+      };
+    }
+    const logged = (kind: "created" | "closed") => {
+      const e = this.log.find(saleId, kind);
+      return e?.txHash && e.account ? { txHash: e.txHash, account: e.account } : undefined;
+    };
+    const created = logged("created");
+    const closed = logged("closed");
+    const { verification, found } = await verifySaleRuns({
+      network,
+      rpcUrl: this.config.rpcUrl,
+      contractId: this.contractId,
+      saleId,
+      referenceWasm: this.config.expectedCodeHash,
+      logged: { ...(created ? { key: created } : {}), ...(closed ? { clear: closed } : {}) },
+      known: this.runTxs.get(saleId),
+      ...(this.fetchImpl ? { fetch: this.fetchImpl } : {}),
+    });
+    this.runTxs.set(saleId, { ...this.runTxs.get(saleId), ...found });
+    return verification;
   }
 
   /**
@@ -975,21 +1045,51 @@ export class NearClient implements FairgroundClient {
     }
     if (!bid) throw invalid("No bid from this account in this sale.", "no_bid");
     if (bid.claimed) throw invalid("Already claimed.", "already_claimed");
+    // While the launch pool is being seeded the sale tokens stay locked: a claim pays only the USDC.
+    const fillOf = async () =>
+      (await this.view<FillView[]>("get_fills", { sale_id: saleId, from_index: bid.index, limit: 1 }))[0];
+    const liquidity = sale.liquidity ? ((await this.freshLiquidity(saleId)) ?? null) : null;
+    const fill = liquidity && LOCKING.has(liquidity.status) ? await fillOf() : undefined;
+    const locked = !!fill && BigInt(fill.tokens) > 0n;
+    // A refund-only claim this browser sent while the tokens were locked: the contract will not pay that USDC again.
+    const refundDone = this.log
+      .list(saleId)
+      .some((e) => e.kind === "claimed" && e.account === bidder && e.detail === "refund_claimed");
+    if (locked) {
+      if (BigInt(fill.refund) === 0n || refundDone) {
+        throw invalid(
+          "Your tokens unlock once the launch pool is seeded (or abandoned after its deadline). Anyone can seed it from the result page.",
+          "liquidity_pending",
+        );
+      }
+    }
+    // A refund-only claim leaves the bid's `claimed` flag false: its USDC arriving confirms it instead.
+    const usdcBefore = locked ? await this.usdcBalance(bidder) : 0n;
     const action = this.build(() => claimAction(this.contractId, saleId, bidder));
-    const sent = await this.send(action, this.pusher(bidder, opts), opts, true, async () => {
-      return !!(await this.freshBidView(saleId, bidder))?.claimed;
-    });
+    const sent = await this.send(action, this.pusher(bidder, opts), opts, true, async () =>
+      locked
+        ? (await this.usdcBalance(bidder)) > usdcBefore
+        : !!(await this.freshBidView(saleId, bidder))?.claimed,
+    );
     // What was paid: the contract's `claimed` event when in hand, else the bid's fill.
     const event = sent.events.find((e) => e.event === "claimed")?.data as { tokens?: string; refund?: string } | undefined;
     let tokens = event?.tokens !== undefined ? BigInt(event.tokens) : null;
     let refund = event?.refund !== undefined ? BigInt(event.refund) : null;
     if (tokens === null || refund === null) {
-      const [fill] = await this.view<FillView[]>("get_fills", { sale_id: saleId, from_index: bid.index, limit: 1 });
-      tokens = BigInt(fill?.tokens ?? "0");
-      refund = BigInt(fill?.refund ?? "0");
+      const f = fill ?? (await fillOf());
+      tokens = locked ? 0n : BigInt(f?.tokens ?? "0");
+      refund = !locked && refundDone ? 0n : BigInt(f?.refund ?? "0");
     }
     const txHash = sent.relay.txHash ?? "";
-    this.log.add({ saleId, kind: "claimed", at: Date.now(), account: bidder, amount: refund.toString(), txHash });
+    this.log.add({
+      saleId,
+      kind: "claimed",
+      ...(locked ? { detail: "refund_claimed" as const } : {}),
+      at: Date.now(),
+      account: bidder,
+      amount: refund.toString(),
+      txHash,
+    });
     return { saleId, bidder, tokens, refund, txHash, relay: sent.relay };
   }
 
@@ -1007,6 +1107,12 @@ export class NearClient implements FairgroundClient {
     // to burn on a sold-out sale, no raise on a failed one) keeps its flag false for good.
     const left = before ? proceedsLeft(sale, before, reserve) : null;
     if (left && !left.raise && !left.allocation && !left.burn && !left.reserve) {
+      if (before && allocationLocked(sale, before)) {
+        throw invalid(
+          "Nothing to pay out now: the creator allocation unlocks once the launch pool is seeded (or abandoned after its deadline).",
+          "liquidity_pending",
+        );
+      }
       throw invalid("The creator's proceeds were already paid.", "already_claimed");
     }
     const flags = (r: ResultView | null) => JSON.stringify(r?.proceeds ?? null);
@@ -1022,6 +1128,138 @@ export class NearClient implements FairgroundClient {
       txHash,
     });
     return { txHash, relay: sent.relay };
+  }
+
+  // ---------- launch liquidity ----------
+
+  /** USDC balance straight from the chain, past the cache. */
+  private usdcBalance = async (account: string): Promise<bigint> =>
+    BigInt((await this.rpc.view<string | null>(this.usdcContract, "ft_balance_of", { account_id: account })) ?? "0");
+
+  /** get_result's liquidity straight from the chain; null when the sale has none (or no result yet). */
+  private freshLiquidity = async (saleId: string): Promise<LiquidityView | null> =>
+    (await this.view<ResultView | null>("get_result", { sale_id: saleId }))?.liquidity ?? null;
+
+  async getLiquidityDex(): Promise<string | null> {
+    return this.cached("config:dex", async () => {
+      // A contract without launch liquidity has no `dex` in its config.
+      const config = await this.view<{ dex?: string | null } | null>("get_config", {});
+      return config?.dex ?? null;
+    });
+  }
+
+  async getPool(saleId: string): Promise<DexPool | null> {
+    const liquidity = (await this.resultView(saleId))?.liquidity;
+    if (!liquidity || liquidity.pool_id === null) return null;
+    const { dex, pool_id: poolId } = liquidity;
+    return this.cached(`pool:${dex}:${poolId}`, async () => {
+      const [pool, shares] = await Promise.all([
+        this.rpc.view<RefPoolView>(dex, "get_pool", { pool_id: poolId }),
+        this.rpc.view<string>(dex, "get_pool_shares", { pool_id: poolId, account_id: this.contractId }),
+      ]);
+      return poolFromView(dex, poolId, pool, shares, Date.now());
+    });
+  }
+
+  async seedLiquidity(saleId: string, caller: string, opts?: WriteOptions): Promise<LiquidityWriteResult> {
+    const before = await this.freshLiquidity(saleId);
+    if (!before) throw invalid("This sale has no launch pool.", "no_liquidity");
+    if (before.status !== "seeding") {
+      throw invalid(`Cannot seed the launch pool: it is ${STAGE_LABEL[before.status].toLowerCase()}.`, "wrong_stage");
+    }
+    if (busy(before)) throw invalid(LIQUIDITY_BUSY, "liquidity_busy");
+    const deadline = before.deadline === null ? null : nsToMs(before.deadline);
+    if (deadline !== null && (await this.rpc.headTimeMs()) >= deadline) {
+      throw invalid("The seeding deadline has passed. Anyone can now abandon the launch pool.", "too_late");
+    }
+    return this.liquidityCall("seed_liquidity", saleId, caller, opts, before);
+  }
+
+  async abandonLiquidity(saleId: string, caller: string, opts?: WriteOptions): Promise<LiquidityWriteResult> {
+    const before = await this.freshLiquidity(saleId);
+    if (!before) throw invalid("This sale has no launch pool.", "no_liquidity");
+    if (before.status !== "seeding" && before.status !== "abandoned") {
+      throw invalid(`Cannot abandon the launch pool: it is ${STAGE_LABEL[before.status].toLowerCase()}.`, "wrong_stage");
+    }
+    if (before.status === "abandoned" && before.next_step === null && before.usdc_on_dex === "0" && before.tokens_on_dex === "0") {
+      throw invalid("The launch pool is already abandoned and nothing is left on the exchange.", "already_done");
+    }
+    if (busy(before)) throw invalid(LIQUIDITY_BUSY, "liquidity_busy");
+    const deadline = before.deadline === null ? null : nsToMs(before.deadline);
+    if (before.status === "seeding" && deadline !== null && (await this.rpc.headTimeMs()) < deadline) {
+      throw invalid(`The launch pool can be abandoned from ${dateTime(deadline)}, if it is not seeded by then.`, "too_early");
+    }
+    return this.liquidityCall("abandon_liquidity", saleId, caller, opts, before);
+  }
+
+  /**
+   * seed_liquidity or abandon_liquidity, with no deposit. A wallet transaction
+   * the caller pays for (300 TGas, about 0.03 NEAR at most) runs every step.
+   * Gasless only when the relayer's policy lists the method, at 150 TGas,
+   * which runs one or two. A step that fails on the exchange is counted in
+   * `failures` by the contract, and this throws so the page can offer the retry.
+   */
+  private async liquidityCall(
+    method: "seed_liquidity" | "abandon_liquidity",
+    saleId: string,
+    caller: string,
+    opts: WriteOptions | undefined,
+    before: LiquidityView,
+  ): Promise<LiquidityWriteResult> {
+    const relay = !!this.relayer && !!(await this.getRelayerPolicy())?.methods.includes(method);
+    const gas = relay ? RELAYED_LIQUIDITY_GAS : WALLET_GAS[method];
+    const action = this.walletCall(this.contractId, method, { sale_id: saleId }, gas, 0n);
+    // What a step changes. next_step is left out: it also changes when the deadline passes.
+    const progress = (v: LiquidityView | null) =>
+      JSON.stringify(
+        v && [v.status, v.in_flight, v.pool_id, v.usdc_on_dex, v.tokens_on_dex, v.shares, v.failures],
+      );
+    // A step that waited too long is given up first (failures + 1) and the exchange read again: not a failure of this call.
+    const lost = before.in_flight !== null && before.next_step === "reconcile" ? 1 : 0;
+    const failedHere = (after: LiquidityView) => after.failures - before.failures > lost;
+    // A step that failed on the exchange: the contract recorded it and the same call runs it again.
+    const stepFailed = (after: LiquidityView, relayInfo: RelayInfo | null, cause?: unknown) => {
+      // After a lost step the exchange was read first, so which step failed is not known here.
+      const step = lost ? null : (before.next_step ?? (method === "abandon_liquidity" ? "withdraw" : null));
+      const ran = after.failures - before.failures - lost > 1 ? "Steps" : "A step";
+      return new FairgroundError(
+        "tx_failed",
+        `${step ? `"${STEP_LABEL[step]}"` : ran} failed on the exchange. Nothing was lost: run it again.`,
+        { relay: relayInfo, reason: "liquidity_step_failed", cause },
+      );
+    };
+    let sent: Sent;
+    try {
+      sent = await this.send(action, caller, opts, relay, async () => {
+        const now = await this.freshLiquidity(saleId);
+        return progress(now) !== progress(before) && !!now && !busy(now);
+      });
+    } catch (e) {
+      // The exchange's own failure fails the transaction too; the contract's callback still counted it.
+      if (e instanceof FairgroundError && e.code === "tx_failed") {
+        const after = await this.freshLiquidity(saleId).catch(() => null);
+        if (after && failedHere(after)) throw stepFailed(after, e.relay, e);
+      }
+      throw e;
+    }
+    const txHash = sent.relay.txHash ?? "";
+    const after = await this.freshLiquidity(saleId);
+    if (!after) throw invalid("This sale has no launch pool.", "no_liquidity");
+    const liquidity = liquidityFromView(after)!;
+    if (failedHere(after) && after.status === before.status && !busy(after)) {
+      throw stepFailed(after, sent.relay);
+    }
+    if (after.status !== before.status && (after.status === "seeded" || after.status === "abandoned")) {
+      this.log.add({
+        saleId,
+        kind: "settled",
+        detail: after.status === "seeded" ? "liquidity_seeded" : "liquidity_abandoned",
+        at: Date.now(),
+        account: caller,
+        txHash,
+      });
+    }
+    return { txHash, relay: sent.relay, liquidity };
   }
 
   // ---------- USDC: storage and the test faucet ----------

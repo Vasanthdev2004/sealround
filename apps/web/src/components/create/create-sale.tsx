@@ -12,10 +12,12 @@ import { AllocationSection } from "./allocation-section";
 import { Insights } from "./insights";
 import { LimitsSection } from "./limits-section";
 import { FixedRules, ModeSection } from "./mode-section";
+import { PoolSection } from "./pool-section";
 import { CreateSteps, sectionStatuses } from "./progress";
 import { PriceSection } from "./price-section";
 import { Review } from "./review";
 import type { CreateCost, EditTarget } from "./rules";
+import { SimulateSection } from "./simulate-section";
 import { SummaryCard } from "./summary-card";
 import { TokenSection } from "./token-section";
 import { WindowSection } from "./window-section";
@@ -68,6 +70,9 @@ export function CreateSale() {
   // Existing sales, to catch a taken symbol while typing. Updates on any change; no polling needed.
   const salesQ = useClientQuery(() => getClient().listSales(), ["create:sales"], 0);
   const sales = salesQ.data;
+  // The exchange launch pools go to (get_config `dex`). None: the contract takes no launch liquidity.
+  const dexQ = useClientQuery(() => getClient().getLiquidityDex(), ["create:dex"], 0);
+  const dex = dexQ.data ?? null;
 
   const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT);
   // Time of the last edit. Null until then, so nothing reads the clock while prerendering.
@@ -84,7 +89,8 @@ export function CreateSale() {
   const [cost, setCost] = useState<CreateCost>({ state: "idle" });
 
   const taken = new Set((sales ?? []).map((s) => s.config.tokenSymbol));
-  const derived = derive(draft, taken, now);
+  const poolOpts = { pool: dex !== null };
+  const derived = derive(draft, taken, now, poolOpts);
   const errorCount = Object.keys(derived.errors).length;
 
   /** Whether field k's error is on screen: live errors at once, the rest after blur or a review attempt. */
@@ -107,7 +113,7 @@ export function CreateSale() {
   const review = () => {
     const t = Date.now();
     setNow(t);
-    const fresh = derive(draft, taken, t);
+    const fresh = derive(draft, taken, t, poolOpts);
     if (!fresh.ready) {
       setAttempted(true);
       const first = FIELD_ORDER.find((k) => fresh.errors[k]);
@@ -118,7 +124,7 @@ export function CreateSale() {
       return;
     }
     const client = getClient();
-    const config = buildConfig(draft, fresh.ready, t, client.usdcContract);
+    const config = buildConfig(draft, fresh.ready, t, client.usdcContract, dex);
     try {
       validateConfig(config, sales ?? []);
     } catch (e) {
@@ -158,7 +164,7 @@ export function CreateSale() {
     if (!account || submitting || created) return;
     const t = Date.now();
     setNow(t);
-    const fresh = derive(draft, taken, t);
+    const fresh = derive(draft, taken, t, poolOpts);
     if (!fresh.ready) {
       setSubmitError("Some rules are no longer valid, for example a start time that has now passed.");
       return;
@@ -167,7 +173,7 @@ export function CreateSale() {
     setSubmitError(null);
     try {
       const client = getClient();
-      const config = buildConfig(draft, fresh.ready, t, client.usdcContract);
+      const config = buildConfig(draft, fresh.ready, t, client.usdcContract, dex);
       const meta = buildMeta(draft);
       if (client.mode === "near" && cost.state === "ready") {
         // The wallet attaches what the contract asks at this moment. If that is
@@ -196,6 +202,7 @@ export function CreateSale() {
       <Review
         draft={draft}
         derived={derived}
+        dex={dex}
         account={account}
         mode={mode}
         cost={cost}
@@ -230,6 +237,8 @@ export function CreateSale() {
           <LimitsSection {...sectionProps} status={statuses.limits} />
           <Insights derived={derived} />
           <ModeSection {...sectionProps} status={statuses.mode} />
+          {dex !== null && <PoolSection {...sectionProps} status={statuses.pool} dex={dex} />}
+          <SimulateSection derived={derived} />
           <FixedRules />
         </div>
 

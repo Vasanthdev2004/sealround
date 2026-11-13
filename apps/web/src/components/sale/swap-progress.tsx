@@ -8,7 +8,7 @@ import { KV } from "@/components/ui/stat";
 import { dateTime, shortHash, usdcStr } from "@/lib/format";
 import { ONECLICK_STATUS_TEXT, type FundingRecord, type OneClickStatus } from "@/lib/funding";
 import { useNow } from "@/lib/hooks";
-import { DEPOSIT_WINDOW_MS, SIM_PATH, isFinished, isTerminal } from "@/lib/oneclick";
+import { DEPOSIT_WINDOW_MS, SIM_PATH, canTrackFunding, isFinished, isTerminal } from "@/lib/oneclick";
 import { focusEl, scrollToEl } from "@/lib/scroll";
 
 const FAIL_END: OneClickStatus[] = ["REFUNDED", "FAILED", "INCOMPLETE_DEPOSIT"];
@@ -155,8 +155,10 @@ function LiveSwapProgress({ funding, canBid, liveDepositsEnabled, focusOnOpen, o
   const pending = funding.status === "PENDING_DEPOSIT";
   const expiresAt = funding.depositExpiresAt;
   const expired = pending && expiresAt !== undefined && now >= expiresAt;
-  const canDeposit = liveDepositsEnabled && pending && expiresAt !== undefined && !expired && !funding.statusCheckFailed;
   const done = isTerminal(funding.status);
+  const canTrack = canTrackFunding(funding, now);
+  const canDeposit = liveDepositsEnabled && canTrack && pending && expiresAt !== undefined && !expired && !funding.statusCheckFailed;
+  const canRequestNew = liveDepositsEnabled && (expired || (pending && !canTrack));
   const succeeded = funding.status === "SUCCESS";
   const refunded = funding.status === "REFUNDED";
   const failed = funding.status === "FAILED";
@@ -177,12 +179,17 @@ function LiveSwapProgress({ funding, canBid, liveDepositsEnabled, focusOnOpen, o
       <div ref={statusRef} tabIndex={-1} className="text-small text-fg" role="status">
         {statusText}
       </div>
-      {funding.statusCheckFailed && (
+      {!done && !canTrack ? (
+        <p className="text-small text-muted" role="status">
+          This receipt can no longer track the swap. If you already sent funds, keep the transaction and quote reference for 1Click support.
+        </p>
+      ) : funding.statusCheckFailed && (
         <p className="text-small text-warn" role="status">1Click status is temporarily unavailable. This page will retry.</p>
       )}
 
       <dl className="divide-y divide-line border-y border-line">
         <KV k={canDeposit ? `Send on ${funding.originChain}` : `Quoted input on ${funding.originChain}`} v={`${funding.amountIn} ${funding.originAsset}`} />
+        {funding.confidentiality === "basic" && <KV k="Funding route" v="Confidential through 1Click" />}
         {succeeded ? (
           <KV
             k="Delivered"
@@ -226,7 +233,7 @@ function LiveSwapProgress({ funding, canBid, liveDepositsEnabled, focusOnOpen, o
       )}
       {failed && <p className="text-small text-muted">A refund is unconfirmed. Keep your deposit transaction and quote reference for 1Click support.</p>}
       {showRefundDetails && funding.refundReason && <p className="text-small text-muted">{funding.refundReason}</p>}
-      {(failed || incomplete) && funding.correlationId && (
+      {(failed || incomplete || (!done && !canTrack)) && funding.correlationId && (
         <p className="break-all text-label text-subtle">Quote reference <span className="num text-muted">{funding.correlationId}</span></p>
       )}
       {links.length > 0 && (
@@ -241,9 +248,9 @@ function LiveSwapProgress({ funding, canBid, liveDepositsEnabled, focusOnOpen, o
       {succeeded && canBid && (
         <Button onClick={goBid} className="w-full max-sm:h-10">Place your sealed bid</Button>
       )}
-      {(done || (expired && liveDepositsEnabled)) && (
+      {(done || canRequestNew) && (
         <Button variant="ghost" size="sm" onClick={onNewSwap} className="-ml-3 self-start max-sm:h-10">
-          {expired ? "Get a new quote" : "New swap"}
+          {canRequestNew ? "Get a new quote" : "New swap"}
         </Button>
       )}
     </div>

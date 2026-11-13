@@ -200,13 +200,15 @@ export class Chain {
    * wall clock, which is why nothing in this run compares the two.
    */
   async advanceTo(atNs: bigint): Promise<void> {
-    for (let i = 0; i < 20; i++) {
+    // At most 1,000 blocks a call: a sandbox that has run for hours forwards
+    // about 100 blocks a second, and each call has 30 s (`rpc`).
+    for (let i = 0; i < 60; i++) {
       const now = await this.nowNs();
       if (now >= atNs) return;
       const blocks = Number((atNs - now) / NS_PER_FORWARDED_BLOCK + 2n);
-      await this.rpc("sandbox_fast_forward", { delta_height: Math.min(blocks, 3_000) });
+      await this.rpc("sandbox_fast_forward", { delta_height: Math.min(blocks, 1_000) });
     }
-    throw new Error(`the sandbox clock did not reach ${atNs} after 20 fast-forwards`);
+    throw new Error(`the sandbox clock did not reach ${atNs} after 60 fast-forwards`);
   }
 
   /** NEP-141 balance, 0 for an account that is not registered. */

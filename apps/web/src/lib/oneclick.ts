@@ -26,11 +26,13 @@ import { formatUnits, parseUnits } from "@fairground/clearing";
 import {
   NEAR_USDC_ASSET,
   NEAR_USDC_CONTRACT,
+  ONECLICK_STATUSES,
   checkRealQuote,
   isAddressOf,
   isRealRecipient,
   isTxHashOf,
   type AddressKind,
+  type FundingMode,
 } from "@/app/api/oneclick/shared";
 import { getClient } from "./client";
 import { fakeTxHash, randomHex } from "./crypto";
@@ -275,6 +277,7 @@ export type DryQuoteInput = {
   recipient: string;
   /** Origin-chain refund address. Empty = sample address (dry quotes only). */
   refundTo: string;
+  confidentiality?: FundingMode;
 };
 
 export type QuoteView = {
@@ -285,6 +288,7 @@ export type QuoteView = {
   /** Plain-words notes on how this number was produced. */
   notes: string[];
   originId: OriginId;
+  confidentiality?: FundingMode;
   amountIn: bigint;
   amountInFormatted: string;
   /** Micro-USD. */
@@ -311,6 +315,8 @@ export class QuoteInputError extends Error {
   }
 }
 
+type TrackingReceipt = { token: string; expiresAt: number };
+
 type QuoteResponse = {
   quote: {
     amountIn: string;
@@ -336,6 +342,8 @@ type QuoteResponse = {
   /** 1Click's signature over the quote. Kept with a real quote, in case of a dispute. */
   signature?: string;
   quoteRequest?: Record<string, unknown>;
+  /** Sealround's bearer credential for this deposit's status and submit calls. */
+  tracking?: TrackingReceipt;
 };
 
 async function errorMessage(res: Response): Promise<string> {
@@ -372,7 +380,9 @@ export async function getDryQuote(input: DryQuoteInput): Promise<QuoteView> {
   const amount = BigInt(input.amount);
   const notes: string[] = [];
 
-  const tokens = await fetchTokens().catch(() => null);
+  // Confidential previews use the same pinned asset IDs as the deposit quote.
+  const confidential = input.confidentiality === "basic";
+  const tokens = confidential ? null : await fetchTokens().catch(() => null);
   const originToken = findOrigin(tokens, origin);
   const dest = findNearUsdc(tokens);
 
@@ -397,11 +407,15 @@ export async function getDryQuote(input: DryQuoteInput): Promise<QuoteView> {
     recipient,
     recipientType: "DESTINATION_CHAIN",
     deadline: new Date(Date.now() + origin.deadlineMs).toISOString(),
+    confidentiality: input.confidentiality,
   };
 
   let r = await postQuote(body);
   if (!r.ok && /refundTo/i.test(r.message)) {
     throw new QuoteInputError(`That refund address is not valid on ${origin.chain}.`, "refundTo");
+  }
+  if (!r.ok && confidential) {
+    throw new Error(`No confidential preview is available. ${r.message}`);
   }
   // A real mainnet recipient that 1Click rejects (e.g. not yet created): price it for the stand-in.
   if (!r.ok && r.status >= 400 && r.status < 500 && !standIn) {
@@ -429,6 +443,7 @@ export async function getDryQuote(input: DryQuoteInput): Promise<QuoteView> {
       standIn,
       notes,
       originId: origin.id,
+      confidentiality: input.confidentiality,
       amountIn: BigInt(q.amountIn),
       amountInFormatted: q.amountInFormatted,
       amountInUsd: inUsd,
@@ -676,6 +691,7 @@ type RealQuoteInput = {
   recipient: string;
   /** Origin-chain address for refunds. Required. */
   refundTo: string;
+  confidentiality?: FundingMode;
 };
 
 /** A real 1Click quote: a live deposit address and the exact terms behind it. */
@@ -683,6 +699,7 @@ type RealQuote = {
   originId: OriginId;
   recipient: string;
   refundTo: string;
+  confidentiality?: FundingMode;
   depositAddress: string;
   /** Exactly what to send, origin base units. */
   amountIn: bigint;
@@ -692,6 +709,7 @@ type RealQuote = {
   /** When the deposit address stops being active, unix ms. */
   deadline: number;
   correlationId: string | null;
+  tracking: TrackingReceipt;
   /** The whole 1Click answer, signature included, kept with the funding record. */
   response: QuoteResponse;
 };
@@ -702,6 +720,9 @@ type RealSwapDetails = {
   originId: OriginId;
   /** Original quote and signature, retained for support. */
   response: QuoteResponse;
+  /** Kept apart from the upstream quote so support details don't carry a bearer token. */
+  tracking?: TrackingReceipt;
+  trackingRevoked?: boolean;
   /** The deposit tx hash the user reported, if any. */
   submittedTx?: string;
 };
@@ -714,6 +735,18 @@ function realSwapOf(rec: FundingRecord): RealSwapDetails | null {
   const d = (rec as RealFundingRecord).oneclick;
   return d?.v === 1 ? d : null;
 }
+
+function trackingValid(tracking: TrackingReceipt | undefined, now: number): tracking is TrackingReceipt {
+  return !!tracking && typeof tracking.token === "string" && /^[A-Za-z0-9_-]{1,512}\.[A-Za-z0-9_-]{43}$/.test(tracking.token) &&
+    Number.isSafeInteger(tracking.expiresAt) && tracking.expiresAt > now;
+}
+
+function trackingOf(rec: FundingRecord, now = Date.now()): TrackingReceipt | null {
+  const details = realSwapOf(rec);
+  return !details?.trackingRevoked && trackingValid(details?.tracking, now) ? details.tracking : null;
+}
+
+export const canTrackFunding = (rec: FundingRecord, now?: number): boolean => trackingOf(rec, now) !== null;
 
 /** Base units as a plain decimal string, exact, without thousands separators: what a wallet expects. */
 export const plainUnits = (v: bigint, decimals: number) => formatUnits(v, decimals).replace(/,/g, "");
@@ -752,6 +785,7 @@ async function getRealQuote(input: RealQuoteInput): Promise<RealQuote> {
     recipient,
     recipientType: "DESTINATION_CHAIN",
     deadline: new Date(Date.now() + origin.deadlineMs).toISOString(),
+    confidentiality: input.confidentiality,
   };
   const r = await postQuote(body, "/api/oneclick/swap");
   if (!r.ok) {
@@ -776,17 +810,23 @@ async function getRealQuote(input: RealQuoteInput): Promise<RealQuote> {
   if (minAmountOut <= 0n || minAmountOut > amountOut) {
     throw new Error("1Click returned an invalid minimum. Request a new quote before sending funds.");
   }
+  const { tracking, ...response } = r.data;
+  if (!trackingValid(tracking, now) || tracking.expiresAt <= deadline) {
+    throw new Error("This deposit quote has no valid tracking receipt. Request a new quote before sending funds.");
+  }
   return {
     originId: origin.id,
     recipient,
     refundTo,
+    confidentiality: input.confidentiality,
     depositAddress: q.depositAddress as string,
     amountIn: BigInt(q.amountIn),
     amountOut,
     minAmountOut,
     deadline,
     correlationId: r.data.correlationId ?? null,
-    response: r.data,
+    tracking,
+    response,
   };
 }
 
@@ -812,6 +852,7 @@ function startRealSwap(args: { account: string; saleId: string; quote: RealQuote
     depositExpiresAt: quote.deadline,
     correlationId: quote.correlationId ?? undefined,
     refundTo: quote.refundTo,
+    confidentiality: quote.confidentiality,
     status: "PENDING_DEPOSIT",
     createdAt: now,
     updatedAt: now,
@@ -820,6 +861,7 @@ function startRealSwap(args: { account: string; saleId: string; quote: RealQuote
       v: 1,
       originId: quote.originId,
       response: quote.response,
+      tracking: quote.tracking,
     },
   };
   if (!saveFunding(rec)) throw new Error("The deposit quote could not be saved in this browser. No funds were sent.");
@@ -832,26 +874,17 @@ export async function startLiveSwap(args: {
   origin: Origin;
   amountInBase: bigint;
   refundTo: string;
+  confidentiality?: FundingMode;
 }): Promise<FundingRecord> {
   const quote = await getRealQuote({
     originId: args.origin.id,
     amount: args.amountInBase.toString(),
     recipient: args.account,
     refundTo: args.refundTo,
+    confidentiality: args.confidentiality,
   });
   return startRealSwap({ account: args.account, saleId: args.saleId, quote });
 }
-
-const STATUSES: OneClickStatus[] = [
-  "PENDING_DEPOSIT",
-  "KNOWN_DEPOSIT_TX",
-  "PROCESSING",
-  "SUCCESS",
-  "INCOMPLETE_DEPOSIT",
-  "REFUNDED",
-  "FAILED",
-];
-const isStatus = (s: unknown): s is OneClickStatus => typeof s === "string" && (STATUSES as string[]).includes(s);
 
 /** An https URL, or undefined. Explorer links from 1Click are shown as links, so nothing else is let through. */
 function httpsUrl(u: unknown): string | undefined {
@@ -864,8 +897,6 @@ function httpsUrl(u: unknown): string | undefined {
   }
 }
 
-const sameDeposit = (a: string, b: string) => (a.startsWith("0x") ? a.toLowerCase() === b.toLowerCase() : a === b);
-
 type StatusReading = {
   status: OneClickStatus;
   updatedAt: number;
@@ -877,39 +908,29 @@ type StatusReading = {
   refundedAmount?: string;
 };
 
-/** A /v0/status (or /v0/deposit/submit) answer for `depositAddress`, or null when it is not one. */
-function readStatus(data: unknown, rec: FundingRecord): StatusReading | null {
+/** A status response scoped and reduced by the server's receipt check. */
+function readStatus(data: unknown): StatusReading | null {
   if (!data || typeof data !== "object") return null;
   const d = data as {
     status?: unknown;
     updatedAt?: unknown;
-    quoteResponse?: { quote?: { depositAddress?: unknown }; quoteRequest?: { recipient?: unknown } };
-    swapDetails?: {
-      originChainTxHashes?: { explorerUrl?: unknown }[];
-      destinationChainTxHashes?: { explorerUrl?: unknown }[];
-      amountOut?: unknown;
-      refundReason?: unknown;
-      refundedAmountFormatted?: unknown;
-    };
+    originTxUrl?: unknown;
+    deliveryTxUrl?: unknown;
+    amountOut?: unknown;
+    refundReason?: unknown;
+    refundedAmount?: unknown;
   };
-  if (!isStatus(d.status)) return null;
-  const addr = d.quoteResponse?.quote?.depositAddress;
-  if (typeof addr !== "string" || !sameDeposit(addr, rec.depositAddress) || d.quoteResponse?.quoteRequest?.recipient !== rec.account) {
-    return null;
-  }
-  const updatedAt = typeof d.updatedAt === "string" ? Date.parse(d.updatedAt) : NaN;
-  if (!Number.isFinite(updatedAt)) return null;
-  const sd = d.swapDetails ?? {};
-  const first = (list: unknown) => (Array.isArray(list) ? httpsUrl((list[0] as { explorerUrl?: unknown } | undefined)?.explorerUrl) : undefined);
+  const status = ONECLICK_STATUSES.find((value) => value === d.status);
+  if (!status || typeof d.updatedAt !== "number" || !Number.isSafeInteger(d.updatedAt)) return null;
   return {
-    status: d.status,
-    updatedAt,
-    originTxUrl: first(sd.originChainTxHashes),
-    deliveryTxUrl: first(sd.destinationChainTxHashes),
-    amountOut: digits(sd.amountOut) && BigInt(sd.amountOut) > 0n ? BigInt(sd.amountOut) : undefined,
-    refundReason: typeof sd.refundReason === "string" && sd.refundReason ? sd.refundReason.slice(0, 200) : undefined,
-    refundedAmount: typeof sd.refundedAmountFormatted === "string" && /^\d{1,40}(\.\d{1,24})?$/.test(sd.refundedAmountFormatted)
-      ? sd.refundedAmountFormatted
+    status,
+    updatedAt: d.updatedAt,
+    originTxUrl: httpsUrl(d.originTxUrl),
+    deliveryTxUrl: httpsUrl(d.deliveryTxUrl),
+    amountOut: digits(d.amountOut) && BigInt(d.amountOut) > 0n ? BigInt(d.amountOut) : undefined,
+    refundReason: typeof d.refundReason === "string" && d.refundReason ? d.refundReason.slice(0, 200) : undefined,
+    refundedAmount: typeof d.refundedAmount === "string" && /^\d{1,40}(\.\d{1,24})?$/.test(d.refundedAmount)
+      ? d.refundedAmount
       : undefined,
   };
 }
@@ -962,10 +983,16 @@ function applyStatus(
   return next;
 }
 
-async function fetchRealStatus(rec: FundingRecord, signal: AbortSignal): Promise<StatusReading | null> {
+async function fetchRealStatus(rec: FundingRecord, tracking: TrackingReceipt, signal: AbortSignal): Promise<StatusReading | "receipt_required" | null> {
   try {
-    const res = await fetch(`/api/oneclick/status?depositAddress=${encodeURIComponent(rec.depositAddress)}`, { cache: "no-store", signal });
-    return res.ok ? readStatus(await res.json(), rec) : null;
+    const res = await fetch(`/api/oneclick/status?depositAddress=${encodeURIComponent(rec.depositAddress)}`, {
+      cache: "no-store",
+      headers: { authorization: `Bearer ${tracking.token}` },
+      signal,
+    });
+    if (res.ok) return readStatus(await res.json());
+    if (res.status === 403 && (await res.json()).code === "receipt_required") return "receipt_required";
+    return null;
   } catch {
     return null;
   }
@@ -989,7 +1016,7 @@ const polling = new Map<string, () => void>();
 export function pollRealStatus(rec: FundingRecord, opts: { intervalMs?: number } = {}): () => void {
   const existing = polling.get(rec.id);
   if (existing) return existing;
-  if (rec.simulated || isTerminal(rec.status)) return () => {};
+  if (isTerminal(rec.status) || !trackingOf(rec)) return () => {};
   const interval = opts.intervalMs ?? REAL_POLL_MS;
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1002,13 +1029,19 @@ export function pollRealStatus(rec: FundingRecord, opts: { intervalMs?: number }
   const tick = async () => {
     if (abort.signal.aborted) return;
     const cur = latest(rec);
-    if (isTerminal(cur.status)) return stop();
-    const reading = await fetchRealStatus(cur, abort.signal);
+    const tracking = trackingOf(cur);
+    if (isTerminal(cur.status) || !tracking) return stop();
+    const reading = await fetchRealStatus(cur, tracking, abort.signal);
     if (abort.signal.aborted) return;
     await withTabLock(`fairground:oneclick:${rec.id}`, async () => {
       if (abort.signal.aborted) return;
-      applyStatus(cur, reading, {}, !reading);
+      if (reading === "receipt_required") {
+        applyStatus(cur, null, { trackingRevoked: true }, true);
+      } else {
+        applyStatus(cur, reading, {}, !reading);
+      }
     });
+    if (reading === "receipt_required") return stop();
     if (abort.signal.aborted) return;
     if (reading) {
       const next = latest(cur);
@@ -1031,7 +1064,7 @@ export function resumeLiveSwaps(account: string): () => void {
   const active = new Map<string, () => void>();
   const sync = () => {
     for (const rec of getFundings(account)) {
-      if (rec.simulated || isTerminal(rec.status) || !realSwapOf(rec) || active.has(rec.id)) continue;
+      if (isTerminal(rec.status) || !trackingOf(rec) || active.has(rec.id)) continue;
       active.set(rec.id, pollRealStatus(rec));
     }
   };
@@ -1051,7 +1084,8 @@ export function resumeLiveSwaps(account: string): () => void {
  */
 export async function submitDepositTx(rec: FundingRecord, txHash: string): Promise<FundingRecord> {
   const details = realSwapOf(rec);
-  if (!details) throw new Error("This swap has no 1Click deposit address to report to.");
+  const tracking = trackingOf(rec);
+  if (!details || !tracking) throw new Error("This swap no longer has an active tracking receipt.");
   const origin = originById(details.originId);
   const hash = txHash.trim();
   const err = txHashError(origin, hash);
@@ -1060,7 +1094,7 @@ export async function submitDepositTx(rec: FundingRecord, txHash: string): Promi
   try {
     res = await fetch("/api/oneclick/submit", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: `Bearer ${tracking.token}` },
       body: JSON.stringify({ txHash: hash, depositAddress: rec.depositAddress }),
     });
   } catch {
@@ -1072,6 +1106,6 @@ export async function submitDepositTx(rec: FundingRecord, txHash: string): Promi
     data = await res.json();
   } catch {}
   return withTabLock(`fairground:oneclick:${rec.id}`, async () =>
-    applyStatus(rec, readStatus(data, rec), { submittedTx: hash }),
+    applyStatus(rec, readStatus(data), { submittedTx: hash }),
   );
 }

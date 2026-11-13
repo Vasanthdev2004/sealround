@@ -173,8 +173,8 @@ near account create-account sponsor-by-faucet-service alice.testnet autogenerate
 near account view-account-summary alice.testnet network-config testnet now
 ```
 
-You need about **10 NEAR** on testnet: 6.5 for the contract account's storage
-(its code is 548 KB because it embeds the per-sale token), about 1.73 for the
+You need about **11 NEAR** on testnet: 7.2 for the contract account's storage
+(its code is 616 KB because it embeds the per-sale token), about 1.73 for the
 smoke sale, 0.3 attached (mostly refunded) for the project and the two secret
 rows, and headroom, because a 300 TGas transaction must have 0.3 NEAR
 available up front (gas is bought at 1e9 yoctoNEAR/gas and the unused part
@@ -457,7 +457,7 @@ refuses, because the predecessor is you, not the contract.
 `deploy\4-deploy-contract.ps1 -Account alice.testnet` prints:
 
 ```powershell
-near account create-account fund-myself $FG '6.5 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ME network-config testnet sign-with-keychain send
+near account create-account fund-myself $FG '7.2 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ME network-config testnet sign-with-keychain send
 near contract deploy $FG use-file contracts\res\fairground.wasm with-init-call new file-args enclave\deploy\out\testnet\new-args.json prepaid-gas '100 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-keychain send
 near contract call-function as-read-only $FG get_config file-args enclave\deploy\out\testnet\empty.json network-config testnet now
 near account view-account-summary $FG network-config testnet now
@@ -465,11 +465,11 @@ near account view-account-summary $FG network-config testnet now
 
 - **Storage.** NEAR locks 1e19 yoctoNEAR per stored byte. The contract code
   embeds the per-sale token wasm (contracts/fairground/src/costs.rs,
-  `TOKEN_WASM`), so `fairground.wasm` is large: 546,747 bytes on 12 Nov 2026
-  (sha256 `bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800`),
-  which is 5.48 NEAR for the code alone. The script reads the file on disk, prints its size and
+  `TOKEN_WASM`), so `fairground.wasm` is large: 616,196 bytes on 12 Nov 2026
+  (sha256 `e93c42759bd63edfba428cf16f043bdad1ae2f3a54d45ca8f9f41e74fe65a941`),
+  which is 6.16 NEAR for the code alone. The script reads the file on disk, prints its size and
   sha256, and computes the balance from it (code + 2 KB, plus 1 NEAR
-  headroom: 6.5 NEAR for that file). Sale costs are paid by each sale's
+  headroom: 7.2 NEAR for that file). Sale costs are paid by each sale's
   creator through `create_sale`'s deposit, not from this balance.
 - **`new` is `#[private]`**: only the contract account may call it.
   `contract deploy ... with-init-call` deploys and initialises in one

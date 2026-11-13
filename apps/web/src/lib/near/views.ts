@@ -7,12 +7,18 @@
  * nanoseconds. The app uses bigint amounts and millisecond times.
  */
 
+import { formatUnits } from "@fairground/clearing";
 import { appFailReason, checkRows, OUTLAYER_COMPUTE_DEPOSIT } from "../client/rules";
 import { fromB64, toHex } from "../crypto";
 import type {
   BidRecord,
   ChainFailReason,
   ChainSaleStatus,
+  DexPool,
+  LiquidityStage,
+  LiquidityState,
+  LiquidityStep,
+  LiquidityTerms,
   ResultFill,
   Sale,
   SaleConfig,
@@ -64,6 +70,44 @@ export type SaleView = {
   bid_count: number;
   total_deposits: string;
   bid_set_hash: string;
+  /** Block height of the latest sealer key request. Newer contracts only; attestation-sources.ts uses it to find the transaction. */
+  key_request_block?: number | string | null;
+  /** Launch liquidity terms, fixed at creation. Absent on contracts without launch liquidity. */
+  liquidity?: LiquidityTermsView | null;
+};
+
+/** get_sale `liquidity` (views.rs LiquidityTermsView). */
+export type LiquidityTermsView = {
+  dex: string;
+  raise_share_bps: number;
+  pool_tokens: string;
+  fee_bps: number;
+};
+
+/** get_result `liquidity` (views.rs LiquidityView). */
+export type LiquidityView = {
+  status: LiquidityStage;
+  next_step: LiquidityStep | null;
+  in_flight: LiquidityStep | null;
+  dex: string;
+  pool_id: number | null;
+  usdc: string;
+  tokens: string;
+  shares: string;
+  usdc_on_dex: string;
+  tokens_on_dex: string;
+  failures: number;
+  /** Nanoseconds; null before settlement. */
+  deadline: string | null;
+};
+
+/** Ref exchange `get_pool` (SIMPLE_POOL): amounts in `token_account_ids` order. */
+export type RefPoolView = {
+  pool_kind: string;
+  token_account_ids: string[];
+  amounts: string[];
+  total_fee: number;
+  shares_total_supply: string;
 };
 
 export type BidView = {
@@ -95,8 +139,12 @@ export type ResultView = {
   input_sha256: string | null;
   clear_requests: number;
   clear_attempts: number;
+  /** Block height of the latest clear request. Newer contracts only; attestation-sources.ts uses it to find the transaction. */
+  clear_request_block?: number | string | null;
   total_penalties: string;
   proceeds: { raise_paid: boolean; allocation_paid: boolean; unsold_burned: boolean; reserve_returned: boolean };
+  /** Launch liquidity progress. Absent on contracts without launch liquidity. */
+  liquidity?: LiquidityView | null;
 };
 
 export type FillView = {
@@ -129,6 +177,68 @@ export function hueOf(saleId: string): number {
   return h;
 }
 
+// ---------- launch liquidity ----------
+
+export function liquidityTermsFromView(v: LiquidityTermsView | null | undefined): LiquidityTerms | null {
+  if (!v) return null;
+  return { dex: v.dex, raiseShareBps: v.raise_share_bps, poolTokens: BigInt(v.pool_tokens), feeBps: v.fee_bps };
+}
+
+export function liquidityFromView(v: LiquidityView | null | undefined): LiquidityState | null {
+  if (!v) return null;
+  return {
+    stage: v.status,
+    nextStep: v.next_step,
+    inFlight: v.in_flight,
+    dex: v.dex,
+    poolId: v.pool_id,
+    usdc: BigInt(v.usdc),
+    tokens: BigInt(v.tokens),
+    shares: BigInt(v.shares),
+    usdcOnDex: BigInt(v.usdc_on_dex),
+    tokensOnDex: BigInt(v.tokens_on_dex),
+    failures: v.failures,
+    deadline: optMs(v.deadline),
+  };
+}
+
+/** Sale tokens stay locked while the launch pool waits for settlement or is being seeded (liquidity.rs `locks_tokens`). */
+const locksTokens = (v: Pick<LiquidityView, "status"> | null | undefined): boolean =>
+  !!v && (v.status === "waiting" || v.status === "seeding");
+
+/**
+ * USDC of the raise that is not the creator's (liquidity.rs `usdc_kept`): the
+ * pool's, or after abandonment what is still on the exchange (all of the
+ * pool's share while the exchange is read again).
+ */
+export function poolUsdcKept(
+  v: Pick<LiquidityView, "status" | "usdc" | "usdc_on_dex" | "next_step" | "in_flight"> | null | undefined,
+): bigint {
+  if (!v) return 0n;
+  if (v.status === "seeding" || v.status === "seeded") return BigInt(v.usdc);
+  // While a lost step's effects are read again (a reconcile due, nothing in flight) all of the pool's share is kept.
+  if (v.status === "abandoned") return BigInt(v.next_step === "reconcile" && v.in_flight === null ? v.usdc : v.usdc_on_dex);
+  return 0n;
+}
+
+/**
+ * The pool as the exchange reports it. `poolId` and `dex` come from the
+ * sale's liquidity view; `contractShares` is get_pool_shares for the sale
+ * contract.
+ */
+export function poolFromView(dex: string, poolId: number, v: RefPoolView, contractShares: string, readAt: number): DexPool {
+  return {
+    dex,
+    poolId,
+    tokenIds: v.token_account_ids,
+    amounts: v.amounts.map((a) => BigInt(a)),
+    feeBps: v.total_fee,
+    sharesTotal: BigInt(v.shares_total_supply),
+    contractShares: BigInt(contractShares),
+    readAt,
+  };
+}
+
 // ---------- sale ----------
 
 export function saleFromView(
@@ -138,15 +248,16 @@ export function saleFromView(
   const commitReveal = v.reveal_mode === "CommitReveal";
   const totalSupply = BigInt(v.total_supply);
   const saleSupply = BigInt(v.sale_supply);
+  const liquidity = liquidityTermsFromView(v.liquidity);
   const config: SaleConfig = {
     tokenName: v.token_name,
     tokenSymbol: v.token_symbol,
     decimals: v.decimals,
     totalSupply,
     saleSupply,
-    // The contract has one creator share: everything that is not for sale.
+    // The contract has one creator share: everything that is not for sale or for the launch pool.
     creatorAllocation: BigInt(v.creator_allocation),
-    lpReserve: 0n,
+    lpReserve: liquidity?.poolTokens ?? 0n,
     floorPrice: BigInt(v.floor_price),
     maxPrice: v.max_price === null ? null : BigInt(v.max_price),
     minRaise: BigInt(v.min_raise),
@@ -160,6 +271,7 @@ export function saleFromView(
     quoteToken: v.quote_token,
     maxBids: v.max_bids,
     ...(v.reveal_window !== null ? { revealWindowMs: nsToMs(v.reveal_window) } : {}),
+    ...(liquidity ? { liquidity } : {}),
   };
   const meta: SaleMeta = {
     description: v.description ?? "",
@@ -224,6 +336,16 @@ export function createSaleParams(saleId: string, config: SaleConfig, meta: SaleM
     quote_token: config.quoteToken,
     ...(meta.description.trim() ? { description: meta.description.trim() } : {}),
     ...(meta.website?.trim() ? { website: meta.website.trim() } : {}),
+    // The contract picks the exchange (get_config `dex`); the terms name only the share, the reserve and the fee.
+    ...(config.liquidity
+      ? {
+          liquidity: {
+            raise_share_bps: config.liquidity.raiseShareBps,
+            pool_tokens: config.liquidity.poolTokens.toString(),
+            fee_bps: config.liquidity.feeBps,
+          },
+        }
+      : {}),
   };
 }
 
@@ -272,7 +394,7 @@ export const commitmentHexOf = (payloadBase64: string): string => toHex(fromB64(
  */
 export function proceedsLeft(
   sale: Pick<SaleView, "status" | "token_setup" | "creator_allocation">,
-  result: Pick<ResultView, "total_raised" | "unsold" | "proceeds">,
+  result: Pick<ResultView, "total_raised" | "unsold" | "proceeds" | "liquidity">,
   reserveRefund?: bigint,
 ): { raise: boolean; allocation: boolean; burn: boolean; reserve: boolean } {
   const done = result.proceeds;
@@ -280,11 +402,30 @@ export function proceedsLeft(
   // A token deploy still in flight decides whether its NEAR comes back: nothing is returned until it ends.
   const tokenSettled = sale.token_setup !== "pending";
   return {
+    // The launch pool's USDC is never the creator's while it is planned or seeded, so the raise is owed
+    // exactly when the sale raised anything: the pool takes at most half.
     raise: sale.status === "settled" && !done.raise_paid && BigInt(result.total_raised) > 0n,
-    allocation: tokenReady && !done.allocation_paid && BigInt(sale.creator_allocation) > 0n,
+    // Locked while the launch pool is being seeded: claim_proceeds cannot pay it yet (see allocationLocked).
+    allocation: allocationOwed(sale, result) && !locksTokens(result.liquidity),
     burn: tokenReady && !done.unsold_burned && BigInt(result.unsold) > 0n,
     reserve: tokenSettled && !done.reserve_returned && (reserveRefund === undefined || reserveRefund > 0n),
   };
+}
+
+const allocationOwed = (
+  sale: Pick<SaleView, "token_setup" | "creator_allocation">,
+  result: Pick<ResultView, "proceeds">,
+): boolean => sale.token_setup === "done" && !result.proceeds.allocation_paid && BigInt(sale.creator_allocation) > 0n;
+
+/**
+ * The creator allocation is owed but locked: the launch pool is being seeded,
+ * and claim_proceeds keeps the allocation until it is seeded or abandoned.
+ */
+export function allocationLocked(
+  sale: Pick<SaleView, "token_setup" | "creator_allocation">,
+  result: Pick<ResultView, "proceeds" | "liquidity">,
+): boolean {
+  return allocationOwed(sale, result) && locksTokens(result.liquidity);
 }
 
 /**
@@ -316,6 +457,8 @@ export function resultFromViews(
   if (sale.status !== "settled" && sale.status !== "failed") return null;
   const settled = sale.status === "settled";
   const left = proceedsLeft(sale, result, reserveRefund);
+  const locked = allocationLocked(sale, result);
+  const liquidity = liquidityFromView(result.liquidity);
   const tokenPending = sale.token_setup === "pending";
   const commitReveal = sale.reveal_mode === "CommitReveal";
   const failReason = settled ? null : result.fail_reason;
@@ -325,6 +468,9 @@ export function resultFromViews(
     const bid = bids[f.index];
     const penalty = BigInt(f.penalty);
     const claim = log.findLast((e) => e.kind === "claimed" && e.account === f.bidder && !e.detail);
+    // While the tokens are locked a claim pays only the USDC, which no view records:
+    // this browser knows it when it sent that claim. The later claim then pays the tokens only.
+    const refundClaim = log.findLast((e) => e.kind === "claimed" && e.account === f.bidder && e.detail === "refund_claimed");
     return {
       index: f.index,
       bidder: f.bidder,
@@ -337,10 +483,13 @@ export function resultFromViews(
       claimed: bid?.claimed ?? false,
       claimTx: bid?.claimed ? (claim?.txHash || null) : null,
       ...(commitReveal && bid ? { revealed: bid.revealed } : {}),
+      ...(refundClaim ? { refundClaimed: true } : {}),
     };
   });
   const totalSold = BigInt(result.total_sold);
-  const settleLog = log.findLast((e) => e.kind === "settled" || e.kind === "failed" || e.kind === "refund_mode");
+  const settleLog = log.findLast(
+    (e) => (e.kind === "settled" || e.kind === "failed" || e.kind === "refund_mode") && !e.detail,
+  );
   return {
     status: settled ? "settled" : "failed",
     ...(settled ? {} : { failReason: appFailReason(failReason) }),
@@ -373,7 +522,9 @@ export function resultFromViews(
       allocationPaid: !left.allocation && !tokenPending,
       unsoldBurned: !left.burn && !tokenPending,
       reserveReturned: !left.reserve && !tokenPending,
+      ...(locked ? { allocationLocked: true } : {}),
     },
+    ...(liquidity ? { liquidity } : {}),
   };
 }
 
@@ -540,16 +691,40 @@ export function eventsFromViews(
               : "A contract check failed. Every bidder can claim a full refund.";
       untimed({ kind: "failed", note }, base + 0.1, sent("failed"));
     }
+    const liq = result.liquidity;
+    if (sale.status === "settled" && liq && (liq.status === "seeded" || liq.status === "abandoned")) {
+      const detail = liq.status === "seeded" ? "liquidity_seeded" : "liquidity_abandoned";
+      untimed(
+        {
+          kind: "settled",
+          detail,
+          amount: BigInt(liq.usdc),
+          note:
+            liq.status === "seeded"
+              ? `Launch pool seeded at the clearing price: ${usdc(BigInt(liq.usdc))} USDC and ${formatUnits(BigInt(liq.tokens), sale.decimals, 4)} ${sale.token_symbol}${
+                  liq.pool_id !== null ? ` in pool ${liq.pool_id}` : ""
+                }. The sale contract keeps the LP shares.`
+              : `Launch pool not seeded by its deadline and abandoned. Its ${usdc(BigInt(liq.usdc))} USDC goes to the creator and its tokens are burned.`,
+        },
+        base + 0.15,
+        sent("settled", undefined, detail),
+      );
+    }
     const p = result.proceeds;
     if (p.raise_paid || p.allocation_paid || p.unsold_burned || p.reserve_returned) {
+      // The creator's raise is the total less the launch pool's USDC.
+      const raise = BigInt(result.total_raised) - poolUsdcKept(liq);
+      const allocationLeft = !p.allocation_paid && BigInt(sale.creator_allocation) > 0n;
       untimed(
         {
           kind: "claimed",
           detail: "proceeds_claimed",
           account: sale.creator,
-          ...(p.raise_paid && BigInt(result.total_raised) > 0n ? { amount: BigInt(result.total_raised) } : {}),
+          ...(p.raise_paid && raise > 0n ? { amount: raise } : {}),
           note: p.raise_paid
-            ? `Creator paid: ${usdc(BigInt(result.total_raised))} USDC raised and the creator allocation. Unsold tokens burned.`
+            ? allocationLeft && locksTokens(liq)
+              ? `Creator paid ${usdc(raise)} USDC of the raise. The creator allocation unlocks once the launch pool is seeded.`
+              : `Creator paid: ${usdc(raise)} USDC raised and the creator allocation. Unsold tokens burned.`
             : "Creator allocation paid. The unsold sale tokens were burned.",
         },
         base + 0.2,
@@ -557,6 +732,21 @@ export function eventsFromViews(
       );
     }
     for (const b of bids) {
+      // A claim while the tokens were locked paid only the USDC; no view records it, so only this browser's log knows.
+      const refundOnly = sent("claimed", b.bidder, "refund_claimed");
+      if (refundOnly) {
+        untimed(
+          {
+            kind: "claimed",
+            detail: "refund_claimed",
+            account: b.bidder,
+            amount: BigInt(fills[b.index]?.refund ?? "0"),
+            note: `Claimed ${usdc(BigInt(fills[b.index]?.refund ?? "0"))} USDC unspent. The tokens unlock once the launch pool is seeded.`,
+          },
+          base + 0.3 + b.index / 1000,
+          refundOnly,
+        );
+      }
       if (!b.claimed) continue;
       const fill = fills[b.index];
       const refund = BigInt(fill?.refund ?? "0");
@@ -566,15 +756,17 @@ export function eventsFromViews(
         {
           kind: "claimed",
           account: b.bidder,
-          amount: refund,
+          amount: refundOnly ? 0n : refund,
           note:
             tokens > 0n
-              ? `Claimed tokens and ${usdc(refund)} USDC unspent.`
+              ? refundOnly
+                ? "Claimed tokens. The unspent USDC was paid earlier."
+                : `Claimed tokens and ${usdc(refund)} USDC unspent.`
               : penalty > 0n
                 ? `Claimed ${usdc(refund)} USDC: the deposit less the 1 % penalty for a void bid.`
                 : `Claimed full refund of ${usdc(refund)} USDC.`,
         },
-        base + 0.3 + b.index / 1000,
+        base + 0.3 + b.index / 1000 + 0.0005,
         sent("claimed", b.bidder),
       );
     }

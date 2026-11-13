@@ -150,13 +150,13 @@ export function SwapRoute() {
 
 const CHECKS = [
   { label: "Attested run's hashes match what the contract stored", detail: "attested output f57440…1edbaa = on chain f57440…1edbaa" },
-  { label: "Enclave code hash equals the reproducible build", detail: "attested 7f3a9c…3f2a71 = public build 7f3a9c…3f2a71" },
+  { label: "Enclave code hash equals the reproducible build", detail: "attested f8408a87…d8cb = public build f8408a87…d8cb" },
   { label: "Sealer public key on chain matches the attestation", detail: "on chain 86c543…2e492a = attested 86c543…2e492a" },
   { label: "Result's bid-set hash equals the stored hash", detail: "stored at close 6949ea…4e90c3 = reported 6949ea…4e90c3" },
   { label: "All contract-side checks passed", detail: "14 of 14 passed" },
 ];
 
-/** The five verification checks ticking over, as they do on every result page. */
+/** An illustrative run of the verification checks for an enclave-cleared sale. */
 export function ChecksDemo() {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, amount: 0.4 });
@@ -184,7 +184,7 @@ export function ChecksDemo() {
     <div ref={ref} className="panel overflow-hidden">
       <div className="flex items-center justify-between gap-4 px-5 pt-[18px] pb-2">
         <div>
-          <div className="text-h3 text-fg">Verified</div>
+          <div className="text-h3 text-fg">Verification example</div>
           <p className="mt-0.5 text-label text-subtle" aria-live="polite">
             <span className="num">{passed}</span> of 5 checks passed
           </p>

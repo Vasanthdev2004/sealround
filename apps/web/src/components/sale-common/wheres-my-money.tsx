@@ -9,8 +9,9 @@ import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
 import { accountUrl, networkName, shortHash, tokenStr, usdcStr } from "@/lib/format";
 import { ONECLICK_STATUS_TEXT, type FundingRecord } from "@/lib/funding";
-import { useNow } from "@/lib/hooks";
-import { resumeLiveSwaps } from "@/lib/oneclick";
+import { useClientQuery, useNow } from "@/lib/hooks";
+import { canTrackFunding, isTerminal, resumeLiveSwaps } from "@/lib/oneclick";
+import { locksTokens } from "@/lib/liquidity";
 import type { BidRecord, Sale, SaleResult } from "@/lib/types";
 
 type HopState = CheckState | "skip";
@@ -57,6 +58,14 @@ const ExtLink = ({ href, children }: { href: string; children: React.ReactNode }
 function LiveFundingStatus({ funding }: { funding: FundingRecord }) {
   const now = useNow(5000);
   if (funding.status === "FAILED") return "1Click reported a failure. A refund is unconfirmed.";
+  if (!isTerminal(funding.status) && !canTrackFunding(funding, now)) {
+    return (
+      <>
+        Tracking has ended for this receipt. Keep the deposit transaction for 1Click support.
+        {funding.correlationId && <> Quote reference <span className="num break-all">{funding.correlationId}</span>.</>}
+      </>
+    );
+  }
   if (funding.statusCheckFailed) return "1Click status is temporarily unavailable. This page will retry.";
   if (funding.status === "INCOMPLETE_DEPOSIT") return "1Click detected a short deposit. Waiting for refund status.";
   if (funding.status === "PENDING_DEPOSIT" && funding.depositExpiresAt !== undefined && now >= funding.depositExpiresAt) {
@@ -151,20 +160,35 @@ export function WheresMyMoney({
   // 3. Sealround contract
   const st = sale.status;
   const closed = st === "settled" || st === "failed";
+  const needsPoolState = !!bid && !!sale.config.liquidity && st === "settled";
+  const poolResult = useClientQuery(
+    () => needsPoolState ? getClient().getResult(sale.id) : Promise.resolve(null),
+    [sale.id, needsPoolState],
+    5000,
+  );
+  const claimed = fill?.claimed ?? bid?.claimed ?? false;
+  const refundClaimed = fill?.refundClaimed === true;
+  const checkingPool = needsPoolState && !claimed && !poolResult.data && (fill?.tokens ?? 1n) > 0n;
+  const tokensLocked = !claimed && locksTokens(poolResult.data?.liquidity) && !!fill && fill.tokens > 0n;
+  const refundAvailable = tokensLocked && !refundClaimed && !!fill && fill.refund > 0n;
   // Without a bid, the last two rows only describe what would happen while a bid can still be placed.
   const biddable = st === "upcoming" || st === "open";
   // The 1 % a void bid loses. It never comes back, so it gets its own row below.
   const penalty = fill?.penalty ?? 0n;
   hops.push({
     title: "Sealround contract",
-    state: !bid ? "idle" : bid.claimed || closed ? "pass" : "pending",
+    state: !bid ? "idle" : claimed || (closed && !tokensLocked && !checkingPool) ? "pass" : "pending",
     value: bid ? `${usdcStr(bid.deposit, 6)} USDC` : undefined,
     word: !bid
       ? biddable
         ? "No bid yet"
         : "No bid"
-      : bid.claimed
+      : claimed
         ? "Released"
+        : checkingPool
+          ? "Checking pool status"
+        : tokensLocked
+          ? refundAvailable ? "Refund available" : "Tokens locked"
         : st === "failed"
           ? "Refundable"
           : st === "settled"
@@ -174,8 +198,10 @@ export function WheresMyMoney({
       ? biddable
         ? "A deposit sits here, locked, until the sale settles."
         : undefined
-      : bid.claimed
+      : claimed
         ? undefined
+        : tokensLocked
+          ? "Tokens unlock when the launch pool is seeded or abandoned."
         : !closed
           ? "Until the sale settles"
           : st === "failed" && penalty > 0n
@@ -199,16 +225,27 @@ export function WheresMyMoney({
   const tokens = fill && fill.tokens > 0n ? `${tokenStr(fill.tokens, sale.config.decimals)} ${sym}` : null;
   hops.push({
     title: "Tokens and refund",
-    state: bid?.claimed ? "pass" : bid && closed ? "pending" : "idle",
-    word: bid?.claimed ? "Claimed" : bid && closed ? "Unclaimed" : bid || biddable ? "After settlement" : "Nothing to claim",
+    state: claimed ? "pass" : bid && closed ? "pending" : "idle",
+    word: claimed ? "Claimed" : refundClaimed ? "Refund claimed" : checkingPool ? "Checking pool status" : tokensLocked ? "Tokens locked" : bid && closed ? "Unclaimed" : bid || biddable ? "After settlement" : "Nothing to claim",
     detail:
       bid && closed ? (
-        fill ? (
+        checkingPool ? "Checking when the sale tokens can be claimed." : fill ? (
           <span className="num">
-            {tokens && `${tokens} and `}
-            {usdcStr(fill.refund, 6)} USDC {bid.claimed ? "sent to your account" : "waiting for you"}
+            {tokensLocked ? (
+              <>
+                {tokens} locked.
+                {fill.refund > 0n && <> {usdcStr(fill.refund, 6)} USDC {refundClaimed ? "already refunded." : "available to claim."}</>}
+              </>
+            ) : refundClaimed && !claimed ? (
+              <>{tokens} available to claim. {usdcStr(fill.refund, 6)} USDC already refunded.</>
+            ) : (
+              <>
+                {tokens && `${tokens} and `}
+                {usdcStr(fill.refund, 6)} USDC {claimed ? "sent to your account" : "waiting for you"}
+              </>
+            )}
           </span>
-        ) : bid.claimed ? (
+        ) : claimed ? (
           "Sent to your account"
         ) : undefined
       ) : bid || biddable ? (

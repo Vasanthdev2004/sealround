@@ -125,7 +125,7 @@ function Console() {
     setWallet(w);
     setOwner(id);
     setOwnerBalance(acct.balance);
-    setContractId((c) => (c && c.endsWith(`.${id}`) ? c : `fairground.${id}`));
+    setContractId((c) => (c && c.endsWith(`.${id}`) ? c : `sealround.${id}`));
   }
 
   async function takeTypedOwner() {

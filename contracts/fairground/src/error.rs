@@ -48,6 +48,18 @@ pub enum Error {
     AlreadyRevealed,
     BadSalt,
     CommitmentMismatch,
+    /// The sale was created without launch liquidity.
+    NoLiquidity,
+    /// The launch liquidity is not in a stage that allows the action.
+    WrongLiquidityStage {
+        action: &'static str,
+        stage: &'static str,
+    },
+    /// Sale tokens stay in the contract until the launch pool is seeded or
+    /// abandoned.
+    LiquidityPending,
+    /// A launch liquidity step is waiting for its result.
+    LiquidityBusy,
 }
 
 impl fmt::Display for Error {
@@ -75,6 +87,16 @@ impl fmt::Display for Error {
             Self::AlreadyRevealed => f.write_str("this bid is already revealed"),
             Self::BadSalt => f.write_str("salt must be 32 hex characters"),
             Self::CommitmentMismatch => f.write_str("the reveal does not match the commitment"),
+            Self::NoLiquidity => f.write_str("this sale has no launch liquidity"),
+            Self::WrongLiquidityStage { action, stage } => {
+                write!(f, "cannot {action}: launch liquidity is {stage}")
+            }
+            Self::LiquidityPending => f.write_str(
+                "sale tokens stay locked until the launch pool is seeded (seed_liquidity) or abandoned (abandon_liquidity)",
+            ),
+            Self::LiquidityBusy => f.write_str(
+                "a launch liquidity step is waiting for its result; try again in a few blocks",
+            ),
         }
     }
 }

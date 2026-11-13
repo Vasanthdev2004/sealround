@@ -307,3 +307,60 @@ fn quoted_figures_match_the_constants() {
         5_490_000_000_000_000_000_000
     );
 }
+
+#[test]
+fn liquidity_record_fits_the_constant() {
+    use crate::costs::LIQUIDITY_RECORD_BYTES;
+    use crate::liquidity::Liquidity;
+    use crate::{LiquidityStage, LiquidityStep};
+
+    // Every field at its largest; the record sits inside the sale value, so
+    // it adds exactly its Borsh length over `None`.
+    let largest = Liquidity {
+        raise_share_bps: u16::MAX,
+        pool_tokens: u128::MAX,
+        fee_bps: u16::MAX,
+        stage: LiquidityStage::Abandoned,
+        usdc: u128::MAX,
+        tokens: u128::MAX,
+        deadline: u64::MAX,
+        dex_account: true,
+        dex_on_token: true,
+        dex_on_quote: true,
+        pool_id: Some(u64::MAX),
+        tokens_on_dex: u128::MAX,
+        usdc_on_dex: u128::MAX,
+        shares: u128::MAX,
+        in_flight: Some(LiquidityStep::Reconcile),
+        failures: u32::MAX,
+        attempt: u32::MAX,
+        started_at: u64::MAX,
+        unsure: true,
+        near_lost: u128::MAX,
+        pool_search: Some(u64::MAX),
+    };
+    let some = near_sdk::borsh::to_vec(&Some(largest)).unwrap().len();
+    let none = near_sdk::borsh::to_vec(&None::<Liquidity>).unwrap().len();
+    let bytes = (some - none) as u64;
+    println!("measured liquidity record bytes: {bytes}");
+    assert!(bytes <= LIQUIDITY_RECORD_BYTES && LIQUIDITY_RECORD_BYTES - bytes <= 8);
+
+    // And on the real path: the same sale with and without liquidity.
+    let measure = |liquidity: bool| {
+        let mut contract = new_contract();
+        let mut p = params("fairt", RevealMode::Tee);
+        if liquidity {
+            p.liquidity = Some(crate::LiquidityParams {
+                raise_share_bps: 1,
+                pool_tokens: U128(1),
+                fee_bps: 1,
+            });
+        }
+        let before = usage(&mut contract);
+        create(&mut contract, p);
+        usage(&mut contract) - before
+    };
+    // A new record has no pool id, nothing in flight and no pool search: 17
+    // bytes less.
+    assert_eq!(measure(true) - measure(false), bytes - 17);
+}

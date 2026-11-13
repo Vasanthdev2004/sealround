@@ -322,8 +322,8 @@ NEP-141 + NEP-145 + NEP-148 using near-contract-standards 5.30.1.
 ## Sealround contract
 
 Source: `contracts/fairground/src` (lib, config, sale, setup, bids, outlayer,
-settle, claims, costs, events, views; unit tests in `tests/`). Built wasm:
-`contracts/res/fairground.wasm` (about 547 KB, the token wasm included).
+settle, claims, liquidity, costs, events, views; unit tests in `tests/`). Built
+wasm: `contracts/res/fairground.wasm` (about 592 KB, the token wasm included).
 
 ### Init and config (fixed at deploy; there is no owner and no admin method)
 
@@ -335,6 +335,8 @@ settle, claims, costs, events, views; unit tests in `tests/`). Built wasm:
   sealer_code_hash: String,               // the pinned wasm sha256, 64 lowercase hex; copied into every sale
   sealer_secrets: Option<SecretsRef>,     // OutLayer secrets_ref {profile, account_id}
   allowed_quote_tokens: Vec<AccountId>,   // USDC ids accepted as quote_token
+  dex: Option<AccountId>,                 // Rhea exchange for launch pools: ref-finance-101.testnet /
+                                          //   v2.ref-finance.near; null (or absent) turns launch liquidity off
 )
 ```
 
@@ -342,7 +344,8 @@ settle, claims, costs, events, views; unit tests in `tests/`). Built wasm:
 `version_key` (or WasmUrl `hash`) different from `sealer_code_hash`; a
 `project_id` without `/`; a WasmUrl that is not `https://` (at most 2048
 bytes); a secrets profile that is not 1-64 of `[A-Za-z0-9_-]`; an empty or
-duplicated `allowed_quote_tokens`. Views: `get_config`.
+duplicated `allowed_quote_tokens`; a `dex` equal to `outlayer` or to a quote
+token. Views: `get_config`.
 
 ### Sale parameters (`create_sale`)
 
@@ -367,9 +370,10 @@ field must not fall back to its default).
 | `quote_token` | AccountId | must be in `allowed_quote_tokens` |
 | `unsold_rule` | Option<`"Burn"`> | only value, the default |
 | `description`, `website` | Option<String> | <= 280 and <= 200 bytes, display only |
+| `liquidity` | Option<{`raise_share_bps`: u16, `pool_tokens`: U128, `fee_bps`: u16}> | launch pool, see "Launch liquidity": refused when `dex` is null; raise_share_bps 1..=5000, 0 < pool_tokens <= total_supply - sale_supply, fee_bps 1..=1000; unknown fields refused |
 
-`creator_allocation = total_supply - sale_supply` goes to the creator at the end
-(this includes any LP reserve; the creator decides what to do with it).
+`creator_allocation = total_supply - sale_supply - pool_tokens` (no
+`liquidity`: `total_supply - sale_supply`) goes to the creator at the end.
 
 ### Storage and cost
 
@@ -380,7 +384,7 @@ byte; `costs.rs` says how, `contracts/GAS.md` has the numbers; "* 1.15" is
 `STORAGE_MARGIN_PERCENT`, rounded up to whole bytes):
 
 ```
-create cost = (SALE_BASE_BYTES 1040 + 2 * len(sale_id) + 64 (creator, any length)
+create cost = (SALE_BASE_BYTES 1112 + 2 * len(sale_id) + 64 (creator, any length)
                + len(quote_token) + len(token account) + name + symbol + icon
                + description + website) * 1.15 * 1e19
             + token deploy balance  = (token wasm bytes + 100 + 280 + 200 + name + symbol + icon) * 1e19
@@ -388,6 +392,9 @@ create cost = (SALE_BASE_BYTES 1040 + 2 * len(sale_id) + 64 (creator, any length
             + creator registrations on the sale token and the quote token (2 * 0.00125 NEAR)
             + this contract's registration on the quote token, first sale only (0.00125 NEAR + 112 B * 1.15)
             + Tee: OutLayer compute deposit for the key call (OUTLAYER_COMPUTE_DEPOSIT, 0.01401 NEAR)
+            + liquidity only: the record (LIQUIDITY_RECORD_BYTES 168 * 1.15 * 1e19)
+              + LIQUIDITY_NEAR_RESERVE (0.01508 NEAR: exchange account 0.00398, the exchange's
+                registrations on both tokens 2 * 0.00125, pool 0.007, LP record 0.0016, 5 yoctoNEAR)
 ```
 
 Measured on chain: a worst-case TEE bid (64-character bidder, 32-character
@@ -404,8 +411,9 @@ OutLayer refunds the creator what it does not charge. `claim_proceeds` returns
 to the creator what is not needed (`get_reserve_refund(sale_id)` shows it):
 unused bid slots (`max_bids - bid_count`) in full, the token registration of
 every bid that won no tokens, the creator registrations not used (no
-allocation, no raise), and the token deploy balance if the token never
-deployed. The storage of used bid slots stays locked (records are kept).
+allocation, no raise), the token deploy balance if the token never
+deployed, and the part of the liquidity reserve no step spent (see "Launch
+liquidity"). The storage of used bid slots stays locked (records are kept).
 
 Known leak, accepted: `claim` and `claim_proceeds` register the receiver
 (NEP-145, 0.00125 NEAR from the reserve) before every token transfer. If the
@@ -605,27 +613,222 @@ views answer nothing.
   bid loses the penalty either way. Marks each part claimed before the promises;
   `on_claim(sale_id, index, tokens, refund)` restores whatever part failed so it
   can be claimed again. Nothing left: returns false with a log, never a second
-  transfer.
+  transfer. While a launch pool is being seeded the tokens wait: the refund
+  is paid alone (with a log), and a claim with only tokens left fails with
+  "sale tokens stay locked until the launch pool is seeded (seed_liquidity)
+  or abandoned (abandon_liquidity)".
 - `claim_proceeds(sale_id) -> bool`: anyone; pays the creator: the raise in USDC
-  (Settled), the allocation in tokens (each after registering the creator on that
-  token), the NEAR reserve refund; burns the unsold sale tokens with
-  `token.burn` (1 yoctoNEAR attached). Each part once, restored on failure by
-  `on_proceeds`. Waits while a token deploy is still in flight.
+  (Settled; less the pool's USDC), the allocation in tokens (each after
+  registering the creator on that token), the NEAR reserve refund; burns the
+  unsold sale tokens (and the pool reserve the pool does not take) with
+  `token.burn` (1 yoctoNEAR attached). The sale records the amount paid for
+  each part and each call pays what is owed minus what was paid; `on_proceeds`
+  takes a failed part's amount off again, so it is claimed again and never
+  twice, and an abandoned pool's USDC follows in a later call. Waits while a
+  token deploy is still in flight. While a launch pool is being seeded the
+  allocation waits, and a call with only the allocation left fails like
+  `claim`.
+- `seed_liquidity(sale_id)`, `abandon_liquidity(sale_id)`: see "Launch
+  liquidity".
 - `trigger_refund_mode(sale_id)`: anyone, see States.
-- Views: `get_config`, `get_sale(sale_id) -> Option<SaleView>`,
-  `get_sales(from_index, limit)`, `get_bid(sale_id, bidder)`,
+- Views: `get_config`, `get_sale(sale_id) -> Option<SaleView>` (with
+  `key_request_block`, the block height of the call that sent the latest
+  sealer key request, TEE only, and `liquidity`, the launch pool terms with
+  the exchange), `get_sales(from_index, limit)`, `get_bid(sale_id, bidder)`,
   `get_bids(sale_id, from_index, limit)` (index, bidder, deposit, payload
   base64, placed_at, revealed, claimed; never prices), `get_bids_summary(sale_id)`
   (count, max_bids, total_deposits, bid_set_hash), `get_result(sale_id)`
   (status, fail_reason, clearing_price, totals, unsold (what `claim_proceeds`
-  burns: zero while the token is not deployed), n_valid, n_invalid,
-  n_winners, failed_checks, failed_checks_total, result_sha256, input_sha256,
-  clear_requests, clear_attempts, total_penalties, proceeds flags),
+  burns, the unused pool reserve included: zero while the token is not
+  deployed), n_valid, n_invalid, n_winners, failed_checks,
+  failed_checks_total, result_sha256, input_sha256, clear_requests,
+  `clear_request_block` (block height of the call that sent the latest
+  clearing request, TEE only), clear_attempts, total_penalties, proceeds
+  flags (a part counts as paid once everything it owes so far is paid),
+  `liquidity`, the launch pool's progress),
   `get_fills(sale_id, from_index, limit)` (index, bidder, tokens, spent, refund,
   penalty, once final; refunds for a failed sale; `refund` is net of
   `penalty`), `get_create_cost(params)`,
   `get_close_deposit(sale_id)`, `get_reserve_refund(sale_id)`. Pages default to
   50 entries, at most 200.
+
+### Launch liquidity
+
+Optional, per sale (`src/liquidity.rs`). A sale with `liquidity` sets aside
+`pool_tokens` sale tokens and `raise_share_bps` of its raise, and after it
+settles seeds a constant-product pool on the Rhea exchange (formerly Ref
+Finance; config `dex`) at exactly the clearing price. The LP shares stay with
+this contract, which has no method that moves, transfers or redeems them, and
+no key once deployed, so the liquidity can never be pulled. The terms are
+fixed at `create_sale` and shown by `get_sale`; nobody can change them.
+
+**Plan, at settlement.** With `raise` the total raised and `price` the
+clearing price (USDC base units per whole token, `ONE = 10^decimals`):
+
+```
+budget = floor(raise * raise_share_bps / 10000)
+tokens = min(floor(budget * ONE / price), pool_tokens)
+usdc   = ceil(tokens * price / ONE)                    // <= budget
+```
+
+So `usdc * ONE - tokens * price` is in `[0, ONE)`: the pool's price is the
+clearing price, at most one USDC base unit above it in total, never below.
+If `tokens` or `usdc` comes to zero the pool is `skipped`: the whole raise goes
+to the creator and the reserve is burned. The reserve the pool does not take
+(`pool_tokens - tokens`) is burned at `claim_proceeds` with the unsold sale
+supply (`get_result.unsold` includes it). The pool's USDC comes out of the
+raise. A failed sale burns the whole reserve (stage `cancelled`).
+
+**Stages** (`get_result.liquidity.status`): `waiting` (sale not final),
+`seeding`, `seeded`, `skipped`, `cancelled`, `abandoned`.
+
+**Seeding.** `seed_liquidity(sale_id) -> stage`: anyone, no deposit, while
+`seeding` and before the deadline (settlement time + `settle_timeout`). It
+runs the next step; each step's callback records the result and starts the
+step after while the gas left covers it. 300 TGas runs all four (54.5 TGas
+burnt in the sandbox); a relayed 150 TGas call runs one or two, so three
+calls seed the pool. Steps, with what each call attaches:
+
+1. `register`: one batch on the exchange,
+   `storage_deposit({"account_id": <this contract>, "registration_only": false})`
+   with 0.00398 NEAR (398 bytes: the 102-byte account record and a 148-byte
+   entry for each token), 10 TGas, then
+   `register_tokens({"token_ids": [<sale token>, <quote token>]})` with
+   1 yoctoNEAR, 10 TGas. Alongside, on each token,
+   `storage_deposit({"account_id": <dex>, "registration_only": true})` with
+   0.00125 NEAR, 10 TGas. Callback `on_dex_registered`.
+2. `create_pool`: first `get_number_of_pools({})` with no deposit, 10 TGas;
+   `on_pool_count` (50 TGas static) keeps the count as `pool_search` and
+   sends `add_simple_pool({"tokens": [<sale token>, <quote token>],
+   "fee": fee_bps})` with 0.007 NEAR (the record measured 602 bytes with
+   64-character token ids; the exchange refunds the rest to this contract),
+   20 TGas. `on_pool_created` reads the pool id. The new pool's id is at
+   least `pool_search`, so a pool whose id did not come back can be found.
+3. `deposit`: on each token, `ft_transfer_call({"receiver_id": <dex>,
+   "amount": <what is still missing>, "msg": ""})` with 1 yoctoNEAR, 50 TGas
+   (a plain deposit into this contract's exchange account). `on_dex_deposit`
+   reads how much each transfer kept.
+4. `add_liquidity`: `add_liquidity({"pool_id": id, "amounts": [tokens, usdc],
+   "min_amounts": [tokens, usdc]})` with 0.0016 NEAR (the LP share record
+   measured 129 bytes for a 64-character account; the rest is refunded),
+   20 TGas. `on_liquidity_added`: stage `seeded`, the minted shares recorded
+   (1e24 for a new pool), `liquidity_seeded` event. If the call went through
+   but the share count is unreadable or zero, the pool is not called seeded:
+   the next step is `reconcile`, which reads the shares from the exchange.
+   `seeded` always comes with the share count the exchange reported.
+
+Each callback is `#[private]`, gets 15 TGas plus the call's unused gas, and
+sets a flag only when it sees its promise succeed. A failed step changes
+nothing else: `failures` goes up, `liquidity_step_failed` is logged, the run
+stops, and the next `seed_liquidity` runs the same step again (a deposit
+sends only what is still missing). One step runs at a time: while a step
+waits for its callback both methods answer "a launch liquidity step is
+waiting for its result". A pool the exchange refuses for good (paused,
+a token frozen) is retried until the deadline and then abandoned.
+
+Every step started gets the next number (`attempt`), passed to its callback
+as the second argument (`on_dex_registered(sale_id, attempt, account,
+on_token, on_quote)`, `on_pool_count(sale_id, attempt)`,
+`on_pool_created(sale_id, attempt)`,
+`on_dex_deposit(sale_id, attempt, tokens, usdc)`,
+`on_liquidity_added(sale_id, attempt)`, `on_dex_withdraw(sale_id, attempt,
+tokens, usdc)`, `on_dex_reconciled(sale_id, attempt, pool_id, search)`). A callback
+whose step is not the one in flight, or whose number is older, changes
+nothing and returns the stage: a result delivered twice, or one that arrives
+after its step was given up on, is ignored.
+
+**Lost results.** A callback receipt that fails (a bug here, or gas) leaves
+its step in flight forever, which would block both methods and keep the
+tokens locked. So a step counts as running for `STEP_TIMEOUT_BLOCKS` (600
+blocks, about 6 to 10 minutes) after it started; after that the next
+`seed_liquidity` or `abandon_liquidity` gives it up (`liquidity_step_lost`,
+`failures` + 1) and runs `reconcile` instead:
+`get_deposits({"account_id": <this contract>})` with 10 TGas and, if it has
+a pool, `get_pool_shares({"pool_id": id, "account_id": <this contract>})`
+with 10 TGas, or, if a pool may exist whose id never came back,
+`get_pools({"from_index": pool_search, "limit": 20})` with 30 TGas, each as a
+function call on the exchange with no deposit, then
+`on_dex_reconciled(sale_id, attempt, pool_id, search)`. The balances replace
+`tokens_on_dex` and `usdc_on_dex` (`liquidity_reconciled` {sale_id, pool_id,
+tokens_on_dex, usdc_on_dex, shares}); LP shares mean `add_liquidity` went
+through, so the stage becomes `seeded` with that share count (even from
+`abandoned`); otherwise the run goes on from what is really there (the
+deposit step sends only what is missing, `abandon_liquidity` withdraws only
+what is there). In a page of pools, the first empty `SIMPLE_POOL` of
+`[<sale token>, <quote token>]` in that order with the sale's fee becomes the
+sale's pool (its id is `from_index` plus its place in the page). Any such
+pool will do: nobody else holds the sale token while the pool is seeded, so
+an empty pool of the pair cannot have been priced by anyone. A full page
+without one moves `pool_search` 20 on and reads again; a shorter one means
+`add_simple_pool` failed, and the pool step runs again. A pool is never
+created twice for a sale whose `add_simple_pool` went through. Until a
+reconcile succeeds the record is `unsure`: the next step is `reconcile`
+again, and a failed one is retried like any step. A lost `on_pool_count`
+sent nothing, so the pool step simply runs again. A lost `register` cannot be
+read back, so it runs again (it is safe to repeat), and the NEAR it attached
+counts as spent (`near_lost`, at most 0.00648 NEAR per lost step, not refunded to the
+creator; the repeat is paid from this contract's balance). Not covered: a
+step whose receipts are delayed more than 600 blocks and land after the
+reconcile read; a deposit could then be sent twice, and the extra would stay
+on this contract's exchange account.
+
+No caller can make a callback fail: each callback's gas is static and
+reserved when the step starts (a method refuses to start a step without it),
+and callbacks never panic. The lost-result path covers a bug or a protocol
+change; the sandbox tests reach it by rewriting the record.
+
+**Token lock.** While the stage is `waiting` or `seeding`, no sale token
+leaves this contract: `claim` pays refunds only and `claim_proceeds` pays the
+raise (less the pool's USDC), the burn and the NEAR, but not the allocation.
+The token's whole supply was minted to this contract, so nobody else holds
+any of it and nobody can put liquidity into the new pool at another price
+first. `min_amounts = amounts` would refuse a pool that somehow had another
+ratio. Seeded, skipped, cancelled or abandoned: the tokens unlock.
+
+**Fallback.** From the deadline on, `abandon_liquidity(sale_id) -> stage`:
+anyone, no deposit. The first call sets `abandoned` (tokens unlock at once)
+and logs `liquidity_abandoned`; then it withdraws whatever this contract has
+on the exchange: `withdraw({"token_id": <token>, "amount": <amount>})` with
+1 yoctoNEAR, 50 TGas, for each token with a balance there (the exchange
+sends the tokens with `ft_transfer` and answers with the amount, or 0 when
+the transfer failed, in which case it credits the amount again).
+`on_dex_withdraw` logs `liquidity_withdrawn` with any `failed` part; calling
+`abandon_liquidity` again retries it. `claim_proceeds` then pays the pool's
+USDC to the creator and burns its tokens, in the same call or a later one.
+A pool created but never filled stays on the exchange, empty. If a step's
+result was lost, abandoning still unlocks the tokens at once and then runs
+`reconcile` first; until it succeeds, `claim_proceeds` holds all of the
+pool's USDC and tokens (and the LP deposit), since any of it may be on the
+exchange. If the exchange never answers again, that share stays held: it is
+the only case where the pool's funds wait on the exchange, and the rest of
+the sale (refunds, tokens, the raise less the pool's share, the allocation)
+is paid as usual.
+
+**Views.** `get_sale.liquidity`: `{dex, raise_share_bps, pool_tokens,
+fee_bps}`. `get_result.liquidity`: `{status, next_step, in_flight, dex,
+pool_id, usdc, tokens, shares, usdc_on_dex, tokens_on_dex, failures,
+deadline}`, where `next_step` is what `seed_liquidity` (or, abandoned,
+`abandon_liquidity`) would run now: `register`, `create_pool`, `deposit`,
+`add_liquidity`, `withdraw`, `reconcile` or null.
+
+**NEAR.** `create_sale` charges the record's storage and
+`LIQUIDITY_NEAR_RESERVE` (0.01508 NEAR; "Storage and cost"). `claim_proceeds`
+returns all of it for a skipped or cancelled pool, and for a seeded or
+abandoned one what no completed step sent, less `near_lost`. What the exchange refunds (the
+pool and LP deposits above what it charged) or a token refunds (the
+exchange's registration when it already had one, as it has on mainnet USDC)
+stays in this contract: under 0.006 NEAR per sale.
+
+**What Rhea controls.** The exchange is outside this contract. Its owner and
+guardians can pause it, freeze a token, change a pool's fee and upgrade the
+contract. A pause or freeze makes a step fail (retried, or abandoned after the
+deadline); after seeding it can stop trading in the pool. This contract only
+guarantees that it never removes the liquidity itself.
+
+**Assumption.** Both tokens' `ft_resolve_transfer` does not fail (true of the
+NEP-141 reference and of the sale token here). If it did, a deposit the
+exchange kept could look failed and be sent again; the extra would sit in
+this contract's exchange account.
 
 ### OutLayer call
 
@@ -694,6 +897,13 @@ must follow those fees if a protocol upgrade changes them.
 - `claimed` {sale_id, bidder, index, tokens, refund, failed: ["tokens"|"refund"]}
 - `proceeds_claimed` {sale_id, creator, raise, allocation, burned, near_refund, failed}
 - `refund_mode` {sale_id, from (the status before)}
+- `liquidity_planned` {sale_id, dex, stage (`seeding` or `skipped`), usdc, tokens, price, unused_tokens, deadline}
+- `liquidity_step_failed` {sale_id, step, failures}
+- `liquidity_step_lost` {sale_id, step, failures} (no result after `STEP_TIMEOUT_BLOCKS`)
+- `liquidity_reconciled` {sale_id, pool_id, tokens_on_dex, usdc_on_dex, shares}
+- `liquidity_seeded` {sale_id, dex, pool_id, usdc, tokens, price, shares}
+- `liquidity_abandoned` {sale_id, pool_id, usdc, tokens, usdc_on_dex, tokens_on_dex, failures}
+- `liquidity_withdrawn` {sale_id, tokens, usdc, failed: ["tokens"|"usdc"]}
 
 Logs are capped at 100 per call and 16 KB, so settlement emits one summary
 event, never one per bid.
@@ -709,6 +919,8 @@ no event at all.
 ### Safety rules
 
 - No owner, no admin, no upgrade. Parameters never change after creation.
+  The one outside party a sale can depend on is the exchange of a launch
+  pool, and only for that pool (see "Launch liquidity", "What Rhea controls").
 - State is written before any promise; every callback is `#[private]`,
   handles every promise outcome and never panics.
 - Only `quote_token` deposits count; anything else is returned.
@@ -761,6 +973,9 @@ works the same when relayed. What the gas relayer (`apps/relayer`) relays:
   `clear_onchain`: none takes a deposit. Gas the client attaches: see
   `contracts/GAS.md`, "Relayed calls".
 
+`seed_liquidity` and `abandon_liquidity` take no deposit either and each
+step fits 150 TGas, but the relayer's policy does not list them yet.
+
 Never relayed: the payable methods `create_sale`, `close_sale` and
 `retry_setup`. Their deposits pay for storage and for OutLayer, and under
 NEP-366 an inner action's deposit is paid by the relayer.
@@ -807,6 +1022,24 @@ box of the old unpadded plaintext, an over-long sale id), commit-reveal with an
 unrevealed and a revealed-invalid bid (penalties), claim_proceeds (raise,
 allocation, unsold burn, NEAR reserve equal to `get_reserve_refund`) and
 claims pushed by a third party, `#[init]` once and `#[private]` callbacks.
+Launch liquidity runs against the Rhea exchange's own wasm, read from
+`ref-finance-101.testnet` (`contracts/tests/res`, see its NOTICE.md), with the
+test as the exchange's owner: a pool seeded in one call at the clearing
+price (pool amounts and fee, every LP share Fairground's, nothing left on its
+exchange account, a stranger cannot remove or move shares, the wasm names no
+method that could), refunds but no tokens before seeding, a paused exchange
+(the step fails, then succeeds), relayed 150 TGas calls, a frozen token (the
+deposit fails twice, the retry sends only what is missing) then abandonment
+with a failed and then a retried withdrawal, an abandoned pool with both
+deposits made, the exchange's storage at 64-character ids against the
+constants, lost results (the record rewritten with `patch_state` so that the
+deposit step, or the pool step after `add_simple_pool` went through, waits
+forever: busy until `STEP_TIMEOUT_BLOCKS`, then one call reads the exchange,
+finds the deposits or the pool past a stranger's pools of the same tokens,
+and seeds it without a second pool), and two callers sending
+`seed_liquidity` or `abandon_liquidity` at once (each step and each
+withdrawal runs once). Each ends with no USDC or sale token left in
+Fairground.
 The gas calibration (`--ignored`: 100 / 300 / 500 worst-case TEE bids, each
 the longest sealed bid there is, and 500 commit-reveal bids twice, once
 with a usual book and once with every max price at `u128::MAX`, the longest

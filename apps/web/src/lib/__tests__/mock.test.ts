@@ -4,8 +4,10 @@
  * penalty in both modes, the 1 USDC minimum deposit, sale id rules.
  * Runs in Node, where the mock keeps its state in memory.
  */
-import { bidSetHash } from "@fairground/clearing";
+import { bidSetHash, poolPriceMatches } from "@fairground/clearing";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { checkBidSet, placeOf } from "../bid-inclusion";
+import { planFor } from "../liquidity";
 import { getBidSecret } from "../bid-secrets";
 import { FairgroundError } from "../client/errors";
 import { CONTRACT_ID, MOCK_SECRETS_SCOPE, MockClient, SEALER_CODE_HASH, USDC_TOKEN, validateConfig } from "../client/mock";
@@ -114,6 +116,13 @@ describe("seeded demo sales", () => {
       expect(sale.runningBidSetHash, id).toBe(hashOf(id, bids));
       // Frozen at close, absent before.
       expect(sale.bidSetHash, id).toBe(sale.closedAt === null ? null : hashOf(id, bids));
+      // The bid-inclusion check on the result page agrees, and places every bidder.
+      if (sale.bidSetHash !== null) {
+        const check = checkBidSet(id, bids, sale.bidSetHash, sale.bidCount);
+        expect(check.matches, id).toBe(true);
+        for (const b of bids) expect(placeOf(check, b.bidder), b.bidder).not.toBeNull();
+        if (check.count > 0) expect(placeOf(check, check.bidders[0])).toBe(1);
+      }
     }
   });
 
@@ -361,8 +370,18 @@ describe("a TEE sale, bid to claim", () => {
     const paid = (await client.getEvents(id)).find((e) => e.detail === "proceeds_claimed")!;
     expect(paid).toMatchObject({ kind: "claimed", account: "maker.testnet", amount: 8n * USDC });
 
-    const attestation = await client.getAttestation(id, "aa");
-    expect(attestation).toMatchObject({ nonce: "aa", simulated: true, source: "simulated", outputHash: result.resultSha256, reportedPubkey: sale.sealerPubkey });
+    const verification = await client.verifySale(id);
+    expect(verification).toMatchObject({ simulated: true, pinnedWasm: SEALER_CODE_HASH });
+    const runs = [verification.key, verification.clear];
+    for (const run of runs) {
+      expect(run).toMatchObject({ found: true, simulated: true, txSource: "simulated" });
+      if (!run?.found) throw new Error("no run");
+      // The same eight rows NEAR mode shows, every one passing on the simulated run.
+      expect(run.checks.map((c) => c.id)).toEqual(["build", "executed", "input", "output", "task", "measurements", "request", "key"]);
+      expect(run.checks.every((c) => c.ok === true)).toBe(true);
+    }
+    const output = verification.clear?.found ? verification.clear.checks.find((c) => c.id === "output")! : null;
+    expect(output?.items[0]).toMatchObject({ kind: "equal", values: expect.arrayContaining([{ label: "contract stored", value: result.resultSha256 }]) });
   }, 60_000);
 
   it("fails a sale closed without bids", async () => {
@@ -529,5 +548,13 @@ describe("judge mode", () => {
     // Bots and people pay the same price.
     const prices = new Set(result.fills.filter((f) => f.tokens > 0n).map((f) => (f.spent * TOKEN) / f.tokens));
     expect(prices.size).toBeLessThanOrEqual(2); // equal up to the rounding of one base unit
+    // The launch pool: 20 % of the raise at the clearing price, seeded right after settlement (simulated).
+    expect(sale.config.liquidity).toMatchObject({ raiseShareBps: 2000, feeBps: 30 });
+    expect(result.liquidity).toMatchObject({ stage: "seeded", simulated: true, inFlight: null, failures: 0 });
+    const pool = result.liquidity!;
+    expect(pool).toMatchObject(planFor(sale.config, result.totalRaised, result.clearingPrice));
+    expect(pool.tokens).toBeGreaterThan(0n);
+    expect(poolPriceMatches(pool.usdc, pool.tokens, result.clearingPrice, sale.config.decimals)).toBe(true);
+    expect(result.proceeds?.allocationLocked).toBeUndefined();
   }, 40_000);
 });

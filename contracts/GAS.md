@@ -139,6 +139,48 @@ relayer refuses a call that attaches more than `MAX_GAS_TGAS` (150).
 | `claim`, refund only | 8.8 | |
 | `claim_proceeds`, raise and reserve | 10.5-10.6 | each extra part (allocation, burn) adds 2-4 TGas; attach 150 TGas |
 
+## Launch liquidity
+
+Measured on 12 Nov 2026 against the Rhea exchange's own wasm (v1.9.19, read
+from `ref-finance-101.testnet`, `contracts/tests/res`), with mock USDC and a
+sale token of the template, by `liquidity::*` and `gas::gas_launch_liquidity`
+(which asserts that no receipt burns 8 TGas or more). Burnt gas per receipt:
+
+| Step | Receipts (TGas burnt) | Static gas attached |
+| --- | --- | ---: |
+| `seed_liquidity` itself | 3.1-3.9 | |
+| `register` | exchange batch `storage_deposit` + `register_tokens` 5.4-5.5, sale token `storage_deposit` 1.5, USDC `storage_deposit` 1.5, `on_dex_registered` 2.9 | 10 + 10 + 2 x 10, callback 15 |
+| `create_pool` | `get_number_of_pools` 2.0, `on_pool_count` 2.9, `add_simple_pool` 2.8, `on_pool_created` 2.2-3.4 | 10, callback 50 (which sends 20 and a 15 callback) |
+| `deposit` | per token: `ft_transfer_call` 2.5, `ft_on_transfer` 2.9-3.0, `ft_resolve_transfer` 1.3; `on_dex_deposit` 2.2-2.9 | 2 x 50, callback 15 |
+| `add_liquidity` | `add_liquidity` 4.0, `on_liquidity_added` 2.3 | 20, callback 15 |
+| `abandon_liquidity` itself | 1.9-3.5 | |
+| `withdraw` | per token: exchange `withdraw` 3.5-3.6, `ft_transfer` 1.8, exchange callback 2.1-2.2; `on_dex_withdraw` 2.3 | 2 x 50, callback 15 |
+| `reconcile` (after a lost result) | `get_deposits` 2.5, `get_pool_shares` 2.1 or `get_pools` 2.3 (3 pools), `on_dex_reconciled` 3.1-3.6 | 10 + 10 or 10 + 30, callback 15 |
+
+| Call | Attached | Whole tx burns |
+| --- | ---: | ---: |
+| `seed_liquidity`, all four steps | 300 | 54.5 |
+| `seed_liquidity` relayed: `register` and `create_pool` | 150 | 27.7 |
+| `seed_liquidity` relayed: `deposit` | 150 | 21.1-21.2 |
+| `seed_liquidity` relayed: `add_liquidity` | 150 | 10.2 |
+| `seed_liquidity`, `register` refused (exchange paused) | 300 | 12.6 |
+| `abandon_liquidity`, both withdrawals | 300 | 22.7 |
+| `abandon_liquidity`, nothing left to withdraw | 300 | 2.2 |
+| `seed_liquidity` after a lost deposit result: `reconcile`, `add_liquidity` | 300 | 19.4 |
+| `seed_liquidity` after a lost pool result: `reconcile` (pool found), `deposit`, `add_liquidity` | 300 | 38.2 |
+
+- Before it starts a step, a method checks that the gas left covers the
+  step's static gas plus `OWN_WORK_GAS` (15): at most 130 TGas (`deposit`,
+  `withdraw`; `create_pool` 75, `reconcile` 70), so every step fits a
+  relayed 150 TGas call, and a callback starts the next step only when the
+  same holds for its own gas.
+- The exchange's `withdraw` attaches 20 TGas each to its `ft_transfer` and to
+  its callback, so `DEX_WITHDRAW_GAS` (50) must stay above about 45.
+- The static gas is 3 to 7 times what the sandbox burns: the exchange on
+  testnet and mainnet holds far more state, which a call reads by key.
+  `get_pools` reads 20 whole pools (30 TGas for 2.3 burnt on 3 small pools in
+  the sandbox); it runs only after a lost `add_simple_pool` result.
+
 ## Storage (bytes, as NEAR counts it: key + value + 40 per record)
 
 | What | Measured on chain | Charged for |
@@ -149,6 +191,10 @@ relayer refuses a call that attaches more than `MAX_GAS_TGAS` (150).
 | Settlement | 32 per bid + 121 | fills in the per-bid bytes, the rest in `SALE_BASE_BYTES` |
 | Sale at creation, 32-character sale id (first sale: with the 110-byte quote-token entry) | 886 | formula below, which also covers the largest stored result |
 | Token account (37-byte token name) | 167,443 (code 167,069 + 374) | sent 167,690 bytes' worth |
+| A sale's launch liquidity record, at its largest | 165 | `LIQUIDITY_RECORD_BYTES` 168 x 1.15 = 194 |
+| On the exchange: this contract's account with both tokens registered | 398 (the exchange's own count: 102 + 2 x 148) | `DEX_ACCOUNT_BYTES` 398 |
+| On the exchange: a simple pool, 64-character token ids, 32-character exchange id | 602 | `POOL_STORAGE_DEPOSIT` 700 bytes' worth |
+| On the exchange: an LP share record, 64-character account | 129 | `LP_STORAGE_DEPOSIT` 160 bytes' worth |
 
 The unit tests (`contracts/fairground/src/tests/costs.rs`) measure the same
 sizes at their largest and agree to the byte; the gas calibration asserts
@@ -164,7 +210,7 @@ rounded up to whole bytes. Constants are in `contracts/fairground/src/costs.rs`.
 `get_create_cost(params)`, which `create_sale` charges exactly:
 
 ```
-sale storage   = (1040 + 2 * len(sale_id) + 64 + len(quote_token) + len(token account)
+sale storage   = (1112 + 2 * len(sale_id) + 64 + len(quote_token) + len(token account)
                   + len(name) + len(symbol) + len(icon) + len(description) + len(website)) x 1.15
 token deploy   = (len(token wasm) 167,069 + 100 + 280 + 200 + len(name) + len(symbol) + len(icon)) bytes
 bid reserve    = max_bids x (624 x 1.15 bytes + 0.00125 NEAR)        Tee:          0.00843 NEAR per slot
@@ -172,6 +218,9 @@ bid reserve    = max_bids x (624 x 1.15 bytes + 0.00125 NEAR)        Tee:       
 creator        = 2 x 0.00125 NEAR       (registrations on the sale token and the quote token)
 quote token    = 0.00125 NEAR + 112 x 1.15 bytes, only for the first sale on that token
 sealer key     = 0.01401 NEAR (Tee only; OutLayer refunds what the pubkey run does not use)
+liquidity      = 168 x 1.15 bytes + 0.01508 NEAR (with `liquidity` only: exchange account 0.00398,
+                 the exchange's registrations on both tokens 2 x 0.00125, pool 0.007, LP record 0.0016,
+                 5 yoctoNEAR; claim_proceeds returns what no step spent)
 ```
 
 Measured `create_sale` charges for the calibration sales (no icon, first

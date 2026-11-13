@@ -15,6 +15,24 @@ import { ACCOUNT_ID, type AppConfig } from "@/lib/config";
 export const NEAR_USDC_CONTRACT = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 export const NEAR_USDC_ASSET = `nep141:${NEAR_USDC_CONTRACT}`;
 
+export const ONECLICK_STATUSES = [
+  "PENDING_DEPOSIT",
+  "KNOWN_DEPOSIT_TX",
+  "PROCESSING",
+  "SUCCESS",
+  "INCOMPLETE_DEPOSIT",
+  "REFUNDED",
+  "FAILED",
+] as const;
+
+/** Standard and confidential origin-chain swaps supported by this app. */
+export const FUNDING_MODES = ["public", "basic"] as const;
+export type FundingMode = (typeof FUNDING_MODES)[number];
+
+export function quoteMatchesFundingMode(mode: FundingMode, echoed: unknown): boolean {
+  return echoed === mode || (mode === "public" && echoed === undefined);
+}
+
 /** Address format of an origin chain. */
 export type AddressKind = "evm" | "sol" | "btc";
 
@@ -98,6 +116,7 @@ export type RealQuoteTerms = {
   amount: string;
   recipient: string;
   refundTo: string;
+  confidentiality?: FundingMode;
 };
 
 const sameAddress = (kind: AddressKind | undefined, a: unknown, b: string) =>
@@ -117,6 +136,9 @@ export function checkRealQuote(asked: RealQuoteTerms, data: unknown): string | n
   const q = d.quote;
   const r = d.quoteRequest;
   if (!q || typeof q !== "object" || !r || typeof r !== "object") return bad;
+  if (!quoteMatchesFundingMode(asked.confidentiality ?? "public", r.confidentiality)) {
+    return "1Click did not confirm the requested funding mode. Nothing was sent.";
+  }
   const kind = REAL_ORIGIN_ASSETS[asked.originAsset];
   if (!kind) return bad;
   if (r.dry !== false || r.swapType !== "EXACT_INPUT" || r.depositType !== "ORIGIN_CHAIN" || r.amount !== asked.amount) {

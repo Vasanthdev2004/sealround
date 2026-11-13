@@ -72,7 +72,14 @@ async fn calibrate_commit_reveal(
     n: usize,
     max_price: impl Fn(usize) -> u128,
 ) -> Result<()> {
-    let env = Env::with_options(tag, EnvOptions { parent_near: 600 }).await?;
+    let env = Env::with_options(
+        tag,
+        EnvOptions {
+            parent_near: 600,
+            ..EnvOptions::default()
+        },
+    )
+    .await?;
     let creator = env.account("creator", 40).await?;
     let mut spec = worst_case_spec(sale_id, Mode::CommitReveal, n);
     spec.reveal_window = Some(120 + n as u64 / 2);
@@ -283,7 +290,14 @@ async fn required_close_gas(
 }
 
 async fn calibrate(n: usize) -> Result<()> {
-    let env = Env::with_options(&format!("g{n}"), EnvOptions { parent_near: 600 }).await?;
+    let env = Env::with_options(
+        &format!("g{n}"),
+        EnvOptions {
+            parent_near: 600,
+            ..EnvOptions::default()
+        },
+    )
+    .await?;
     let creator = env.account("creator", 40).await?;
     let spec = worst_case_spec(&longest_sale_id(&format!("gas{n}")), Mode::Tee, n);
     ensure!(spec.sale_id.len() == MAX_SALE_ID_LEN);
@@ -474,5 +488,36 @@ async fn calibrate(n: usize) -> Result<()> {
     ensure_success(&proceeds)?;
     ensure!(event(&proceeds, "proceeds_claimed").is_some_and(|e| e["failed"] == json!([])));
     print_receipts("claim_proceeds", &proceeds);
+    Ok(())
+}
+
+/// Launch liquidity against the exchange's real wasm: a whole run in one
+/// 300 TGas call, and the two withdrawals of an abandoned pool. Every
+/// receipt must burn well under the 10 TGas the smallest liquidity call is
+/// given (contracts/GAS.md, "Launch liquidity").
+#[tokio::test]
+#[ignore = "gas calibration, about 1 minute; run with --ignored"]
+async fn gas_launch_liquidity() -> Result<()> {
+    let seeded = crate::liquidity::launched("gls").await?;
+    let tx = seeded.seed(MAX_PREPAID_TGAS).await?;
+    ensure!(tx.clone().json::<String>()? == "seeded");
+    liquidity_gas("seed_liquidity, every step in one call", &tx)?;
+
+    let abandoned = crate::liquidity::deposited("gla").await?;
+    abandoned
+        .env
+        .advance_to(abandoned.deadline().await?)
+        .await?;
+    let tx = abandoned.abandon().await?;
+    ensure!(event(&tx, "liquidity_withdrawn").is_some_and(|e| e["failed"] == json!([])));
+    liquidity_gas("abandon_liquidity, both withdrawals", &tx)
+}
+
+fn liquidity_gas(label: &str, tx: &ExecutionFinalResult) -> Result<()> {
+    let lines = receipt_gas(tx);
+    let total: f64 = lines.iter().map(|line| line.tgas).sum();
+    let worst = lines.iter().map(|line| line.tgas).fold(0.0, f64::max);
+    println!("{label}: {total:.1} TGas burnt in all, largest receipt {worst:.2} TGas");
+    ensure!(worst < 8.0, "{label}: a receipt burnt {worst:.2} TGas");
     Ok(())
 }

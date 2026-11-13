@@ -12,7 +12,6 @@
  */
 
 import type {
-  Attestation,
   Balances,
   BidRecord,
   BidResult,
@@ -21,6 +20,8 @@ import type {
   ClientCapabilities,
   ClientNotice,
   CreateOptions,
+  DexPool,
+  LiquidityWriteResult,
   RelayerPolicyInfo,
   RevealTerms,
   Sale,
@@ -28,6 +29,7 @@ import type {
   SaleEvent,
   SaleMeta,
   SaleResult,
+  SaleVerification,
   SaleWithRelay,
   StorageResult,
   WriteOptions,
@@ -124,6 +126,34 @@ export interface FairgroundClient {
   claim(saleId: string, bidder: string, opts?: WriteOptions): Promise<ClaimResult>;
   /** Anyone may push the creator's payout of a final sale (raise, allocation, NEAR reserve; burns unsold tokens). */
   claimProceeds(saleId: string, caller: string, opts?: WriteOptions): Promise<WriteResult>;
+
+  /**
+   * The exchange account launch pools are seeded on (contract get_config
+   * `dex`); null when the contract takes no launch liquidity. /create hides
+   * the launch pool section then.
+   */
+  getLiquidityDex(): Promise<string | null>;
+  /**
+   * The sale's launch pool as the exchange reports it (Ref get_pool and
+   * get_pool_shares); null when the sale has no pool yet. Mock: a simulated
+   * pool with the seeded amounts.
+   */
+  getPool(saleId: string): Promise<DexPool | null>;
+  /**
+   * Anyone, while the launch pool is being seeded and before its deadline:
+   * runs seed_liquidity's steps (300 TGas runs them all, no deposit). A failed
+   * step can be run again. NEAR: a wallet transaction unless the relayer's
+   * policy lists the method.
+   */
+  seedLiquidity(saleId: string, caller: string, opts?: WriteOptions): Promise<LiquidityWriteResult>;
+  /**
+   * Anyone, from the launch pool's deadline when it was not seeded: unlocks
+   * the sale tokens and withdraws what sits on the exchange. claim_proceeds
+   * then pays the pool's USDC to the creator and burns its tokens. Call again
+   * to retry a failed withdrawal.
+   */
+  abandonLiquidity(saleId: string, caller: string, opts?: WriteOptions): Promise<LiquidityWriteResult>;
+
   /** Anyone, after settle_timeout with no result. Moves the sale to Failed. */
   triggerRefundMode(saleId: string, caller: string, opts?: WriteOptions): Promise<SaleWithRelay>;
   /**
@@ -134,12 +164,14 @@ export interface FairgroundClient {
   retrySetup(saleId: string, caller: string, opts?: { deposit?: bigint }): Promise<Sale>;
 
   /**
-   * What is known about the enclave run. Mock: a simulated attestation that
-   * echoes `nonce`. NEAR: what the contract's views hold (`source: "chain"`):
-   * the pinned code hash, the stored sale key, and the sha256 of the clearing
-   * input and output; no quote is fetched, so `nonce` and `quote` are "".
+   * Checks the sale's enclave runs (the sale key run and the clearing run) in
+   * this browser. NEAR: finds the transaction behind each run, fetches
+   * OutLayer's attestation for it and checks it against the chain
+   * (near/attestation.ts, a port of enclave/deploy/Verify-Attestation.ps1).
+   * Mock: the same checks over a simulated, unsigned attestation
+   * (`simulated: true`). Never signs anything.
    */
-  getAttestation(saleId: string, nonce: string): Promise<Attestation>;
+  verifySale(saleId: string): Promise<SaleVerification>;
   /** Hash of our reproducible enclave build from the public repo ("" when not configured). */
   expectedCodeHash(): string;
 

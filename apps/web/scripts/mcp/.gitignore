@@ -1,0 +1,2 @@
+# Bid secret files (they hold the bid's max price, max spend and salt) and sandbox test logs.
+.run/

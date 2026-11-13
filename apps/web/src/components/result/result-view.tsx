@@ -11,18 +11,23 @@ import { Empty } from "@/components/ui/panel";
 import { Reveal } from "@/components/visual/reveal";
 import { isNearMode } from "@/lib/config";
 import { useLatestFunding } from "@/lib/funding";
-import { DocumentTitle, useBalances, useMyBid, useResult, useSale } from "@/lib/hooks";
+import { DocumentTitle, useBalances, useBids, useMyBid, useResult, useSale } from "@/lib/hooks";
 import type { Sale, SaleResult } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { effectiveFills } from "./compute";
 import { Distribution } from "./distribution";
+import { FairnessTimeline } from "./fairness-timeline";
 import { FillsTable } from "./fills-table";
 import { MyResult } from "./my-result";
 import { NotReady } from "./not-ready";
 import { OutcomeHero } from "./outcome-hero";
+import { PoolPanel } from "./pool-panel";
 import { ResultHeader } from "./result-header";
+import { OutcomeReveal } from "./reveal";
 import { SamePrice } from "./same-price";
+import { ShareOnX } from "./share";
 import { ResultSkeleton } from "./skeleton";
+import { buildTimeline } from "./timeline";
 import { VerifiedPanel } from "./verified-panel";
 
 /** Client entry for /sale/[id]/result. Unwraps the params promise. */
@@ -118,27 +123,49 @@ function Outcome({ sale, result }: { sale: Sale; result: SaleResult }) {
   const myBid = useMyBid(sale.id, account);
   const balances = useBalances(account);
   const funding = useLatestFunding(account, sale.id);
+  // Public bids, for when each landed (the timeline, the reveal and the share text). Never their prices.
+  const bids = useBids(sale.id);
+  const timeline = useMemo(
+    () => (bids.data ? buildTimeline(sale, result, fills, bids.data, account) : null),
+    [sale, result, fills, bids.data, account],
+  );
 
   return (
     <>
       <div className="flex flex-col gap-5 sm:gap-6">
-        <ResultHeader sale={sale} />
+        <ResultHeader sale={sale} action={<ShareOnX sale={sale} result={result} timeline={timeline} />} />
         <div className="flex flex-col gap-4">
           <OutcomeHero
             sale={sale}
             result={result}
             fills={fills}
             aside={<MyResult sale={sale} result={result} fill={myFill} />}
+            reveal={<OutcomeReveal sale={sale} result={result} fills={fills} bids={bids.data ?? null} />}
           />
           <Simulated />
         </div>
       </div>
+
+      {fills.length > 0 && (
+        <Reveal>
+          <FairnessTimeline
+            sale={sale}
+            result={result}
+            timeline={timeline}
+            loading={bids.loading}
+            error={bids.error?.message ?? null}
+            onRetry={bids.refetch}
+          />
+        </Reveal>
+      )}
 
       {result.status === "settled" && (
         <Reveal>
           <SamePrice sale={sale} result={result} fills={fills} />
         </Reveal>
       )}
+
+      {result.liquidity && <PoolPanel sale={sale} result={result} />}
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         <VerifiedPanel sale={sale} result={result} />

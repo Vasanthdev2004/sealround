@@ -1,6 +1,7 @@
 "use client";
 
 import { TxLink } from "@/components/ui/bits";
+import { cn } from "@/lib/cn";
 import { Progress } from "@/components/ui/stat";
 import { dateTime, duration, priceStr, tokenFull, tokenStr, usdcStr } from "@/lib/format";
 import type { Sale, SaleResult } from "@/lib/types";
@@ -25,22 +26,25 @@ export function OutcomeHero({
   result,
   fills,
   aside,
+  reveal,
 }: {
   sale: Sale;
   result: SaleResult;
   fills: ResultFill[];
   aside?: React.ReactNode;
+  /** The reveal band (reveal.tsx), under the headline and above the facts. */
+  reveal?: React.ReactNode;
 }) {
   return result.status === "failed" ? (
-    <Failed sale={sale} result={result} fills={fills} aside={aside} />
+    <Failed sale={sale} result={result} fills={fills} aside={aside} reveal={reveal} />
   ) : (
-    <Settled sale={sale} result={result} fills={fills} aside={aside} />
+    <Settled sale={sale} result={result} fills={fills} aside={aside} reveal={reveal} />
   );
 }
 
-type Props = { sale: Sale; result: SaleResult; fills: ResultFill[]; aside?: React.ReactNode };
+type Props = { sale: Sale; result: SaleResult; fills: ResultFill[]; aside?: React.ReactNode; reveal?: React.ReactNode };
 
-function Settled({ sale, result, fills, aside }: Props) {
+function Settled({ sale, result, fills, aside, reveal }: Props) {
   const c = sale.config;
   const P = result.clearingPrice;
   const soldPct = pct(result.totalSold, c.saleSupply);
@@ -52,6 +56,7 @@ function Settled({ sale, result, fills, aside }: Props) {
   return (
     <Frame
       aside={aside}
+      band={reveal}
       head={
         <>
           <div className="flex items-baseline justify-between gap-4">
@@ -140,7 +145,7 @@ function Settled({ sale, result, fills, aside }: Props) {
   );
 }
 
-function Failed({ sale, result, fills, aside }: Props) {
+function Failed({ sale, result, fills, aside, reveal }: Props) {
   const c = sale.config;
   const { title, body } = failText(result, sale);
   // What bidders get back: every deposit, less the 1 % penalty of any bid a trusted clearing found void.
@@ -157,6 +162,7 @@ function Failed({ sale, result, fills, aside }: Props) {
   return (
     <Frame
       aside={aside}
+      band={reveal}
       head={
         <>
           <div className="text-label text-subtle">{title}</div>
@@ -240,31 +246,44 @@ function closeFact(sale: Sale, result: SaleResult): FactItem {
 
 /**
  * One card, divided by hairlines: the headline, the viewer's result beside
- * it, then four facts and one quiet line. Source order is the phone order.
+ * it, the reveal band, then four facts and one quiet line. Source order is
+ * the phone order.
  */
 function Frame({
   head,
   facts,
   foot,
   aside,
+  band,
 }: {
   head: React.ReactNode;
   facts: FactItem[];
   foot: React.ReactNode;
   aside?: React.ReactNode;
+  band?: React.ReactNode;
 }) {
   return (
     <section
       aria-labelledby="outcome-title"
-      className="panel grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[1fr_auto_auto]"
+      className={cn(
+        "panel grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px]",
+        band ? "lg:grid-rows-[1fr_auto_auto_auto]" : "lg:grid-rows-[1fr_auto_auto]",
+      )}
     >
       <div className="min-w-0 p-5 sm:p-8 lg:col-start-1">{head}</div>
 
       {aside && (
-        <div className="min-w-0 border-t border-line bg-bg/60 lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:border-t-0 lg:border-l">
+        <div
+          className={cn(
+            "min-w-0 border-t border-line bg-bg/60 lg:col-start-2 lg:row-start-1 lg:border-t-0 lg:border-l",
+            band ? "lg:row-span-4" : "lg:row-span-3",
+          )}
+        >
           {aside}
         </div>
       )}
+
+      {band && <div className="min-w-0 lg:col-start-1">{band}</div>}
 
       <dl className="grid min-w-0 grid-cols-2 border-t border-line [&>*]:border-line max-sm:[&>*:nth-child(even)]:border-l max-sm:[&>*:nth-child(n+3)]:border-t sm:grid-cols-4 sm:[&>*+*]:border-l lg:col-start-1">
         {facts.map((f) => (

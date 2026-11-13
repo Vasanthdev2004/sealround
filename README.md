@@ -182,7 +182,7 @@ Setup -> Bidding (upcoming / open / awaiting_close)
 
 | Artifact | sha256 | How to check |
 | --- | --- | --- |
-| `contracts/res/fairground.wasm` (sale contract, embeds the token) | `bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800` | Built with `scripts\build-contracts.ps1`. The reproducible container build is configured (NEP-330 metadata) but has not been run yet, see [contracts/DESIGN.md](contracts/DESIGN.md) "Reproducible build" |
+| `contracts/res/fairground.wasm` (sale contract, embeds the token) | `e93c42759bd63edfba428cf16f043bdad1ae2f3a54d45ca8f9f41e74fe65a941` | Built with `scripts\build-contracts.ps1`. The reproducible container build is configured (NEP-330 metadata) but has not been run yet, see [contracts/DESIGN.md](contracts/DESIGN.md) "Reproducible build" |
 | `enclave/res/fairground_sealer.wasm` (the OutLayer job) | `f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb` | `powershell -File scripts\build-enclave.ps1 -Verify` rebuilds it in Docker and prints `verify: MATCH`. The single source of truth is `enclave/res/fairground_sealer.wasm.sha256` |
 | `contracts/res/fairground_token.wasm` | `0b1673bf822def860a637059ff55e839cc47f8c1dacee46b284080bbe7450047` | Embedded in `fairground.wasm` |
 | `contracts/res/outlayer_contract.wasm` (third party, tests only) | `74ab074a27ccddd9b6f400f3f8453c1039419acba556ba77dfb288759b3dbd0f` | [contracts/res/NOTICE.md](contracts/res/NOTICE.md) |
@@ -269,6 +269,21 @@ This drives the web app's NEAR client from Node, with no browser and no fakes in
 To point the web app at a local sandbox in a browser, see [apps/web/README.md](apps/web/README.md), "Local sandbox".
 
 ### Tests
+
+Use Node 24 and pnpm 12.3.4 for the checks that run without Docker or
+PowerShell. From the repository root, select Rust 1.97.1, install the
+dependencies, and run the checks.
+
+```sh
+rustup toolchain install 1.97.1 --profile minimal --target wasm32-wasip1
+rustup override set 1.97.1
+pnpm install --frozen-lockfile
+pnpm check
+```
+
+`pnpm check` runs the Rust and enclave job tests, all workspace Vitest
+suites, TypeScript, and web ESLint. It prints a pass/fail summary. The
+sandbox suites below use their own commands.
 
 From the repo root unless noted:
 

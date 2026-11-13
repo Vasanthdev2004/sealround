@@ -210,6 +210,21 @@ async function scenarios(w: World, report: Report): Promise<void> {
 
   await report.scenario("tee-people", "TEE: three people bid after the bot, through the web app's client", ["tee-snipe"], async (t) => {
     for (const p of people) {
+      if (p.who === alice) {
+        const args = ["bid", ...common(TEE), "--account", alice.id, "--deposit", "3", "--max-price", "0.006"];
+        const before = await view.usdc(alice.id);
+        await refused(t, "agent bid above the authorized budget", [...args, "--budget", "2.99"], alice, "over_budget");
+        t.eq("no deposit was taken for the refused bid", await view.usdc(alice.id), before);
+
+        const run = await runBot([...args, "--budget", "3", "--json"], alice);
+        const bid = await view.bid(TEE, alice.id);
+        t.eq("agent bid used the relayer and accepted exactly the budgeted deposit", [
+          run.code, run.json?.deposit, run.json?.index, run.json?.paidBy, before - await view.usdc(alice.id),
+        ], [0, "3000000", bid?.index, "relayer", p.deposit]);
+        t.ok("agent bid output kept its limits and ciphertext out of the receipt", !!run.json &&
+          ["maxPrice", "maxSpend", "ciphertext", "secret"].every((field) => !Object.hasOwn(run.json!, field)));
+        continue;
+      }
       const placed = await app.bid(TEE, p.who.id, p.deposit, { maxPrice: p.maxPrice, maxSpend: p.maxSpend });
       t.ok(`${p.who.id} bid #${placed.index}`, placed.index > 0);
     }
@@ -278,6 +293,15 @@ async function scenarios(w: World, report: Report): Promise<void> {
   await report.scenario("tee-report", "TEE: report proves the bot paid exactly the clearing price; claims", ["tee-close"], async (t) => {
     const expected = teeExpected();
     const P = expected.clearingPrice;
+    const readArgs = ["result", ...common(TEE), "--account", alice.id];
+    await refused(t, "agent result with --claim", [...readArgs, "--claim"], null, "usage", alice);
+    const aliceNonce = await w.chain.nonceOf(alice);
+    const agentResult = await runBot([...readArgs, "--json"], null);
+    const agentFill = (agentResult.json as ReportResult | null)?.fill;
+    t.eq("agent result returned the recorded clearing price and unclaimed fill without a key", [
+      agentResult.code, agentResult.json?.command, agentResult.json?.clearingPrice, agentFill?.spent,
+      agentFill?.claimed, await w.chain.nonceOf(alice),
+    ], [0, "result", P.toString(), expected.fills[1].spent.toString(), false, aliceNonce]);
     const want = expected.fills[0];
     console.log(`      reference clearing: price ${P}, the bot gets ${want.tokens} token base units for ${want.spent} USDC base units`);
     const usdc0 = await view.usdc(sniper.id);

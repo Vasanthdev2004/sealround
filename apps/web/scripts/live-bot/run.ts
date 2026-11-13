@@ -1,7 +1,7 @@
 /**
  * Sealround's live sniper bot, for testnet, mainnet or a local sandbox.
  *
- *   pnpm --filter web live-bot <snipe|copycat|report|reveal|status> [options]
+ *   pnpm --filter web live-bot <bid|result|snipe|copycat|report|reveal|status> [options]
  *
  * What it proves on a real chain: a bot that bids in the first block of a
  * sale still pays exactly the clearing price, like every other winner, and a
@@ -21,11 +21,11 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { NearNetwork } from "../../src/lib/config";
-import { BotError, connect, copycat, DEFAULT_RPC, describe, report, reveal, snipe, status, type BotOptions } from "./bot";
+import { BotError, budgetedBid, connect, copycat, DEFAULT_RPC, describe, fmt, report, reveal, snipe, status, type BotOptions } from "./bot";
 import { renderCopycat, renderReport, renderReveal, renderSnipe, renderStatus } from "./render";
 
 const HERE = typeof __dirname === "string" ? __dirname : path.resolve("scripts/live-bot");
-const COMMANDS = ["snipe", "copycat", "report", "reveal", "status"] as const;
+const COMMANDS = ["bid", "result", "snipe", "copycat", "report", "reveal", "status"] as const;
 type Command = (typeof COMMANDS)[number];
 
 /** Flags that take a value, and the environment variable each falls back to. */
@@ -38,6 +38,7 @@ const VALUE_FLAGS = {
   "key-file": "LIVE_BOT_KEY_FILE",
   relayer: "LIVE_BOT_RELAYER_URL",
   deposit: "LIVE_BOT_DEPOSIT",
+  budget: undefined,
   "max-price": "LIVE_BOT_MAX_PRICE",
   "max-spend": "LIVE_BOT_MAX_SPEND",
   victim: "LIVE_BOT_VICTIM",
@@ -54,6 +55,8 @@ const HELP = `Sealround live sniper bot
 
 Commands
   status    the sale, the bot account and the relayer; sends nothing
+  bid       place one sealed bid in an open enclave sale; requires --budget and --relayer or --direct
+  result    read the account's fill and clearing price; no key or claim (--wait waits for settlement)
   snipe     wait for the sale to open, then place the bot's sealed bid in the first block it can
   copycat   replay --victim's sealed bid (or commitment) from the bot account, and show it rejected
   report    after settlement: the bot's fill against the clearing price, to the smallest unit
@@ -71,8 +74,9 @@ Options (each also read from the environment variable shown)
   --relayer <url>                       LIVE_BOT_RELAYER_URL   gasless through this relayer; without it the bot pays
   --direct                                                     ignore the relayer: the bot signs and pays
   --deposit <amount>                    LIVE_BOT_DEPOSIT       USDC, e.g. 5 (copycat default: the sale's minimum)
-  --max-price <amount>                  LIVE_BOT_MAX_PRICE     USDC per whole token, e.g. 0.02 (snipe)
-  --max-spend <amount>                  LIVE_BOT_MAX_SPEND     USDC (snipe; default: the deposit)
+  --budget <amount>                                            bid only: maximum public deposit in quote-token units
+  --max-price <amount>                  LIVE_BOT_MAX_PRICE     USDC per whole token, e.g. 0.02 (bid, snipe)
+  --max-spend <amount>                  LIVE_BOT_MAX_SPEND     USDC (bid, snipe; default: the deposit)
   --victim <account>                    LIVE_BOT_VICTIM        copycat: whose bid to replay
   --receipt-dir <dir>                   LIVE_BOT_RECEIPT_DIR   default: scripts/live-bot/.run/receipts
   --poll-ms <ms>                        LIVE_BOT_POLL_MS       head polling in the last seconds, default 200
@@ -122,8 +126,8 @@ function readKey(keyFile: string | undefined, env: NodeJS.ProcessEnv): { secretK
   let parsed: { account_id?: string; private_key?: string; secret_key?: string };
   try {
     parsed = JSON.parse(readFileSync(keyFile, "utf8")) as typeof parsed;
-  } catch (e) {
-    throw new BotError("bad_key", `Could not read the key file ${keyFile} as near-cli credentials JSON (${e instanceof Error ? e.message.split("\n")[0] : String(e)}).`);
+  } catch {
+    throw new BotError("bad_key", `Could not read the key file ${keyFile} as near-cli credentials JSON.`);
   }
   const secretKey = parsed.private_key ?? parsed.secret_key ?? null;
   if (!secretKey) throw new BotError("bad_key", `The key file ${keyFile} has no "private_key".`);
@@ -132,7 +136,8 @@ function readKey(keyFile: string | undefined, env: NodeJS.ProcessEnv): { secretK
 
 function options(parsed: Parsed, env: NodeJS.ProcessEnv, say: (line: string) => void): BotOptions {
   const value = (name: keyof typeof VALUE_FLAGS): string | null => {
-    const v = parsed.values[name] ?? env[VALUE_FLAGS[name]];
+    const envName = VALUE_FLAGS[name];
+    const v = parsed.values[name] ?? (envName ? env[envName] : undefined);
     return v === undefined || v.trim() === "" ? null : v.trim();
   };
   const network = value("network");
@@ -143,7 +148,9 @@ function options(parsed: Parsed, env: NodeJS.ProcessEnv, say: (line: string) => 
   const saleId = value("sale");
   if (!contractId) throw new BotError("usage", "--contract (or LIVE_BOT_CONTRACT) is required: the Sealround contract account.");
   if (!saleId) throw new BotError("usage", "--sale (or LIVE_BOT_SALE) is required.");
-  const key = readKey(value("key-file") ?? undefined, env);
+  const key = parsed.command === "result"
+    ? { secretKey: null, keySource: null, accountId: null }
+    : readKey(value("key-file") ?? undefined, env);
   const accountId = value("account") ?? key.accountId;
   if (key.accountId && accountId !== key.accountId) throw new BotError("usage", `The key file belongs to ${key.accountId}, not to --account ${accountId}.`);
   const number = (name: "poll-ms" | "max-wait", fallback: number, min: number) => {
@@ -193,14 +200,41 @@ async function main(argv: string[], env: NodeJS.ProcessEnv = process.env): Promi
       out(HELP);
       return parsed.command === null && !parsed.flags.has("help") ? 2 : 0;
     }
-    const opts = options(parsed, env, say);
     const command = parsed.command;
-    const writes = command === "snipe" || command === "copycat" || command === "reveal" || (command === "report" && opts.claim);
-    const session = await connect(opts, { account: command !== "status", key: writes });
+    if ((command === "bid" || command === "result") && parsed.flags.has("claim")) {
+      throw new BotError("usage", `${command} does not take --claim.`);
+    }
+    const budget = parsed.values.budget?.trim();
+    if (command === "bid" && !budget) throw new BotError("usage", "bid requires an explicit --budget.");
+    const opts = options(parsed, env, say);
+    if (command === "bid" && !opts.relayerUrl && !parsed.flags.has("direct")) {
+      throw new BotError("usage", "Supply a relayer or use --direct to pay network fees from the bidder account.");
+    }
+    const writes = command === "bid" || command === "snipe" || command === "copycat" || command === "reveal" || (command === "report" && opts.claim);
+    const session = await connect(opts, {
+      account: command !== "status",
+      key: writes,
+      quoteMetadata: command === "bid",
+      sponsoredOnly: command === "bid" && !!opts.relayerUrl,
+    });
     say(`${opts.network} (chain "${session.chainId}") at ${opts.rpcUrl}; contract ${opts.contractId}; sale ${opts.saleId} (${session.sale.status})${opts.accountId ? `; bot ${opts.accountId}` : ""}`);
     let result: { ok: boolean };
     let text: string;
     switch (command) {
+      case "bid": {
+        const r = await budgetedBid(session, budget!);
+        result = r;
+        const deposit = `${fmt(BigInt(r.deposit), r.quote.decimals)} ${r.quote.symbol}`;
+        text = `Bid #${r.index} accepted in ${r.saleId}. Deposit: ${deposit}.${r.txHash ? ` Transaction: ${r.txHash}` : ""}`;
+        break;
+      }
+      case "result": {
+        const r = await report(session, { readLocalReceipt: false });
+        const output = { ...r, command: "result" };
+        result = output;
+        text = renderReport(r);
+        break;
+      }
       case "status": {
         const r = await status(session);
         [result, text] = [r, renderStatus(r)];

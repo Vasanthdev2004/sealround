@@ -11,7 +11,7 @@
  * `retry_setup`, `create_sale`) stay normal wallet transactions, or the relayer
  * would fund OutLayer and storage for the user.
  */
-import type { AccessKeyView, SignedDelegate } from "near-api-js";
+import { teraToGas, type AccessKeyView, type SignedDelegate } from "near-api-js";
 import type { RejectionReason } from "./api.ts";
 import { isAccountId } from "./config.ts";
 import { innerCalls, type InnerCall } from "./delegate.ts";
@@ -30,8 +30,21 @@ export interface RelayPolicy {
 }
 
 /** Fairground methods anyone may push with no deposit: the only ones the relayer pays for on that contract. */
-export const FAIRGROUND_METHODS = ["claim", "claim_proceeds", "clear_onchain", "reveal_bid", "trigger_refund_mode"] as const;
+export const FAIRGROUND_METHODS = [
+  "claim", "claim_proceeds", "clear_onchain", "reveal_bid", "trigger_refund_mode", "seed_liquidity", "abandon_liquidity",
+] as const;
 export type FairgroundMethod = (typeof FAIRGROUND_METHODS)[number];
+
+export type LiquidityMethod = "seed_liquidity" | "abandon_liquidity";
+const isLiquidityMethod = (method: FairgroundMethod): method is LiquidityMethod =>
+  method === "seed_liquidity" || method === "abandon_liquidity";
+
+/** These calls can change what subsequent pool or creator payout calls can do. */
+export const needsSaleReservation = (method: FairgroundMethod): boolean =>
+  method === "claim_proceeds" || isLiquidityMethod(method);
+
+/** Every pool step fits in 150 TGas. A higher cap may fund several steps in one call. */
+const LIQUIDITY_GAS = teraToGas(150);
 
 /** An allowed inner call, read from its args: what the on-chain checks need. */
 export type AllowedCall =
@@ -98,6 +111,9 @@ export function checkDelegate(delegate: SignedDelegate, policy: RelayPolicy): Po
   for (const call of calls) {
     const result = read(call);
     if (typeof result === "string") return refused(result);
+    if (result.kind === "fairground" && needsSaleReservation(result.method) && allowed.some(
+      (previous) => previous.kind === "fairground" && needsSaleReservation(previous.method) && previous.saleId === result.saleId,
+    )) return refused("bad_call_args");
     allowed.push(result);
   }
   if (totalGas(delegate) > policy.maxGas) return refused("gas_too_high");
@@ -153,7 +169,7 @@ export function totalGas(delegate: SignedDelegate): bigint {
 
 /**
  * A Fairground call with no deposit and exactly the arguments the contract
- * takes: `{sale_id}` (claim_proceeds, clear_onchain, trigger_refund_mode), plus
+ * takes: `{sale_id}` for most methods, plus
  * an optional `bidder` for `claim` and `{max_price, max_spend, salt}` for
  * `reveal_bid`. Junk arguments would only buy a failed call.
  */
@@ -161,6 +177,7 @@ function readFairgroundCall(call: InnerCall): AllowedCall | RejectionReason {
   const method = FAIRGROUND_METHODS.find((name) => name === call.methodName);
   if (!method) return "method_not_allowed";
   if (call.deposit !== 0n) return "wrong_deposit";
+  if (isLiquidityMethod(method) && call.gas < LIQUIDITY_GAS) return "bad_call_args";
   const args = parseCanonicalJson(call.args);
   if (!args) return "bad_call_args";
   const { sale_id: saleId, ...rest } = args;

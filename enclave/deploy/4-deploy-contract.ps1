@@ -26,6 +26,9 @@ list> -Execute deletes that key. It cannot be undone.
   sealer_code_hash      <sha256>  (must equal version_key, config.rs validate)
   sealer_secrets        {"profile":"<Profile>","account_id":"<Account>"}
   allowed_quote_tokens  the USDC contracts in templates\new-args.<network>.json
+  dex                   the Rhea exchange launch pools are seeded on:
+                        ref-finance-101.testnet / v2.ref-finance.near
+                        (null turns launch liquidity off)
 `new` is #[private]: only the contract account itself can call it, which is
 what `contract deploy ... with-init-call` does (deploy and init in one
 transaction, signed by the contract account, so nobody can front-run the init).
@@ -35,8 +38,8 @@ never change: a new job build means a new contract account (6-upgrade-job.ps1).
 
 Storage: the account must hold 1e19 yoctoNEAR per byte it stores, and the
 contract code embeds the per-sale token wasm (contracts/fairground/src/
-costs.rs, TOKEN_WASM), so the code alone is about 5.5 NEAR at 548 KB (the
-build of 10 Nov 2026). The default balance is computed from the wasm on disk
+costs.rs, TOKEN_WASM), so the code alone is about 6.2 NEAR at 616 KB (the
+build of 12 Nov 2026). The default balance is computed from the wasm on disk
 (its size and sha256 are printed) plus 1 NEAR of headroom.
 Sale costs are paid by each sale's creator, not by this balance.
 

@@ -22,6 +22,7 @@ const LINK =
 export function Review({
   draft,
   derived,
+  dex,
   account,
   mode,
   cost,
@@ -36,6 +37,8 @@ export function Review({
 }: {
   draft: Draft;
   derived: Derived;
+  /** The launch pool exchange; null when the contract takes no launch liquidity. */
+  dex: string | null;
   account: string | null;
   /** The chain the sale will be created on. */
   mode: "mock" | "near";
@@ -60,8 +63,9 @@ export function Review({
   const warnings = derived.notices.filter((n) => n.tone !== "neutral");
   const description = draft.description.trim();
   const busy = submitting || created;
-  // The contract has one creator share: it does not hold an LP reserve apart.
-  const lpUnlocked = near && (derived.values.lp ?? 0n) > 0n;
+  const pool = !!derived.pool;
+  // The contract has one creator share: without a launch pool it does not hold an LP reserve apart.
+  const lpUnlocked = near && !pool && (derived.values.lp ?? 0n) > 0n;
 
   return (
     <div className="flex flex-col gap-8 lg:gap-10">
@@ -92,7 +96,7 @@ export function Review({
             <TokenMark draft={draft} />
             {description && <p className="mt-3 max-w-[68ch] text-small break-words text-muted">{description}</p>}
           </div>
-          <TermsLedger draft={draft} derived={derived} onEdit={busy ? undefined : onEdit} />
+          <TermsLedger draft={draft} derived={derived} dex={dex} onEdit={busy ? undefined : onEdit} />
         </section>
 
         <section
@@ -103,10 +107,10 @@ export function Review({
             Create the sale
           </h2>
 
-          <Cost mode={mode} tee={tee} cost={cost} />
+          <Cost mode={mode} tee={tee} pool={pool} cost={cost} />
 
           <dl className="divide-y divide-line border-y border-line">
-            <CostRows mode={mode} tee={tee} />
+            <CostRows mode={mode} tee={tee} pool={pool} />
             {/* On phones this card comes first, before the ledger that names the token. */}
             <KV
               k="Token"

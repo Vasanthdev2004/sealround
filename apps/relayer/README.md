@@ -22,6 +22,7 @@ every allowed call has an exact deposit, and nothing payable is relayed:
 | --- | --- | --- | --- |
 | `FAIRGROUND_CONTRACT` | `claim` | 0 | `{sale_id, bidder?}` |
 | `FAIRGROUND_CONTRACT` | `claim_proceeds`, `clear_onchain`, `trigger_refund_mode` | 0 | `{sale_id}` |
+| `FAIRGROUND_CONTRACT` | `seed_liquidity`, `abandon_liquidity` | 0 | `{sale_id}` |
 | `FAIRGROUND_CONTRACT` | `reveal_bid` | 0 | `{sale_id, max_price, max_spend, salt}` |
 | one of `USDC_CONTRACTS` | `ft_transfer_call` | 1 yoctoNEAR | `{receiver_id: FAIRGROUND_CONTRACT, amount, msg}` with `msg` exactly `{"sale_id", "ciphertext"}` (canonical base64 of exactly the sealed-bid length, see below) or `{"sale_id", "commitment"}` (64 hex), the contract's own rules |
 
@@ -33,6 +34,12 @@ attaches 150 TGas, exactly the default `MAX_GAS_TGAS`: with 500 revealed bids
 the call burns 51.2 TGas for a usual book and 102.8 TGas when every max price
 is `u128::MAX`, the longest search measured (contracts/GAS.md, "Clearing on
 chain").
+
+Anyone with a delegating wallet can request sponsorship for a launch pool
+step. The app attaches 150 TGas per call, enough for every individual step
+including reconciliation. It can take several calls to finish. A direct wallet
+transaction attaches 300 TGas to give the contract room for the full sequence
+(contracts/GAS.md, "Launch liquidity").
 
 Arguments must be the exact text `JSON.stringify` writes: no byte-order mark,
 no duplicate keys, no extra whitespace. JSON.parse and the contracts' serde
@@ -63,7 +70,18 @@ Before paying, it reads the contract state and refuses a call that would fail
 or do nothing now (`preflight.ts`): a bid needs an open sale quoted in that
 USDC, the payload kind the sale's mode takes, and a USDC balance of at least
 the amount (an unregistered account reads as 0). A claim needs a final sale and
-an unpaid bid; `claim_proceeds` a final sale; a reveal an unrevealed bid of the
+an unpaid bid. Creator payouts require a final sale and a nonzero claimable
+amount or burn in the contract views. The relayer checks whether a launch
+pool is still holding any part of the raise or creator allocation. When the
+views cannot establish what is due, the app can offer a wallet-paid call.
+For launch pools, the relayer checks the current stage, deadline and next step.
+It allows the first abandon at or after the deadline even if there is nothing
+to withdraw, because that unlocks the sale tokens. A later abandon must have a
+withdrawal or reconciliation ready. An in-flight step can be reconciled once
+the contract exposes it as stale. The relayer accepts one creator payout or
+launch pool action per sale in each delegate and reserves that sale across
+senders in this process while the sponsored call is in flight.
+A reveal needs an unrevealed bid of the
 sender inside the reveal window; `clear_onchain` a sale whose status is
 `revealing` at a head time at or past `reveal_end` (so it is refused while the
 window is open, and again once someone has cleared the sale);
@@ -140,7 +158,7 @@ the key's value never appears. See `.env.example`.
 | `STORAGE_PER_IP_PER_DAY` | 3 | registrations paid per IP; plus once per account per 30 days |
 | `DAILY_BUDGET_NEAR` | 5 | hard cap per UTC day on what relays cost (gas burnt + deposits) |
 | `STORAGE_BUDGET_NEAR` | 0.5 | hard cap per UTC day on storage registrations, apart from the relay budget so they cannot starve bids (about 350 registrations) |
-| `MAX_GAS_TGAS` | 150 | per delegate, 1..300; the largest calls the client builds (`claim_proceeds`, `clear_onchain`) attach exactly 150, so a lower cap refuses them with `gas_too_high` |
+| `MAX_GAS_TGAS` | 150 | per delegate, 1..300; `claim_proceeds`, `clear_onchain`, and the app's relayed pool calls attach 150, so a lower cap refuses them with `gas_too_high` |
 | `MAX_DELEGATE_BLOCKS` | 1200 | most blocks a delegate may have left (Ledger signs with 900, near-api-js with 200) |
 | `RELAY_WAIT_MS` | 15000 | how long to wait for the outcome once the transaction is in a block, before answering 202; 0 answers as soon as it is |
 | `PORT` | 8787 | Node server port |

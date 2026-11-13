@@ -82,7 +82,7 @@ Install links for near CLI and the OutLayer CLI: README 0.
 
 ```powershell
 (Get-FileHash contracts\res\fairground.wasm -Algorithm SHA256).Hash.ToLower()
-# bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800   (546,747 bytes, 12 Nov 2026)
+# e93c42759bd63edfba428cf16f043bdad1ae2f3a54d45ca8f9f41e74fe65a941   (616,196 bytes, 12 Nov 2026)
 $SHA
 # f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb   (276,156 bytes, 10 Nov 2026)
 ```
@@ -101,12 +101,12 @@ shows the real balance.
 
 | Account | Network | Role | Fund | Why that amount |
 | --- | --- | --- | --- | --- |
-| `<owner>.testnet` | testnet | owner of the OutLayer project `<owner>.testnet/fairground-sealer` and of its secret row; parent of the contract; creates and closes test sales | about 15 NEAR | 6.5 for the contract account, about 1.73 for the smoke sale, about 2.2 per pilot-shaped dry run (two), 0.3 attached to OutLayer (mostly refunded), and headroom: a 300 TGas call needs 0.3 NEAR free up front |
-| `fairground.<owner>.testnet` | testnet | the sale contract; created by step T5 | 6.5 NEAR, sent by the owner | the script: (wasm bytes + 2,000) x 1e19 yoctoNEAR plus 1 NEAR |
+| `<owner>.testnet` | testnet | owner of the OutLayer project `<owner>.testnet/fairground-sealer` and of its secret row; parent of the contract; creates and closes test sales | about 15 NEAR | 7.2 for the contract account, about 1.73 for the smoke sale, about 2.2 per pilot-shaped dry run (two), 0.3 attached to OutLayer (mostly refunded), and headroom: a 300 TGas call needs 0.3 NEAR free up front |
+| `fairground.<owner>.testnet` | testnet | the sale contract; created by step T5 | 7.2 NEAR, sent by the owner | the script: (wasm bytes + 2,000) x 1e19 yoctoNEAR plus 1 NEAR |
 | `<relayer>.testnet` | testnet | pays gas for bids, claims and refund mode, and new bidders' USDC registration | about 6 NEAR | `/health` reports `ok` from 5 NEAR, `low` below that, `empty` (503) below 0.5 |
 | `<bidder>` | testnet | you, bidding in the browser | whatever the wallet or faucet gives; test USDC comes from the app | |
-| `<owner>.near` | mainnet | the same roles as on testnet | about 12 NEAR and 2 USDC (native USDC on NEAR) | 6.5 contract, 1.73 smoke sale, about 2.2 pilot sale (50 bid slots; `get_create_cost` gives the exact figure), 0.3 OutLayer, headroom. 1 USDC for the smoke bid |
-| `fairground.<owner>.near` | mainnet | the sale contract | 6.5 NEAR, sent by the owner | as on testnet |
+| `<owner>.near` | mainnet | the same roles as on testnet | about 13 NEAR and 2 USDC (native USDC on NEAR) | 7.2 contract, 1.73 smoke sale, about 2.2 pilot sale (50 bid slots; `get_create_cost` gives the exact figure), 0.3 OutLayer, headroom. 1 USDC for the smoke bid |
+| `fairground.<owner>.near` | mainnet | the sale contract | 7.2 NEAR, sent by the owner | as on testnet |
 | `relayer.<owner>.near` | mainnet | relayer | about 3 NEAR | each relay in flight holds about 0.15 NEAR until its gas refund; a bid relay costs about 0.001 NEAR (`apps/relayer/README.md`, "Security notes") |
 | prize payout account | mainnet | hackathon payout | any mainnet account you control; `<owner>.near` works | spec, "Rules for every entry" |
 
@@ -226,7 +226,7 @@ Or from the browser: run `pnpm dev` and open `http://localhost:3000/deploy`
 (dev server only; a production build answers 404). Type `$ME`; no testnet
 wallet is needed. The page checks that T2 and T4 are done and makes a fresh
 key for `$FG`. It then prints one `near account create-account ...` line that
-near CLI signs as `$ME` (create `$FG` with 6.5 NEAR and add that key); a
+near CLI signs as `$ME` (create `$FG` with 7.2 NEAR and add that key); a
 wallet with testnet support (Meteor, Intear, Nightly) can sign it instead.
 The tab then signs deploy plus `new` with the new key and reads the config
 and code hash back. Download the key file it offers first: it is the only
@@ -234,7 +234,7 @@ copy, and T8 needs it. The file has the same fields as a near CLI
 credentials file.
 
 - Does: checks that the version and the secret row exist, creates `$FG`
-  with 6.5 NEAR, then deploys `contracts\res\fairground.wasm` and calls `new`
+  with 7.2 NEAR, then deploys `contracts\res\fairground.wasm` and calls `new`
   in the same transaction (signed by `$FG`, so nobody can front-run the
   init), and reads the config back.
 - `new` arguments, rendered from `enclave\deploy\templates\new-args.testnet.json`
@@ -256,7 +256,7 @@ credentials file.
   never changes.
 - Success: `New account <$FG> created successfully`, the deploy succeeds,
   `get_config` echoes the arguments, and `view-account-summary` shows
-  `Contract (SHA-256 checksum hex): bfc2f800...a800`.
+  `Contract (SHA-256 checksum hex): e93c4275...a941`.
 - If it fails: `invalid config: ...` names the rule; nothing is half
   deployed. If the account was created but the deploy failed, running
   `-Execute` again stops at the account creation: run the printed
@@ -371,10 +371,25 @@ Checked on 11 Nov 2026: it builds (18 files in the context), the image is
 266 MB, and without configuration it exits with `invalid relayer configuration`
 and the list of missing variables.
 
-### fly.toml
+### Fly configuration
 
-Save this as `apps/relayer/fly.toml`. It holds no secrets and serves both
-apps (the app name comes from `-a`):
+For testnet, use [`apps/relayer/fly.testnet.toml`](apps/relayer/fly.testnet.toml).
+It points to `sealround.itzbeast.testnet`. Before hosting, verify that the
+owner has deployed that account, allowed both testnet quote tokens, and
+updated the OutLayer master secret's caller condition to the new account.
+Use `$FG = 'sealround.itzbeast.testnet'` for this rollout and the dry run
+in part 5.
+
+The policy sponsors `claim`, `claim_proceeds`, `clear_onchain`,
+`reveal_bid`, and `trigger_refund_mode` with zero attached deposit.
+It also sponsors approved USDC `ft_transfer_call` bids to that contract
+with 1 yoctoNEAR attached. It sponsors `seed_liquidity` and
+`abandon_liquidity` when the pool is ready for the requested step. Each
+sponsored call uses 150 TGas. A pool may need more than one call. The
+wallet path uses 300 TGas, and payable calls still use the wallet.
+
+For mainnet, save the following as `apps/relayer/fly.toml`. Supply the app
+name with `-a`.
 
 ```toml
 # Sealround relayer on Fly.io. Configuration, the key included, is set with
@@ -405,8 +420,12 @@ primary_region = "fra"   # any region
 
 ### Relayer environment
 
-Copy `apps\relayer\.env.example` to a git-ignored file
-(`apps\relayer\.env.fly-testnet` matches `.env*` in `.gitignore`) and set:
+The testnet TOML supplies the network, contract, tokens, limits and port.
+Set `RELAYER_ACCOUNT_ID`, `RELAYER_PRIVATE_KEY`, and `CORS_ORIGINS` on
+the Fly app as shown below. If reusing a Fly app, check `fly secrets list`
+for older settings that conflict with the TOML. Fly Secrets take precedence.
+For mainnet, supply the mainnet settings from the table through the same
+stdin import. Enter the private key at the masked prompt.
 
 | Variable | Testnet | Mainnet | Where the value comes from |
 | --- | --- | --- | --- |
@@ -414,7 +433,7 @@ Copy `apps\relayer\.env.example` to a git-ignored file
 | `NEAR_RPC_URL` | `https://rpc.testnet.near.org` | `<rpc-url>` | your RPC provider for mainnet |
 | `RELAYER_ACCOUNT_ID` | `<relayer>.testnet` | `relayer.<owner>.near` | part 1, step M1 |
 | `RELAYER_PRIVATE_KEY` | `ed25519:...` | `ed25519:...` | `near account export-account <relayer account> using-private-key network-config <network>` |
-| `FAIRGROUND_CONTRACT` | `fairground.<owner>.testnet` | `fairground.<owner>.near` | `$FG`, step T5 |
+| `FAIRGROUND_CONTRACT` | `sealround.itzbeast.testnet` | `fairground.<owner>.near` | the deployed account |
 | `USDC_CONTRACTS` | `usdc.fakes.testnet,3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` | `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` | the contract's `allowed_quote_tokens`; the first entry must be the web app's USDC |
 | `CORS_ORIGINS` | `https://<web-testnet>.vercel.app` | `https://<web-pilot>.vercel.app` | the Vercel production URL (part 4): exact origin, no trailing slash; add a custom domain after a comma |
 | `CLIENT_IP_HEADER` | `fly-client-ip` | `fly-client-ip` | set by Fly's proxy |
@@ -424,34 +443,45 @@ Copy `apps\relayer\.env.example` to a git-ignored file
 | `PORT` | `8787` | `8787` | must match `internal_port` |
 | the rest | defaults from `.env.example` | same | |
 
-### Deploy
+### Deploy the testnet relayer
 
 ```powershell
+$FlyApp = Read-Host 'Fly app name for the testnet relayer'
+$RelayerAccount = Read-Host 'Dedicated relayer account ending in .testnet'
+$WebOrigin = Read-Host 'Exact testnet Vercel production origin with https'
 fly auth login
-fly auth docker                                   # lets docker push to registry.fly.io
-fly apps create <relayer-app-testnet>
-Copy-Item apps\relayer\.env.example apps\relayer\.env.fly-testnet
-notepad apps\relayer\.env.fly-testnet             # fill in the table above
-Get-Content apps\relayer\.env.fly-testnet | Where-Object { $_ -match '^[A-Z_]+=.+' } | fly secrets import --stage -a <relayer-app-testnet>
-Remove-Item apps\relayer\.env.fly-testnet
-docker build -f apps/relayer/Dockerfile -t registry.fly.io/<relayer-app-testnet>:v1 .
-docker push registry.fly.io/<relayer-app-testnet>:v1
-fly deploy --config apps\relayer\fly.toml -a <relayer-app-testnet> --image registry.fly.io/<relayer-app-testnet>:v1 --ha=false
+fly auth docker
+fly apps create $FlyApp   # skip if the app already exists
+
+$testnetKey = Read-Host 'Full-access testnet relayer key' -AsSecureString
+try {
+  $flyKey = [pscredential]::new('relayer', $testnetKey).GetNetworkCredential().Password
+  @("RELAYER_ACCOUNT_ID=$RelayerAccount", "CORS_ORIGINS=$WebOrigin", "RELAYER_PRIVATE_KEY=$flyKey") |
+    fly secrets import --stage -a $FlyApp
+  if ($LASTEXITCODE -ne 0) { throw 'Fly secret import failed.' }
+} finally {
+  Remove-Variable flyKey, testnetKey -ErrorAction SilentlyContinue
+}
+
+$Image = "registry.fly.io/${FlyApp}:v1"
+docker build -f apps/relayer/Dockerfile -t $Image .
+docker push $Image
+fly deploy --config apps\relayer\fly.testnet.toml -a $FlyApp --image $Image --ha=false
 ```
 
-The `Where-Object` filter passes only `NAME=value` lines (no comments, no
-empty values). `--ha=false` keeps one machine: a second one would double the
-budgets and split the rate limits.
+The import passes the key through stdin and keeps it out of files and shell
+history. `--ha=false` starts one machine. Check the machine count if you
+are reusing a Fly app, since budgets and rate limits are per process.
 
 Success:
 
 ```powershell
-fly status -a <relayer-app-testnet>                                # one machine, started
-fly logs -a <relayer-app-testnet>                                  # {"msg":"listening","port":8787,"network":"testnet","relayer":"<relayer>.testnet"}
-Invoke-RestMethod https://<relayer-app-testnet>.fly.dev/health     # ok True, network testnet, balance ok
-Invoke-RestMethod https://<relayer-app-testnet>.fly.dev/policy     # fairground_contract = $FG
-(Invoke-WebRequest -UseBasicParsing https://<relayer-app-testnet>.fly.dev/policy -Headers @{ Origin = 'https://<web-testnet>.vercel.app' }).Headers['Access-Control-Allow-Origin']
-# prints https://<web-testnet>.vercel.app
+$RelayerUrl = "https://$FlyApp.fly.dev"
+fly status -a $FlyApp                                              # one machine, started
+Invoke-RestMethod "$RelayerUrl/health"                             # ok True, network testnet, balance ok
+Invoke-RestMethod "$RelayerUrl/policy"                             # fairground_contract = sealround.itzbeast.testnet
+(Invoke-WebRequest -UseBasicParsing "$RelayerUrl/policy" -Headers @{ Origin = $WebOrigin }).Headers['Access-Control-Allow-Origin']
+# prints $WebOrigin
 ```
 
 If it fails:
@@ -459,7 +489,7 @@ If it fails:
 - `invalid relayer configuration:` in the logs lists every bad variable. Fix
   each one, which restarts the machine:
   `'CORS_ORIGINS=https://<web-testnet>.vercel.app' | fly secrets import -a <relayer-app-testnet>`.
-  For the key, use the file and pipe above rather than typing it.
+  For the key, use the masked prompt and stdin import above.
 - A startup error about the key: it is not a full-access key of
   `RELAYER_ACCOUNT_ID`.
 - `/health` 503 with `balance` `empty`: fund the relayer. `unknown`: the RPC
@@ -505,23 +535,28 @@ GitHub repository; the code must be pushed first, which is the owner's call):
 | Output Directory | default |
 | Node.js Version | 24.x |
 
-pnpm is pinned because the lockfile was written by pnpm 12.3.4 (the root
-`package.json` `packageManager`); an older pnpm may not read it. These
-commands were not run on Vercel.
+pnpm is pinned because version 12.3.4 wrote the lockfile. Use the settings
+above for the separate testnet Vercel project.
 
-Environment variables:
+In the testnet project, open Settings → Environment Variables and set the
+six `NEXT_PUBLIC_` entries with values in the testnet column for Production.
+Replace `<relayer-app-testnet>` with the Fly app name and redeploy. Use the
+production origin as the relayer's `CORS_ORIGINS`. The matching block in
+`apps/web/.env.example` can also configure a local testnet view.
 
 | Variable | `<web-demo>` | `<web-testnet>` | `<web-pilot>` | Where the value comes from |
 | --- | --- | --- | --- | --- |
-| `NEXT_PUBLIC_FAIRGROUND_CONTRACT` | not set | `fairground.<owner>.testnet` | `fairground.<owner>.near` | `$FG` (T5, M2) |
+| `NEXT_PUBLIC_FAIRGROUND_CONTRACT` | not set | `sealround.itzbeast.testnet` | `fairground.<owner>.near` | the deployed account |
 | `NEXT_PUBLIC_NEAR_NETWORK` | not set | `testnet` | `mainnet` | |
-| `NEXT_PUBLIC_NEAR_RPC_URL` | not set | optional, default `https://rpc.testnet.near.org` | `<rpc-url>` | your RPC provider |
-| `NEXT_PUBLIC_USDC_CONTRACT` | not set | optional, default `usdc.fakes.testnet` | optional, default `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` | must be in the contract's `allowed_quote_tokens` and first in the relayer's `USDC_CONTRACTS` |
+| `NEXT_PUBLIC_NEAR_RPC_URL` | not set | `https://rpc.testnet.near.org` | `<rpc-url>` | your RPC provider |
+| `NEXT_PUBLIC_USDC_CONTRACT` | not set | `usdc.fakes.testnet` | optional, default `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` | must be in the contract's `allowed_quote_tokens` and first in the relayer's `USDC_CONTRACTS` |
 | `NEXT_PUBLIC_RELAYER_URL` | not set | `https://<relayer-app-testnet>.fly.dev` | `https://<relayer-app-mainnet>.fly.dev` | part 3 (no trailing slash) |
 | `NEXT_PUBLIC_SEALER_CODE_HASH` | not set | `f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb` | same | `$SHA`; without it the code-hash check cannot pass |
 | `NEXT_PUBLIC_DEV_ACCOUNTS` | never | never | never | sandbox only; its keys would ship to every visitor |
-| `ONECLICK_JWT` | the 1Click key | same | same | partners.near-intents.org. Server only (the `/api/oneclick/*` routes); mark it Sensitive |
-| `ONECLICK_REAL_SWAPS` | not set | not set | `1` when the owner enables 1Click funding | Server only. Requires mainnet and Circle's native USDC. See M6. |
+| `ONECLICK_JWT` | the 1Click key | optional, dry quotes | the 1Click key | partners.near-intents.org. Server only (the `/api/oneclick/*` routes). Mark it Sensitive. |
+| `ONECLICK_REDIS_URL` and `ONECLICK_REDIS_TOKEN` | optional | optional | required for live swaps | Server-only Upstash Redis REST URL and token. Shared by every instance of this deployment. |
+| `ONECLICK_RECEIPT_SECRET` | not set | not set | required for live swaps | Server-only 32-byte signing secret in hex. Keep it stable across deploys. |
+| `ONECLICK_REAL_SWAPS` | not set | not set | `1` when the owner enables 1Click funding | Server only. Requires mainnet, Circle's native USDC, receipt signing and shared quotas. See M6. |
 | `NEXT_PUBLIC_APP_URL` | not set | optional, `https://app.<domain>` | optional, `https://app.<domain>` | only with the custom domains below; no trailing slash |
 
 Custom domains (optional). One project can serve the landing page and the app
@@ -551,7 +586,8 @@ Checks after each deploy, on the production URL:
   `https://<web-demo>.vercel.app/api/oneclick/tokens` returns a JSON list.
 - `<web-testnet>`: the footer reads "Sealround runs on NEAR testnet.
   Unaudited." The smoke sale from T6 is listed. In the browser's network tab,
-  `GET <relayer>/policy` returns 200 with no CORS error. Part 5 tests bidding.
+  `GET <relayer>/policy` returns 200 with no CORS error and shows
+  `fairground_contract: sealround.itzbeast.testnet`. Part 5 tests bidding.
 - `<web-pilot>`: the same, with "mainnet".
 - Use the production URLs only. Preview deployments have other origins,
   which the relayer's CORS refuses (the app then falls back to paid
@@ -722,9 +758,13 @@ the sale.
 
 ### M6. Enable 1Click funding for the mainnet pilot
 
-Live swaps are off by default. To enable them, set the server-only
-`ONECLICK_REAL_SWAPS=1` on `<web-pilot>` and redeploy. The app must be
-configured for NEAR mainnet and Circle's native USDC. Check that
+Live swaps are off by default. On `<web-pilot>`, configure NEAR mainnet and
+Circle's native USDC. Set the server-only Redis REST URL and token for a
+database dedicated to the pilot. Set `ONECLICK_RECEIPT_SECRET` to 32 random
+bytes encoded as 64 hex characters and keep it stable across redeploys.
+The shared quota covers every 1Click call with limits of 40 per client and
+300 overall in 60 seconds. With those values in place, set
+`ONECLICK_REAL_SWAPS=1` and redeploy. Check that
 `GET /api/oneclick/config` returns `{"liveSwaps":true}` for the pilot and
 `{"liveSwaps":false}` for the demo and testnet.
 
@@ -732,7 +772,8 @@ The funding panel previews the price with a dry quote. A connected bidder
 enters an origin-chain refund address and requests a separate deposit quote.
 The panel shows the exact amount and asset, the 1Click deposit address, and
 the deadline. The bidder sends the transfer from their own origin-chain
-wallet. Sealround polls 1Click for delivery or refund status.
+wallet. Sealround polls 1Click for delivery or refund status using a signed
+receipt valid for 30 days.
 
 Verification so far uses local fixtures. Record the first completed mainnet
 swap as pilot evidence after the owner enables the feature.

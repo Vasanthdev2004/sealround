@@ -369,6 +369,7 @@ mod tests {
                 account_id: "owner.testnet".parse().unwrap(),
             }),
             allowed_quote_tokens: vec!["usdc.testnet".parse().unwrap()],
+            dex: None,
         };
         let input = r#"{"v":1,"op":"clear","bids":[["a.testnet","5","AAAA"]]}"#;
         let payer = "closer.testnet".parse().unwrap();

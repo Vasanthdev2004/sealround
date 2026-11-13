@@ -53,9 +53,9 @@ pub const STORAGE_MARGIN_PERCENT: u128 = 15;
 /// Sale storage that does not depend on string lengths: the sale record, its
 /// meta record, the `sale_ids` entry, the deposits, fills and invalid-bid
 /// values without entries, and the largest result (8 stored check names of
-/// 35 bytes). Measured 1,027 bytes at its largest (a failed TEE sale storing 8
+/// 35 bytes). Measured 1,106 bytes at its largest (a failed TEE sale storing 8
 /// names of three-digit bids) by `tests::costs::sale_storage_fits_the_formula`.
-pub const SALE_BASE_BYTES: u64 = 1_040;
+pub const SALE_BASE_BYTES: u64 = 1_112;
 /// The sale id is stored in the `sales` key and in `sale_ids` (and inside the
 /// token account id, which is counted with the account ids).
 pub const SALE_ID_COPIES: u64 = 2;
@@ -114,6 +114,43 @@ pub fn token_deploy_balance(metadata_len: usize) -> u128 {
 /// First sale with a quote token: this contract's registration on it plus the
 /// `quote_tokens` entry.
 pub const QUOTE_REGISTRATION_COST: u128 = TOKEN_STORAGE_DEPOSIT + storage_cost(QUOTE_ENTRY_BYTES);
+
+// Launch liquidity on the Rhea (Ref) exchange, v1.9.x. Every sale with
+// liquidity pays its own storage there; what the exchange or a token refunds
+// (an excess over what it charges, or a registration that already existed)
+// stays in this contract.
+/// This contract's account on the exchange: the account record (102 bytes,
+/// `storage_balance_bounds().min`) plus one token entry (148 bytes) for each
+/// of the sale token and the quote token. Measured in the sandbox
+/// (`contracts/tests`, `liquidity::exchange_storage_matches_the_constants`).
+pub const DEX_ACCOUNT_BYTES: u64 = 398;
+pub const DEX_ACCOUNT_DEPOSIT: u128 = DEX_ACCOUNT_BYTES as u128 * YOCTO_PER_BYTE;
+/// Attached to `add_simple_pool`, which charges the pool record's storage
+/// and refunds the rest. Measured 602 bytes with 64-byte token ids (the
+/// longest) and a 32-byte exchange id; 700 leaves room for a longer exchange
+/// id or a slightly larger record in a later exchange version.
+pub const POOL_STORAGE_DEPOSIT: u128 = 7_000_000_000_000_000_000_000;
+/// Attached to `add_liquidity`, which charges for this contract's LP share
+/// record and refunds the rest. Measured 129 bytes with a 64-byte account id
+/// (the longest); 160 with room to spare.
+pub const LP_STORAGE_DEPOSIT: u128 = 1_600_000_000_000_000_000_000;
+/// 1 yoctoNEAR each for `register_tokens`, the two deposits
+/// (`ft_transfer_call`) and the two withdrawals. A failed call gets its
+/// yoctoNEAR back; a withdrawal whose transfer failed inside the exchange
+/// keeps it, and a retry of that costs this contract one more.
+pub const LIQUIDITY_YOCTO: u128 = 5;
+/// NEAR `create_sale` adds for launch liquidity besides the record's
+/// storage: the exchange account, the exchange's registrations on both
+/// tokens, the pool and the LP record. What no step spends is returned by
+/// `claim_proceeds`.
+pub const LIQUIDITY_NEAR_RESERVE: u128 = DEX_ACCOUNT_DEPOSIT
+    + 2 * TOKEN_STORAGE_DEPOSIT
+    + POOL_STORAGE_DEPOSIT
+    + LP_STORAGE_DEPOSIT
+    + LIQUIDITY_YOCTO;
+/// A sale's liquidity record at its largest. Measured 165 bytes by
+/// `tests::costs::liquidity_record_fits_the_constant`.
+pub const LIQUIDITY_RECORD_BYTES: u64 = 168;
 
 // OutLayer pricing, live `get_pricing` on outlayer.testnet and outlayer.near
 // (9 Nov 2026). The owner can change it, so the deposit doubles the estimate;
@@ -175,6 +212,40 @@ pub const BURN_GAS: Gas = Gas::from_tgas(10);
 pub const ON_CLAIM_GAS: Gas = Gas::from_tgas(10);
 pub const ON_PROCEEDS_GAS: Gas = Gas::from_tgas(10);
 pub const ON_QUOTE_REGISTERED_GAS: Gas = Gas::from_tgas(5);
+// Launch liquidity calls (the exchange and the tokens). Measured in the
+// sandbox against the exchange's testnet wasm (v1.9.19): every call burnt
+// 6 TGas or less; see contracts/GAS.md. The margins allow for a larger state
+// on testnet and mainnet. Each step fits a relayed call (150 TGas).
+/// The exchange's `storage_deposit` (with `register_tokens`: 5.5 TGas for both).
+pub const DEX_STORAGE_DEPOSIT_GAS: Gas = Gas::from_tgas(10);
+/// The exchange's `register_tokens`.
+pub const DEX_REGISTER_TOKENS_GAS: Gas = Gas::from_tgas(10);
+/// The exchange's `add_simple_pool` (2.8 TGas).
+pub const ADD_SIMPLE_POOL_GAS: Gas = Gas::from_tgas(20);
+/// A token's `ft_transfer_call` to the exchange: the token's work, the
+/// exchange's `ft_on_transfer` and the token's `ft_resolve_transfer` (6.8
+/// TGas in all). The NEP-141 reference keeps 30 TGas for itself and gives the
+/// rest to the receiver.
+pub const FT_TRANSFER_CALL_GAS: Gas = Gas::from_tgas(50);
+/// The exchange's `add_liquidity` (4.0 TGas).
+pub const ADD_LIQUIDITY_GAS: Gas = Gas::from_tgas(20);
+/// The exchange's `withdraw`: its own work (3.5 TGas) and the 20 TGas each it
+/// attaches to the `ft_transfer` and to its callback.
+pub const DEX_WITHDRAW_GAS: Gas = Gas::from_tgas(50);
+/// One of the exchange's small views (`get_number_of_pools`, `get_deposits`,
+/// `get_pool_shares`) called as a function.
+pub const DEX_VIEW_GAS: Gas = Gas::from_tgas(10);
+/// The exchange's `get_pools` for `POOL_SCAN_LIMIT` (20) pools, read when a
+/// pool's creation result was lost.
+pub const DEX_POOL_SCAN_GAS: Gas = Gas::from_tgas(30);
+/// A liquidity step's callback (3.3 TGas at most), before it starts the next
+/// step (which it does with the call's unused gas, not with this).
+pub const ON_LIQUIDITY_GAS: Gas = Gas::from_tgas(15);
+/// `on_pool_count`, the pool step's first callback: its own work, the
+/// `add_simple_pool` it sends and that call's callback.
+pub const ON_POOL_COUNT_GAS: Gas = Gas::from_gas(
+    ON_LIQUIDITY_GAS.as_gas() + ADD_SIMPLE_POOL_GAS.as_gas() + ON_LIQUIDITY_GAS.as_gas(),
+);
 /// Room for the rest of the calling method after its gas check (events, state
 /// write, sending small promises). `close_sale` measured 2.4 TGas besides
 /// `request_send_gas`.

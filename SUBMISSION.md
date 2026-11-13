@@ -9,94 +9,64 @@ Deadline: 14 Nov 2026, 23:59 UTC. Internal target: **14 Nov, 18:00 UTC**
 (23:30 IST). Submit once at nearhackathon.com/#apply; corrections go through
 the request-changes page.
 
-## (a) Demo video, 60 to 90 seconds
+## (a) Demo video, 1:28
 
-Record the production build, not the dev server (no dev overlay, steadier
-frame rate): `pnpm build`, then `pnpm --filter web start`, at 1440 x 900.
-Click "Reset demo data" (page footer) before each take. Judge mode takes
-about 35 seconds of real time; cut or speed up the middle of it.
+**Opening line.** “On a first-come launch, the fastest bot gets first pick. On Sealround, a bot can bid at the opening second and pay the same price as someone who bids just before close.”
 
-If the testnet contract and the live bot are up by recording day, use the
-live-bot shots marked **[live]** instead of the judge-mode ones. In judge mode
-the Verified panel carries a "simulated" tag; leave it visible rather than
-cropping it.
-
-The pitch, in one line, for the voice-over and every caption: **Sealround is
-the fair mode for token launches. Bots can't snipe what they can't see.** Say
-"fair mode", not "launchpad": judges have seen many launchpads, and the new
-part is the sale itself.
+Record the testnet evidence in the order below. Show the chain or explorer timestamp beside each bid. Use “second 0” only if the bot’s recorded bid landed less than one second after opening. Have a person submit the late bid on camera, or say “late bidder” if both bids came from the evidence script. Show the actual numbers from the run.
 
 | Time | On screen | Voice-over |
 | --- | --- | --- |
-| 0 to 8 s | `/arena`, scroll to **Run one yourself**: raise the demand slider and show the price chart, with the "Bonding curve price" climbing after the "Bot buys at second 0" markers, and the dashed "Sealround clearing price" flat beside it | "Every launch, bots buy first and dump on you." |
-| 8 to 20 s | `/sale/fairt` (the open "Fair Test" sale): the **Public bids** table, where every row is only a "Sealed bid", then **Place a sealed bid** ("Sealed in this browser to sale key ...") | "On Sealround, bids are sealed until the sale closes, and everyone pays one price." |
-| 20 to 45 s | `/judge`, click **Run demo**: the timeline steps "3 sniper bots bid at second 0", "50 people bid over the window", "A copycat replays a sealed bid", "Enclave clears the sale". End on the summary: **Bots paid** and **People paid** at the same price, the check "Bots and people paid exactly the clearing price.", the copycat's void bid. Click **Open the full result** and show **Verified: 5 of 5 checks passed**. **[live]** Terminal with `pnpm --filter web live-bot snipe` firing at the opening second, the sale page at close, then `pnpm --filter web live-bot report` printing the bot's price next to the clearing price; `copycat` rejected. | "The bot was faster. It didn't matter." |
-| 45 to 60 s | `/sale/fairt`, **Fund from any chain**: choose USDC on Base, enter an amount ("Enter an amount for a live dry quote."), show the live quote with fees and time, then the **Where's my money** panel hop by hop. If the pilot ran a real swap, use that recording instead. | "Pay from any chain through NEAR Intents." |
-| 60 to 75 s | `/arena`, top of the page: "What bots made and what people paid, by launch type", then **Results by launch type** | Read the real numbers: "Across 60 simulated launches, sniper bots made 1,269 USDC on a bonding curve, 177 on a first-come sale, and zero on Sealround." |
-| 75 to 90 s | The pilot results table from README section 7 (or the pilot's result page). End on the landing page (`/`), section **Not another launchpad. The fair mode for one.** (the comparison table), with the repo and the demo link on screen | "Bots can't snipe what they can't see. Try it with no funds. Link below." |
+| 0:00–0:09 | A first-come launch, then the Sealround sale. Show the bidding window and the sealed bid list. | “On a first-come launch, the fastest bot gets first pick. Sealround gives everyone a window to submit a sealed bid.” |
+| 0:09–0:27 | Split screen: the bot submits at the open, then a person submits near close. Overlay their recorded times. Cut to **Close sale**. | “The bot bid at second zero. A person bid near close. Their prices and budgets stayed encrypted until OutLayer opened the bids.” |
+| 0:27–0:47 | Show the result, the two winning fills, and the clearing price. Point at the transaction links. | “Both won. The timing was different. The price was the same: <clearing price> USDC per token. You can check each charge against its fill.” |
+| 0:47–1:07 | Open the Rhea pool at creation. Show initial reserves, the sale contract’s LP share balance, and its empty access-key list. | “Part of the raise and the reserved tokens open a Rhea pool at that same clearing price. The keyless sale contract holds the LP shares.” |
+| 1:07–1:28 | Open **Verified** and show the TDX report data, approved measurements, and frozen bid-set hash. End with the testnet result and Judge mode links. | “Your browser checks OutLayer’s Intel TDX evidence against the NEAR record and recomputes the frozen bid set. Open the testnet result yourself, or run Judge mode with no wallet.” |
 
-Arena numbers to quote (from `apps/web/src/data/arena-results.json`, seed
-20261114, 60 runs): bot profit 1,269 / 177 / 0 USDC; human price premium
-2.61x / 1.00x / 1.00x; bot share of supply 34.5% / 20.9% / 15.7% (bonding
-curve / fixed price / Sealround). Do not say bots "get nothing": they still
-buy 15.7% of supply on average, at the same price as everyone else.
+The 1:28 cut meets the submission spec. An extended cut can run through **2:20**. Use 1:28–1:51 to open the input and output hashes and show one bidder’s inclusion check. Use 1:51–2:20 to show where the OutLayer verifier checks the quote’s signature chain up to Intel and where to find the pool’s first transaction.
 
-## (b) X post
+**Evidence links to fill after the owner’s testnet run**
 
-Lengths are counted the way X counts them (every link is 23 characters).
-The long version is 515 characters, so it needs X Premium; otherwise post the
-thread.
+- Sale and result `<link>`
+- Bot bid and human late bid transactions `<link>` and `<link>`
+- Close and settlement transaction `<link>`
+- Rhea pool and initial liquidity transaction `<link>` and `<link>`
+- Sale contract LP balance and access keys `<link>` and `<link>`
+- OutLayer attestation `<link>`
 
-**Long version:**
+The older testnet smoke sale verifies OutLayer’s sale-key run, clearing run, and bid-set hash. The local sandbox has a measured 0.8-second bot bid. Use the new testnet run for the combined story above. If it is unavailable, show the 35-second Judge run with **Simulated** visible and describe the pool and checks as simulated. Use the separate sandbox and smoke evidence with their own labels.
 
-```text
-Every token launch, bots buy in the first block and dump on you.
+## (b) X thread
 
-Sealround is the fair mode for token launches on NEAR. Bids stay sealed inside a TEE until the sale closes, then every winner pays one clearing price. Bot or human, the same price.
+Use the testnet wording after the evidence links and on-screen timestamps are confirmed. Each post fits within 280 characters with each URL counted as 23. Attach the 1:28 video to post 1.
 
-Bots can't snipe what they can't see.
-
-Pay from any chain through NEAR Intents.
-
-Built at NEAR HACKATHON @NEARProtocol #NEARHackathon @NearBuilders @out_layer
-
-Try it with no funds: https://sealround-demo.vercel.app/judge
-Code: https://github.com/Vasanthdev2004/fairground
-
-What would you launch with it?
-```
-
-**Thread version (each post under 280 characters):**
-
-Post 1 (278 characters), with the video attached:
+**Post 1**
 
 ```text
-At every launch, bots buy first and dump on you.
+Token launches reward the fastest click. On Sealround, bids stay sealed until close and every winner pays one clearing price.
 
-Sealround is the fair mode for launches on NEAR: bids stay sealed in a TEE until close, then everyone pays one price.
+Watch a bot bid at second 0 and a person bid near close. Both pay the same on NEAR testnet.
 
-Bots can't snipe what they can't see.
-
-Try it, no funds: https://sealround-demo.vercel.app/judge
 @NEARProtocol #NEARHackathon
 ```
 
-Post 2 (278 characters):
+**Post 2**
 
 ```text
-In 60 simulated launches, sniper bots made 1,269 USDC on a bonding curve, 177 on first come and 0 on Sealround.
+Part of the raise and the reserved tokens open a Rhea pool at the sale’s clearing price. The keyless sale contract holds the LP shares.
 
-On a local NEAR chain, a real sniper bot bid 0.8 s after open and paid exactly the clearing price.
-
-Built with @NearBuilders @out_layer
-Code: https://github.com/Vasanthdev2004/fairground
+Testnet result: <link>
+Rhea pool: <link>
 ```
 
-If the testnet pilot ran by posting day, replace "On a local NEAR chain" with
-the pilot's real numbers (bidders, chains, what the bot paid).
+**Post 3**
 
-Check before posting: that "Sealround" is free on X, GitHub and as a domain
-(spec, Risks), and that the handles above are the right accounts.
+```text
+Open Verified to check OutLayer’s Intel TDX evidence against the NEAR record and recompute the frozen bid set. OutLayer’s verifier checks the Intel signature chain separately.
+
+Judge mode, no wallet: https://sealround-demo.vercel.app/judge
+Code: https://github.com/Vasanthdev2004/fairground
+```
 
 ## (c) Submission form
 
@@ -129,10 +99,10 @@ to 11 have the long ones):
 - "Sealed-bid uniform-price auctions already exist." On-chain batch auctions
   show every bid before close. Here nobody can read a bid until the window
   ends, and the contract checks the enclave's result before it settles.
-- "What about liquidity after the sale?" Today the creator gets the raise and
-  the creator allocation and sets up any pool. Seeding a Rhea pool at the
-  clearing price, with the LP tokens held until a lock date, is P1 on the
-  roadmap (README section 13).
+- "What about liquidity after the sale?" The creator can reserve tokens and
+  set aside part of the raise to seed a Rhea pool at the clearing price. The
+  sale contract holds the LP shares. The new testnet run will show the
+  initial reserves, LP ownership, and the contract's access-key list.
 - "Whales still win." Yes: this removes the speed and information advantages,
   not the money advantage. Per-account deposit caps limit it; sybil resistance
   is a stated limit (README section 11).
@@ -162,7 +132,7 @@ submission, change "Buyers can fund" to "Buyers get live quotes to fund".
 | --- | --- |
 | A fresh clone plus the README commands reproduces judge mode with no errors | Done on 11 Nov 2026: clone, `pnpm install` (1 min), `pnpm build` (16 s), `pnpm --filter web start`, `/judge`, **Run demo**: settled result in 0:33 |
 | A testnet sale goes create → bids → close → clear → claim, correct to the smallest unit | Done on a local sandbox (end-to-end run, 21/21 scenarios and 483/483 checks, last run 12 Nov 2026 after the web redesign; integration tests check every balance). Testnet: owner deploys ([LAUNCH.md](LAUNCH.md)) |
-| Every Verified panel check passes on the judge-mode sale | 5 of 5 pass, against a simulated attestation (labelled as such) |
+| Every Verified panel check passes on the judge-mode sale | 11 of 11 pass in the browser against labelled simulated evidence. Separately, the old testnet smoke sale passed both sets of eight OutLayer checks and the bid-set comparison. |
 | The live sniper bot pays exactly the clearing price, and the copycat attack is rejected | In judge mode and on the local sandbox (the copied ciphertext is voided by the pinned job). The live bot (`pnpm --filter web live-bot`) passed 8 of 8 sandbox scenarios: it bid 0.8 s after open and paid exactly the clearing price; the copycat was rejected or voided with the 1% penalty. Testnet run: owner |
 | Timeout refund works: no path leaves funds stuck | Sandbox integration tests (refund mode from `closed` and from `awaiting_close`) and the end-to-end `refund-mode` scenario |
 | Bot Arena charts rebuild from one command | `pnpm arena`; rerun from a fresh clone reproduced the committed JSON byte for byte |

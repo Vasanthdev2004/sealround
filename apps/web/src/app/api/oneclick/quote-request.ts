@@ -9,6 +9,7 @@ import {
   upstreamHeaders,
 } from "./upstream";
 import {
+  FUNDING_MODES,
   NEAR_USDC_ASSET,
   REAL_DEADLINE_MAX_MS,
   REAL_DEADLINE_MIN_MS,
@@ -17,7 +18,11 @@ import {
   checkRealQuote,
   isAddressOf,
   isRealRecipient,
+  quoteMatchesFundingMode,
+  type FundingMode,
 } from "./shared";
+import { checkOneClickQuota } from "./quota";
+import { issueReceipt } from "./receipt";
 
 /**
  * Shared validation and proxying for 1Click dry and deposit quotes. The route
@@ -44,6 +49,7 @@ type QuoteBody = {
   recipientType: (typeof RECIPIENT_TYPES)[number];
   deadline: string;
   quoteWaitingTimeMs?: number;
+  confidentiality?: FundingMode;
 };
 
 const ASSET = /^nep(141|245):[A-Za-z0-9._:-]{1,160}$/;
@@ -64,6 +70,8 @@ function sanitize(b: Record<string, unknown>, dry: boolean): QuoteBody | string 
   if (!refundType) return "refundType is not supported.";
   const recipientType = pick(b.recipientType, RECIPIENT_TYPES, "DESTINATION_CHAIN");
   if (!recipientType) return "recipientType is not supported.";
+  const confidentiality = pick(b.confidentiality, FUNDING_MODES, "public");
+  if (!confidentiality) return "confidentiality is not supported.";
 
   const slippage = b.slippageTolerance ?? 100;
   if (typeof slippage !== "number" || !Number.isInteger(slippage) || slippage < 0 || slippage > 5000) {
@@ -99,6 +107,7 @@ function sanitize(b: Record<string, unknown>, dry: boolean): QuoteBody | string 
   if (typeof b.quoteWaitingTimeMs === "number" && b.quoteWaitingTimeMs >= 0 && b.quoteWaitingTimeMs <= 5000) {
     body.quoteWaitingTimeMs = Math.round(b.quoteWaitingTimeMs);
   }
+  if (b.confidentiality !== undefined) body.confidentiality = confidentiality;
   return body;
 }
 
@@ -125,7 +134,8 @@ function checkReal(b: Record<string, unknown>, body: QuoteBody, now: number): st
 }
 
 export async function requestQuote(request: Request, real: boolean) {
-  if (real && !realSwapsOn()) return realSwapsOff();
+  const liveEnabled = realSwapsOn();
+  if (real && !liveEnabled) return realSwapsOff();
 
   let raw: unknown;
   try {
@@ -138,11 +148,15 @@ export async function requestQuote(request: Request, real: boolean) {
 
   const body = sanitize(b, !real);
   if (typeof body === "string") return badRequest(body);
-  if (real) {
+  const confidential = body.confidentiality === "basic";
+  if (confidential && !liveEnabled) return realSwapsOff();
+  if (real || confidential) {
     const problem = checkReal(b, body, Date.now());
     if (problem) return badRequest(problem);
   }
 
+  const throttled = await checkOneClickQuota(request, { live: real || confidential });
+  if (throttled) return throttled;
   try {
     const res = await fetch(`${ONECLICK_BASE}/v0/quote`, {
       method: "POST",
@@ -151,12 +165,27 @@ export async function requestQuote(request: Request, real: boolean) {
       cache: "no-store",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
-    if (!real || !res.ok) return await passThrough(res);
+    if (!res.ok || (!real && !confidential)) return await passThrough(res);
 
-    const data: unknown = await res.clone().json().catch(() => null);
-    const problem = checkRealQuote(body, data);
+    const data = await res.clone().json().catch(() => null) as {
+      quote?: { depositAddress?: string };
+      quoteRequest?: { confidentiality?: unknown };
+    } | null;
+    const problem = real
+      ? checkRealQuote(body, data)
+      : quoteMatchesFundingMode("basic", data?.quoteRequest?.confidentiality)
+        ? null
+        : "1Click did not confirm a confidential preview.";
     if (problem) {
       return Response.json({ message: problem, code: "quote_mismatch" }, { status: 502, headers: { "cache-control": "no-store" } });
+    }
+    if (real) {
+      const tracking = issueReceipt({
+        address: data!.quote!.depositAddress!,
+        recipient: body.recipient,
+        kind: REAL_ORIGIN_ASSETS[body.originAsset],
+      });
+      return Response.json({ ...data, tracking }, { headers: { "cache-control": "no-store" } });
     }
     return await passThrough(res);
   } catch {

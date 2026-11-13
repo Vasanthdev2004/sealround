@@ -6,6 +6,7 @@ mod bidding;
 mod claims;
 mod costs;
 mod create;
+mod liquidity;
 mod reveal;
 mod settlement;
 
@@ -46,6 +47,9 @@ pub fn usdc() -> AccountId {
 }
 pub fn outlayer() -> AccountId {
     account("outlayer.testnet")
+}
+pub fn dex() -> AccountId {
+    account("ref-finance-101.testnet")
 }
 pub fn creator() -> AccountId {
     account("creator.testnet")
@@ -96,6 +100,7 @@ pub fn config_args() -> (
     String,
     Option<SecretsRef>,
     Vec<AccountId>,
+    Option<AccountId>,
 ) {
     (
         outlayer(),
@@ -109,6 +114,7 @@ pub fn config_args() -> (
             account_id: account("sealer-owner.testnet"),
         }),
         vec![usdc(), account("usdc2.testnet")],
+        Some(dex()),
     )
 }
 
@@ -116,8 +122,8 @@ pub fn config_args() -> (
 pub fn new_contract() -> Fairground {
     with_mocked_blockchain(|chain| chain.take_storage());
     set_call(&contract_id(), T0, 0);
-    let (outlayer, source, hash, secrets, tokens) = config_args();
-    Fairground::new(outlayer, source, hash, secrets, tokens).unwrap()
+    let (outlayer, source, hash, secrets, tokens, dex) = config_args();
+    Fairground::new(outlayer, source, hash, secrets, tokens, dex).unwrap()
 }
 
 pub fn params(sale_id: &str, mode: RevealMode) -> CreateSaleParams {
@@ -144,6 +150,7 @@ pub fn params(sale_id: &str, mode: RevealMode) -> CreateSaleParams {
         unsold_rule: None,
         description: None,
         website: None,
+        liquidity: None,
     }
 }
 

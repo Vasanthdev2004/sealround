@@ -5,6 +5,7 @@ use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, near};
 
 use crate::costs::MAX_BIDS_PER_SALE;
+use crate::liquidity::{Liquidity, LiquidityParams};
 use crate::{Config, Error};
 
 const MINUTE: u64 = 60 * 1_000_000_000;
@@ -82,6 +83,9 @@ pub struct CreateSaleParams {
     pub description: Option<String>,
     #[serde(default)]
     pub website: Option<String>,
+    /// Launch liquidity: a pool seeded at the clearing price after the sale.
+    #[serde(default)]
+    pub liquidity: Option<LiquidityParams>,
 }
 
 /// Economic terms, fixed at creation.
@@ -110,10 +114,6 @@ impl SaleTerms {
             decimals: self.decimals,
             max_price: self.max_price,
         }
-    }
-
-    pub(crate) fn creator_allocation(&self) -> u128 {
-        self.total_supply - self.sale_supply
     }
 }
 
@@ -248,6 +248,9 @@ pub struct SaleResult {
     /// sha256 of the last clearing input (= OutLayer's attestation `input_hash`).
     pub input_sha256: Option<[u8; 32]>,
     pub clear_requests: u32,
+    /// Block height of the call that sent the latest clearing request to
+    /// OutLayer (TEE mode), to find that transaction and its attestation.
+    pub clear_request_block: Option<u64>,
     /// Clearing attempts that ended in Closed.
     pub clear_attempts: u32,
     /// The 1 % penalties of the invalid bids, locked in this contract for
@@ -256,15 +259,16 @@ pub struct SaleResult {
     pub total_penalties: u128,
 }
 
-/// Which creator payouts are done. Each is set before its promise and cleared
-/// again if the promise fails.
+/// What the creator payouts have paid so far (USDC, sale tokens, sale tokens
+/// burned, NEAR). Each amount is added before its promise and taken off again
+/// if the promise fails; `claim_proceeds` pays what is owed minus these.
 #[near(serializers = [borsh])]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Proceeds {
-    pub raise_paid: bool,
-    pub allocation_paid: bool,
-    pub unsold_burned: bool,
-    pub reserve_returned: bool,
+    pub raise_paid: u128,
+    pub allocation_paid: u128,
+    pub burned: u128,
+    pub reserve_returned: u128,
 }
 
 #[near(serializers = [borsh])]
@@ -288,6 +292,9 @@ pub struct Sale {
     /// `Done` from the start in commit-reveal mode.
     pub key_state: StepState,
     pub sealer_pubkey: Option<[u8; 32]>,
+    /// Block height of the call that sent the sealer key request (TEE mode;
+    /// the latest one after a `retry_setup`).
+    pub key_request_block: Option<u64>,
     pub phase: Phase,
     pub closed_at: Option<u64>,
     pub bid_count: u32,
@@ -296,6 +303,7 @@ pub struct Sale {
     pub bid_set_state: [u8; 32],
     pub result: SaleResult,
     pub proceeds: Proceeds,
+    pub liquidity: Option<Liquidity>,
 }
 
 impl Sale {
@@ -348,17 +356,51 @@ impl Sale {
         self.token_state == StepState::Done && self.key_state == StepState::Done
     }
 
-    /// Sale tokens the contract holds beyond what buyers are owed, which
-    /// `claim_proceeds` burns. Zero while the token is not deployed: there is
-    /// nothing to burn then.
+    /// Sale tokens `claim_proceeds` burns in all: the sale supply buyers did
+    /// not get, plus the launch pool reserve the pool does not take. Zero
+    /// while the token is not deployed: there is nothing to burn then.
     pub fn unsold(&self) -> u128 {
         if self.token_state != StepState::Done {
             return 0;
         }
-        match self.phase {
+        let sale_part = match self.phase {
             Phase::Settled => self.terms.sale_supply - self.result.total_sold,
             _ => self.terms.sale_supply,
+        };
+        let pool_part = self.liquidity.as_ref().map_or(0, |liquidity| {
+            liquidity.pool_tokens - liquidity.tokens_kept()
+        });
+        sale_part + pool_part
+    }
+
+    /// Sale tokens set aside for the launch pool.
+    pub fn pool_reserve(&self) -> u128 {
+        self.liquidity
+            .as_ref()
+            .map_or(0, |liquidity| liquidity.pool_tokens)
+    }
+
+    /// The creator's own sale tokens.
+    pub fn creator_allocation(&self) -> u128 {
+        self.terms.total_supply - self.terms.sale_supply - self.pool_reserve()
+    }
+
+    /// USDC the creator is owed in all: the raise, less what the launch pool
+    /// takes. Zero unless settled.
+    pub fn creator_raise(&self) -> u128 {
+        if self.phase != Phase::Settled {
+            return 0;
         }
+        let kept = self.liquidity.as_ref().map_or(0, Liquidity::usdc_kept);
+        self.result.total_raised.saturating_sub(kept)
+    }
+
+    /// Whether sale tokens may leave the contract (bidders' tokens and the
+    /// creator allocation): always, except while the launch pool is seeded.
+    pub fn tokens_unlocked(&self) -> bool {
+        self.liquidity
+            .as_ref()
+            .is_none_or(|liquidity| !liquidity.locks_tokens())
     }
 }
 
@@ -372,6 +414,7 @@ pub(crate) struct NewSale {
     pub reveal_window: u64,
     pub settle_timeout: u64,
     pub quote_token: AccountId,
+    pub liquidity: Option<Liquidity>,
 }
 
 fn invalid(field: &'static str, rule: &'static str) -> Error {
@@ -513,6 +556,10 @@ impl CreateSaleParams {
         if !config.allows_quote_token(&self.quote_token) {
             return Err(Error::QuoteTokenNotAllowed);
         }
+        let liquidity = match self.liquidity {
+            Some(params) => Some(params.validate(total_supply, sale_supply, config)?),
+            None => None,
+        };
 
         Ok(NewSale {
             sale_id: self.sale_id,
@@ -541,6 +588,7 @@ impl CreateSaleParams {
             reveal_window,
             settle_timeout,
             quote_token: self.quote_token,
+            liquidity,
         })
     }
 }

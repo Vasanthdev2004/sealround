@@ -21,7 +21,14 @@ fn new_with(
     tokens: Vec<AccountId>,
 ) -> Result<Fairground, Error> {
     set_call(&contract_id(), T0, 0);
-    Fairground::new(outlayer(), source, hash.to_owned(), secrets, tokens)
+    Fairground::new(
+        outlayer(),
+        source,
+        hash.to_owned(),
+        secrets,
+        tokens,
+        Some(dex()),
+    )
 }
 
 fn project(version_key: &str) -> SealerSource {

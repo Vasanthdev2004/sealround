@@ -140,18 +140,26 @@ another device. A bid that is not revealed pays the 1 % penalty.
 
 Preview quotes are dry. Mock, testnet and sandbox funding simulates the swap.
 The server enables deposit quotes only when `ONECLICK_REAL_SWAPS=1`, the app
-is configured for NEAR mainnet, and the quote token is Circle's native USDC.
-`ONECLICK_JWT` is an optional server credential for the 1Click proxy.
+is configured for NEAR mainnet and Circle's native USDC, and the server has
+`ONECLICK_RECEIPT_SECRET`, `ONECLICK_REDIS_URL`, and `ONECLICK_REDIS_TOKEN`.
+Set these in the server environment. Use an Upstash Redis database shared by
+all instances of the deployment. The proxy allows 40 calls per client and
+300 in total per 60 seconds. Live requests stop if the quota store is
+unavailable. Without Redis, only anonymous previews run under a local
+limit. `ONECLICK_JWT` is optional and sent only with shared quotas.
 
 An enabled swap requires a connected NEAR account that can receive USDC and
 a refund address on the origin chain. The funding panel shows the exact input,
 deposit address, expiry and minimum output before the user sends from their
-own origin wallet. The receipt stays in the browser and the sale and result
-pages resume polling it on return. Funding credits the connected NEAR account.
-Placing a sealed bid is a separate action.
+own origin wallet. The browser keeps a signed tracking credential for the
+deposit. It expires after 30 days and is required for status and deposit
+submission. Keep the signing key stable between deploys. If a receipt is
+expired or predates signed tracking, use the original transaction and quote
+reference for support. Funding credits the connected NEAR account. Placing
+a sealed bid is a separate action.
 
 To exercise deposit quotes and status locally without sending funds, run
-`pnpm --filter web exec vitest run src/lib/__tests__/oneclick-routes.test.ts src/lib/__tests__/oneclick-funding.test.ts`.
+`pnpm --filter web exec vitest run src/app/api/oneclick`.
 
 ## Local sandbox
 

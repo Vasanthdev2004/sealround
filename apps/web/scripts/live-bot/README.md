@@ -39,6 +39,8 @@ pnpm --filter web live-bot <command> [options]        (from the repo root)
 | Command | What it does | Needs the key |
 | --- | --- | --- |
 | `status` | The sale, the bot account, the relayer. Sends nothing. Run it before the sale opens. | no |
+| `bid` | Places one sealed bid in an open TEE sale. Requires an explicit `--budget` covering the deposit, plus a relayer or `--direct`. | yes |
+| `result` | Reads the bidder's fill and clearing price after settlement or refund. `--wait` waits for a final result. | no |
 | `snipe` | Seals the bid and saves a receipt, waits for the open, bids in the first block it can, prints the tx hash, the bid's index and the second it landed in. | yes |
 | `copycat` | Replays `--victim`'s sealed bid (or commitment) from the bot account and shows it rejected. Waits for the sale to open and for the victim's bid. | yes |
 | `report` | After settlement: the bot's fill against the clearing price, every bid of the sale, and the checks. `--claim` also claims the bot's tokens and refund; `--wait` waits for the settlement. | only with `--claim` |
@@ -47,6 +49,8 @@ pnpm --filter web live-bot <command> [options]        (from the repo root)
 `pnpm --filter web live-bot --help` lists every option. Each option can also
 be set with an environment variable (`LIVE_BOT_NETWORK`, `LIVE_BOT_CONTRACT`,
 `LIVE_BOT_SALE`, `LIVE_BOT_ACCOUNT`, `LIVE_BOT_RELAYER_URL`, ...).
+
+For the agent workflow and examples, see [the Sealround bidding skill](../../../../skills/sealround-bid/SKILL.md).
 
 Amounts are in USDC: `--deposit 5`, `--max-spend 2`, and `--max-price 0.02`
 (USDC per whole token). `report` prints them in base units too.

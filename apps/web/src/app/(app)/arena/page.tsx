@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { BurnPanel } from "@/components/arena/burn-panel";
 import { DemandChart } from "@/components/arena/demand-chart";
 import { Headline } from "@/components/arena/headline";
 import { Method } from "@/components/arena/method";
@@ -44,6 +45,7 @@ export default function ArenaPage() {
             <SummaryTable />
           </div>
           <DemandChart />
+          <BurnPanel />
         </div>
       </section>
 

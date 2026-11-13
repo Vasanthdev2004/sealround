@@ -20,6 +20,7 @@ import { OUTLAYER_COMPUTE_DEPOSIT, invalidBidPenalty } from "@/lib/client/rules"
 import { cn } from "@/lib/cn";
 import { ago, dateTime, duration, priceStr, shortHash, usdcStr } from "@/lib/format";
 import { useAction, useBidSecret, useBids, useCloseDeposit, useNow, useResult } from "@/lib/hooks";
+import { locksTokens } from "@/lib/liquidity";
 import { focusEl, scrollToEl } from "@/lib/scroll";
 import type { BidRecord, Sale, SaleStatus, StepState, WriteOptions } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
@@ -716,9 +717,12 @@ function Done({ sale, account }: { sale: Sale; account: string | null }) {
   const at = sale.settledAt;
   const when = at !== null && <span suppressHydrationWarning>{ago(at, Math.max(now, at))}</span>;
   const penalties = result?.totalPenalties ?? 0n;
+  const tokensLocked = locksTokens(result?.liquidity);
   const proceeds = result?.proceeds;
+  const tokenSetupPending = sale.tokenSetup === "pending";
   const unpaid =
-    !!proceeds && !(proceeds.raisePaid && proceeds.allocationPaid && proceeds.unsoldBurned && proceeds.reserveReturned);
+    !!proceeds && (!proceeds.raisePaid ||
+      (!tokenSetupPending && !(proceeds.allocationPaid && proceeds.unsoldBurned && proceeds.reserveReturned)));
   // The number waits for the result, so a refund total never shows before its penalties are known.
   const waiting = loading && !result;
   const pending = <Skeleton className="inline-block h-[0.8em] w-[4.5em] align-baseline" />;
@@ -759,7 +763,9 @@ function Done({ sale, account }: { sale: Sale; account: string | null }) {
         >
           <Statement>Every winner paid this price.</Statement>
           <Detail>
-            Claim your tokens and any unspent USDC on the result page.
+            {tokensLocked
+              ? "Claim any unspent USDC now. Sale tokens unlock when the launch pool is seeded or abandoned."
+              : "Claim your tokens and any unspent USDC on the result page."}
             {when && <> Settled {when}.</>}
           </Detail>
           <div className="mt-5 sm:mt-6">
@@ -770,16 +776,22 @@ function Done({ sale, account }: { sale: Sale; account: string | null }) {
         </Frame>
       )}
 
-      {unpaid && result && (
+      {(unpaid || proceeds?.allocationLocked) && (
         <div className="mt-6 border-t border-line pt-5">
-          <div className="text-small font-[510] text-fg">Creator payout not sent yet</div>
+          <div className="text-small font-[510] text-fg">{unpaid ? "Creator payout available" : "Creator tokens locked"}</div>
           <p className="mt-1 max-w-[62ch] text-small text-muted">
-            {failed
-              ? "Anyone can send it: the creator's token allocation and unused NEAR reserve go to the creator, and the unsold sale tokens are burned."
-              : "Anyone can send it: the raise in USDC, the token allocation and the unused NEAR reserve go to the creator, and any unsold tokens are burned."}{" "}
-            The funds only ever go to <Fg>{sale.creator}</Fg>.
+            {unpaid && proceeds && (
+              <>
+                Anyone can send the available payout to <Fg>{sale.creator}</Fg>.
+                {!proceeds.raisePaid && " The payout includes the creator’s share of the raise."}
+                {!tokenSetupPending && !proceeds.allocationPaid && !proceeds.allocationLocked && " It includes the creator’s token allocation."}
+                {!tokenSetupPending && !proceeds.reserveReturned && " Any unused NEAR reserve is returned."}
+                {!tokenSetupPending && !proceeds.unsoldBurned && " Unsold tokens are burned."}
+              </>
+            )}
+            {proceeds?.allocationLocked && " The creator’s token allocation unlocks when the launch pool is seeded or abandoned."}
           </p>
-          <PushAction
+          {unpaid && <PushAction
             className="mt-4"
             account={account}
             label="Pay out the creator"
@@ -788,7 +800,7 @@ function Done({ sale, account }: { sale: Sale; account: string | null }) {
             size="md"
             subject="payout"
             run={(caller, opts) => getClient().claimProceeds(sale.id, caller, opts)}
-          />
+          />}
         </div>
       )}
       <PublicStats sale={sale} result={result} className="mt-6 sm:mt-8" />

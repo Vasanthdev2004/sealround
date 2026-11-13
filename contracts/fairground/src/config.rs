@@ -43,6 +43,10 @@ pub struct Config {
     pub sealer_secrets: Option<SecretsRef>,
     /// Quote tokens (USDC contracts) a sale may use.
     pub allowed_quote_tokens: Vec<AccountId>,
+    /// The Rhea (Ref) exchange that launch pools are seeded on
+    /// (`ref-finance-101.testnet` / `v2.ref-finance.near`). `None` turns
+    /// launch liquidity off: `create_sale` then refuses `liquidity`.
+    pub dex: Option<AccountId>,
 }
 
 impl Config {
@@ -106,6 +110,13 @@ impl Config {
             if self.allowed_quote_tokens[..i].contains(token) {
                 return Err(Error::InvalidConfig("allowed_quote_tokens has a duplicate"));
             }
+        }
+        if let Some(dex) = &self.dex
+            && (*dex == self.outlayer || self.allows_quote_token(dex))
+        {
+            return Err(Error::InvalidConfig(
+                "dex must not be the OutLayer contract or a quote token",
+            ));
         }
         Ok(())
     }

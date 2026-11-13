@@ -63,11 +63,36 @@ export const sale = (overrides: Record<string, unknown> = {}) => ({
   reveal_mode: "Tee",
   reveal_end: null,
   refund_mode_at: "9000000000000000000",
+  token_setup: "done",
+  creator_allocation: "0",
+  ...overrides,
+});
+
+/** A final sale with no creator payout due unless the test specifies one. */
+export const proceedsResult = (overrides: Record<string, unknown> = {}) => ({
+  sale_id: "fairt",
+  status: "settled",
+  total_raised: "0",
+  unsold: "0",
+  proceeds: { raise_paid: false, allocation_paid: false, unsold_burned: false, reserve_returned: false },
+  ...overrides,
+});
+
+/** A pool ready to register before its seeding deadline. */
+export const liquidityView = (overrides: Record<string, unknown> = {}) => ({
+  status: "seeding",
+  next_step: "register",
+  in_flight: null,
+  deadline: "1001",
+  usdc: "50",
+  usdc_on_dex: "0",
   ...overrides,
 });
 
 interface ChainState {
   sales?: Record<string, unknown>;
+  results?: Record<string, unknown>;
+  reserves?: Record<string, unknown>;
   /** `get_bid` answers by bidder (any sale). */
   bids?: Record<string, { revealed: boolean; claimed: boolean }>;
   /** Everyone's USDC balance. */
@@ -75,10 +100,15 @@ interface ChainState {
 }
 
 /** Fairground and USDC views answered from `state`; each call is recorded in `asked` as [method, args]. */
-export function fakeViews({ sales = { fairt: sale() }, bids = {}, balance = 10n ** 12n }: ChainState = {}, asked: unknown[] = []): ViewCall {
+export function fakeViews(
+  { sales = { fairt: sale() }, results = {}, reserves = {}, bids = {}, balance = 10n ** 12n }: ChainState = {},
+  asked: unknown[] = [],
+): ViewCall {
   return async <T,>(contractId: string, method: string, args: Record<string, unknown>): Promise<T> => {
     asked.push([method, args]);
     if (method === "get_sale") return (sales[String(args["sale_id"])] ?? null) as T;
+    if (method === "get_result") return (results[String(args["sale_id"])] ?? null) as T;
+    if (method === "get_reserve_refund") return (reserves[String(args["sale_id"])] ?? "0") as T;
     if (method === "get_bid") return (bids[String(args["bidder"])] ?? null) as T;
     if (method === "ft_balance_of") return balance.toString() as T;
     throw new Error(`unexpected view ${contractId}.${method}`);

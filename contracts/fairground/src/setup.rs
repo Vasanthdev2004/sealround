@@ -9,10 +9,11 @@ use near_sdk::{AccountId, Gas, NearToken, Promise, env, near};
 
 use crate::bids::bid_set_seed;
 use crate::costs::{
-    MAX_ACCOUNT_ID_LEN, ON_QUOTE_REGISTERED_GAS, ON_SEALER_KEY_GAS, ON_TOKEN_DEPLOYED_GAS,
-    OUTLAYER_COMPUTE_DEPOSIT, OWN_WORK_GAS, QUOTE_REGISTRATION_COST, STORAGE_DEPOSIT_GAS,
-    TOKEN_INIT_GAS, TOKEN_STORAGE_DEPOSIT, TOKEN_WASM, outlayer_request_gas, per_bid_reserve,
-    sale_storage_cost, token_deploy_actions_gas, token_deploy_balance,
+    LIQUIDITY_NEAR_RESERVE, LIQUIDITY_RECORD_BYTES, MAX_ACCOUNT_ID_LEN, ON_QUOTE_REGISTERED_GAS,
+    ON_SEALER_KEY_GAS, ON_TOKEN_DEPLOYED_GAS, OUTLAYER_COMPUTE_DEPOSIT, OWN_WORK_GAS,
+    QUOTE_REGISTRATION_COST, STORAGE_DEPOSIT_GAS, TOKEN_INIT_GAS, TOKEN_STORAGE_DEPOSIT,
+    TOKEN_WASM, outlayer_request_gas, per_bid_reserve, sale_storage_cost, storage_cost,
+    token_deploy_actions_gas, token_deploy_balance,
 };
 use crate::events::{emit, hex};
 use crate::outlayer::{self, Outcome, pubkey_input};
@@ -32,6 +33,8 @@ pub(crate) struct CreateCost {
     pub creator_registrations: u128,
     pub quote_registration: u128,
     pub sealer_key: u128,
+    /// Launch liquidity: the record's storage plus `LIQUIDITY_NEAR_RESERVE`.
+    pub liquidity: u128,
 }
 
 impl CreateCost {
@@ -42,6 +45,7 @@ impl CreateCost {
             + self.creator_registrations
             + self.quote_registration
             + self.sealer_key
+            + self.liquidity
     }
 }
 
@@ -81,6 +85,7 @@ impl Fairground {
             reveal_window,
             settle_timeout,
             quote_token,
+            liquidity,
         } = new_sale;
         let num = self.sale_ids.len();
         let sale = Sale {
@@ -101,6 +106,7 @@ impl Fairground {
                 RevealMode::CommitReveal => StepState::Done,
             },
             sealer_pubkey: None,
+            key_request_block: (reveal_mode == RevealMode::Tee).then(env::block_height),
             phase: Phase::Setup,
             closed_at: None,
             bid_count: 0,
@@ -108,6 +114,7 @@ impl Fairground {
             bid_set_state: bid_set_seed(&sale_id),
             result: SaleResult::default(),
             proceeds: Proceeds::default(),
+            liquidity,
         };
 
         self.deploy_token(&sale_id, &sale, &meta).detach();
@@ -221,6 +228,7 @@ impl Fairground {
         }
         if retry_key {
             sale.key_state = StepState::Pending;
+            sale.key_request_block = Some(env::block_height());
         }
         if attached > key_deposit {
             Promise::new(caller)
@@ -328,6 +336,11 @@ impl Fairground {
             sealer_key: match sale.reveal_mode {
                 RevealMode::Tee => OUTLAYER_COMPUTE_DEPOSIT,
                 RevealMode::CommitReveal => 0,
+            },
+            liquidity: if sale.liquidity.is_some() {
+                storage_cost(LIQUIDITY_RECORD_BYTES) + LIQUIDITY_NEAR_RESERVE
+            } else {
+                0
             },
         }
     }

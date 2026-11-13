@@ -8,11 +8,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { KV } from "@/components/ui/stat";
 import { cn } from "@/lib/cn";
 import { dateTime, priceStr, tokenFull, usdcStr } from "@/lib/format";
+import { bpsPct } from "@/lib/liquidity";
 import { Note } from "./form-kit";
 import {
   BID_SLOTS,
   DECIMALS,
+  POOL_FEE_PRESETS,
   REVEAL_LABEL,
+  SETTLE_TIMEOUT_MS,
   pctStr,
   windowLabel,
   type Derived,
@@ -120,6 +123,13 @@ export function SummaryTerms({ draft, derived, className }: { draft: Draft; deri
       <KV className={ROW} k="Bid window" v={w.length} />
       <KV className={ROW} k="Deposit per account" v={deposit} />
       <KV className={ROW} k="Bids" v={REVEAL_LABEL[draft.revealMode]} mono={false} />
+      {derived.pool && (
+        <KV
+          className={ROW}
+          k="Launch pool"
+          v={derived.pool.shareBps !== null ? `${bpsPct(derived.pool.shareBps)} of the raise` : DASH}
+        />
+      )}
     </dl>
   );
 }
@@ -169,16 +179,21 @@ const Row = ({ k, v, mono }: { k: React.ReactNode; v: React.ReactNode; mono?: bo
 export function TermsLedger({
   draft,
   derived,
+  dex = null,
   onEdit,
 }: {
   draft: Draft;
   derived: Derived;
+  /** The launch pool exchange, named in the pool group. */
+  dex?: string | null;
   onEdit?: (k: EditTarget) => void;
 }) {
   const v = derived.values;
   const s = derived.shares;
   const w = windowTimes(draft, derived);
   const commit = draft.revealMode === "commit_reveal";
+  const pool = derived.pool;
+  const fee = POOL_FEE_PRESETS.find((p) => p.value === draft.poolFee)?.label ?? DASH;
 
   return (
     <div className="@container">
@@ -193,7 +208,7 @@ export function TermsLedger({
           <Group title="Allocation" edit="saleSupply" onEdit={onEdit}>
             <Row k="For sale" v={tokens(v.sale, s?.sale)} />
             <Row k="Creator" v={tokens(v.creator, s?.creator)} />
-            <Row k="LP reserve" v={tokens(v.lp, s?.lp)} />
+            <Row k={pool ? "Launch pool reserve" : "LP reserve"} v={tokens(v.lp, s?.lp)} />
           </Group>
           <Group title="Price" edit="floor" onEdit={onEdit}>
             <Row k="Floor" v={price(v.floor)} />
@@ -216,6 +231,17 @@ export function TermsLedger({
             <Row k="Max per account" v={usdc(v.maxDeposit)} />
             <Row k="Deposit token" v="USDC only" mono={false} />
           </Group>
+          {pool && (
+            <Group title="Launch pool" edit="poolShare" onEdit={onEdit}>
+              <Row k="Share of the raise" v={pool.shareBps !== null ? bpsPct(pool.shareBps) : DASH} />
+              <Row k="Tokens reserved" v={tokens(v.lp, s?.lp)} />
+              <Row k="Pool fee" v={fee} />
+              <Row k="Opens at" v="The clearing price" mono={false} />
+              <Row k="LP shares" v="Kept by the sale contract" mono={false} />
+              <Row k="Not seeded in time" v={`Anyone can abandon it after ${windowLabel(SETTLE_TIMEOUT_MS)}`} mono={false} />
+              {dex && <Row k="Exchange" v={dex} />}
+            </Group>
+          )}
           <Group title="Fixed for every sale">
             <Row k="Bid slots" v={BID_SLOTS} />
             <Row k="Void bids" v="Lose 1 % of the deposit" mono={false} />
@@ -290,12 +316,15 @@ export function CostRow({ mode, tee, className }: { mode: "mock" | "near"; tee: 
 export function Cost({
   mode,
   tee,
+  pool = false,
   cost = { state: "idle" },
   className,
 }: {
   mode: "mock" | "near";
   /** A TEE sale also pays the enclave for its key, and its bid slots store more. */
   tee: boolean;
+  /** A launch pool adds its storage on the exchange (create_sale's liquidity reserve). */
+  pool?: boolean;
   cost?: CreateCost;
   className?: string;
 }) {
@@ -323,8 +352,9 @@ export function Cost({
       </div>
       {near && (
         <p className="mt-1.5 text-label text-subtle">
-          For the token contract, the sale record{tee ? "," : " and"} {BID_SLOTS} bid slots
-          {tee ? " and the enclave key request" : ""}.
+          For the token contract, the sale record{tee || pool ? "," : " and"} {BID_SLOTS} bid slots
+          {tee ? (pool ? ", the enclave key request" : " and the enclave key request") : ""}
+          {pool ? " and the launch pool's storage on the exchange" : ""}.
         </p>
       )}
       {near && cost.state === "ready" && cost.was !== undefined && (
@@ -350,7 +380,7 @@ const Near = ({ children }: { children: React.ReactNode }) => (
  * transaction: it attaches NEAR, and the gas relayer never pays for a call
  * that does. Render inside a <dl>.
  */
-export function CostRows({ mode, tee }: { mode: "mock" | "near"; tee: boolean }) {
+export function CostRows({ mode, tee, pool = false }: { mode: "mock" | "near"; tee: boolean; pool?: boolean }) {
   const est = estimate(tee);
   return (
     <>
@@ -359,9 +389,12 @@ export function CostRows({ mode, tee }: { mode: "mock" | "near"; tee: boolean })
           <KV k="Token contract" v={<Near>{est.token}</Near>} />
           <KV k={`${BID_SLOTS} bid slots`} v={<Near>{est.slots}</Near>} />
           {tee && <KV k="Enclave key request" v={<Near>{est.key}</Near>} />}
+          {/* costs.rs LIQUIDITY_NEAR_RESERVE: about 0.0148 NEAR. */}
+          {pool && <KV k="Launch pool storage" v={<Near>~0.015</Near>} />}
         </>
       )}
       <KV k="Unused bid slots" v="Refunded at payout" mono={false} />
+      {pool && <KV k="Unused pool storage" v="Refunded at payout" mono={false} />}
       <KV k="Transaction fee" v="Paid by your wallet" mono={false} />
     </>
   );

@@ -219,7 +219,7 @@ export async function runScenarios(w: World, report: Report): Promise<void> {
     t.eq("the relayer answers on 127.0.0.1:8790 and is healthy", health, { ok: true, network: "sandbox", balance: "ok", budget_exhausted: false });
     const policy = await client.getRelayerPolicy();
     t.eq("client getRelayerPolicy: the relayer account and the USDC it takes", policy && [policy.relayerAccountId, policy.usdcContracts], [w.relayerAccount.id, [usdc]]);
-    t.eq("client getRelayerPolicy: the Fairground methods it pays for", policy?.methods, ["claim", "claim_proceeds", "clear_onchain", "reveal_bid", "trigger_refund_mode"]);
+    t.eq("client getRelayerPolicy: the Fairground methods it pays for", policy?.methods, ["claim", "claim_proceeds", "clear_onchain", "reveal_bid", "trigger_refund_mode", "seed_liquidity", "abandon_liquidity"]);
     t.eq("client capabilities", client.capabilities, { judgeMode: false, faucet: true, reset: false, relayer: true, simulated: false });
     t.eq("client expectedCodeHash = the pinned sealer hash", client.expectedCodeHash(), w.sealerHash);
   });

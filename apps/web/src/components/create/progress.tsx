@@ -6,7 +6,10 @@ import { cn } from "@/lib/cn";
 import { scrollToEl } from "@/lib/scroll";
 import { FIELD_ORDER, SECTION_OF, sectionDomId, type Derived, type FieldKey, type SectionId } from "./model";
 
-/** The six sections, in form order. */
+/**
+ * The sections, in form order. The launch pool comes last so that hiding it
+ * (a contract without launch liquidity) never renumbers the others.
+ */
 export const SECTIONS: { id: SectionId; n: number; label: string }[] = [
   { id: "token", n: 1, label: "Token" },
   { id: "allocation", n: 2, label: "Allocation" },
@@ -14,6 +17,7 @@ export const SECTIONS: { id: SectionId; n: number; label: string }[] = [
   { id: "window", n: 4, label: "Bid window" },
   { id: "limits", n: 5, label: "Limits" },
   { id: "mode", n: 6, label: "Bid privacy" },
+  { id: "pool", n: 7, label: "Launch pool" },
 ];
 
 /**
@@ -21,15 +25,19 @@ export const SECTIONS: { id: SectionId; n: number; label: string }[] = [
  * been told yet (untouched fields). `fix`: errors are on screen.
  */
 export type SectionStatus = { state: "ready" | "todo" | "fix"; count: number };
-export type SectionStatuses = Record<SectionId, SectionStatus>;
+/** Every section's status; `pool` only when the section shows. */
+export type SectionStatuses = Record<Exclude<SectionId, "pool">, SectionStatus> & { pool?: SectionStatus };
 
 /** Where each section stands. `shown(k)` says whether field k's error is on screen. */
 export function sectionStatuses(derived: Derived, shown: (k: FieldKey) => boolean): SectionStatuses {
-  const out = {} as SectionStatuses;
-  for (const s of SECTIONS) out[s.id] = { state: "ready", count: 0 };
+  const out = {} as Record<SectionId, SectionStatus>;
+  for (const s of SECTIONS) {
+    if (s.id !== "pool" || derived.poolAvailable) out[s.id] = { state: "ready", count: 0 };
+  }
   for (const k of FIELD_ORDER) {
     if (!derived.errors[k]) continue;
     const st = out[SECTION_OF[k]];
+    if (!st) continue;
     st.count += 1;
     if (shown(k)) st.state = "fix";
     else if (st.state === "ready") st.state = "todo";
@@ -47,17 +55,22 @@ const goTo = (id: SectionId) => (e: React.MouseEvent<HTMLAnchorElement>) => {
 };
 
 /**
- * The summary card's progress line: how many of the six sections are ready,
+ * The summary card's progress line: how many of the sections shown are ready,
  * a 4px bar, and a link to the first one that is not.
  */
 export function SectionProgress({ statuses, className }: { statuses: SectionStatuses; className?: string }) {
-  const ready = SECTIONS.filter((s) => statuses[s.id].state === "ready").length;
-  const next = SECTIONS.find((s) => statuses[s.id].state !== "ready");
+  const all = statuses as Partial<Record<SectionId, SectionStatus>>;
+  const shown = SECTIONS.flatMap((s) => {
+    const status = all[s.id];
+    return status ? [{ ...s, status }] : [];
+  });
+  const ready = shown.filter((s) => s.status.state === "ready").length;
+  const next = shown.find((s) => s.status.state !== "ready");
   return (
     <nav aria-label="Sections" className={cn("min-w-0", className)}>
       <div className="flex min-h-6 items-center justify-between gap-3">
         <span className="text-label text-muted" aria-live="polite">
-          <span className="num text-fg">{ready}</span> of {SECTIONS.length} ready
+          <span className="num text-fg">{ready}</span> of {shown.length} ready
         </span>
         {next && (
           <a
@@ -65,15 +78,15 @@ export function SectionProgress({ statuses, className }: { statuses: SectionStat
             onClick={goTo(next.id)}
             className={cn(
               "-my-2 inline-flex min-h-10 items-center gap-1 rounded-sm text-label transition-colors duration-[120ms] hover:text-fg",
-              statuses[next.id].state === "fix" ? "text-bad" : "text-muted",
+              next.status.state === "fix" ? "text-bad" : "text-muted",
             )}
           >
-            {statuses[next.id].state === "fix" ? "Fix" : "Next"}: {next.label}
+            {next.status.state === "fix" ? "Fix" : "Next"}: {next.label}
             <ArrowRight className="size-3.5" strokeWidth={1.75} aria-hidden />
           </a>
         )}
       </div>
-      <Progress value={ready} max={SECTIONS.length} label="Sections ready" className="mt-2" />
+      <Progress value={ready} max={shown.length} label="Sections ready" className="mt-2" />
     </nav>
   );
 }

@@ -47,7 +47,7 @@ describe("checkDelegate: accepted", () => {
   });
 
   it.each(FAIRGROUND_METHODS)("Fairground %s with no deposit", async (method) => {
-    expect(await check(toFairground(call(method)))).toBeNull();
+    expect(await check(toFairground(call(method, 0n, teraToGas(150))))).toBeNull();
   });
 
   it("a claim pushed for another bidder names that bidder", async () => {
@@ -58,6 +58,21 @@ describe("checkDelegate: accepted", () => {
 
   it("two actions within the gas cap", async () => {
     expect(await check(toFairground(call("claim", 0n, teraToGas(150)), call("claim", 0n, teraToGas(150))))).toBeNull();
+  });
+
+  it("allows creator payouts for distinct sales in one delegate", async () => {
+    const proceeds = (sale_id: string) => call("claim_proceeds", 0n, teraToGas(150), { sale_id });
+    expect(await check(toFairground(proceeds("fairt"), proceeds("fairt")))).toBe("bad_call_args");
+    expect(await check(toFairground(proceeds("fairt"), proceeds("other")))).toBeNull();
+  });
+
+  it.each(["seed_liquidity", "abandon_liquidity"])("enforces gas, receiver, arguments and zero deposit for %s", async (method) => {
+    const gas = teraToGas(150);
+    expect(await check(toFairground(call(method, 0n, gas - 1n)))).toBe("bad_call_args");
+    expect(await check(toFairground(call(method, 1n, gas)))).toBe("wrong_deposit");
+    expect(await check(toFairground(call(method, 0n, gas, { sale_id: "fairt", bidder: ALICE })))).toBe("bad_call_args");
+    expect(await check({ receiver: "other.test.near", actions: [call(method, 0n, gas)] })).toBe("receiver_not_allowed");
+    expect(await check(toFairground(call(method, 0n, gas), call("claim_proceeds", 0n, gas)))).toBe("bad_call_args");
   });
 
   it("clear_onchain with the 150 TGas the client attaches, exactly the default cap, and not one gas unit more", async () => {

@@ -6,6 +6,7 @@ import { Panel } from "@/components/ui/panel";
 import { KV } from "@/components/ui/stat";
 import { getClient } from "@/lib/client";
 import { dateTime, duration, priceStr, shortHash, tokenFull, tokenStr, usdcStr } from "@/lib/format";
+import { bpsPct } from "@/lib/liquidity";
 import type { Sale } from "@/lib/types";
 
 /** Rows of a ledger: 41px each, divided by hairlines. */
@@ -39,6 +40,7 @@ export function RulesPanel({ sale }: { sale: Sale }) {
   // "" when this deployment names no reference build: then there is nothing to compare with.
   const expected = client.expectedCodeHash();
   const codeMatches = !!expected && sale.sealerCodeHash === expected;
+  const pool = c.liquidity ?? null;
   const [open, setOpen] = useState(false);
 
   return (
@@ -57,6 +59,17 @@ export function RulesPanel({ sale }: { sale: Sale }) {
         <KV k="Bid window" v={duration(c.bidEnd - c.bidStart)} />
         <KV k="Bid privacy" v={tee ? "Sealed, an enclave clears" : "Commit-reveal, the contract clears"} mono={false} />
         {!tee && c.revealWindowMs !== undefined && <KV k="Reveal window" v={duration(c.revealWindowMs)} />}
+        {pool && (
+          <KV
+            k="Launch pool"
+            v={
+              <>
+                <span className="num">{bpsPct(pool.raiseShareBps)}</span> of the raise, opens at the clearing price
+              </>
+            }
+            mono={false}
+          />
+        )}
         {tee && (
           <>
             <KV k="Enclave code hash" v={<span title={sale.sealerCodeHash}>{shortHash(sale.sealerCodeHash, 6)}</span>} />
@@ -94,8 +107,23 @@ export function RulesPanel({ sale }: { sale: Sale }) {
             <KV k="Decimals" v={c.decimals} />
             <KV k="Total supply" v={tok(c.totalSupply)} />
             <KV k="Creator allocation" v={tok(c.creatorAllocation)} />
-            <KV k="LP reserve" v={tok(c.lpReserve)} />
+            <KV k={pool ? "Launch pool reserve" : "LP reserve"} v={tok(c.lpReserve)} />
           </Group>
+          {pool && (
+            <Group title="Launch pool">
+              <KV k="Share of the raise" v={bpsPct(pool.raiseShareBps)} />
+              <KV k="Tokens reserved" v={tok(pool.poolTokens)} />
+              <KV k="Pool fee" v={bpsPct(pool.feeBps)} />
+              <KV k="Exchange" v={<span className="break-all">{pool.dex}</span>} />
+              <KV k="Opens at" v="The clearing price" mono={false} />
+              <KV k="Reserve the pool does not take" v="Burned" mono={false} />
+              <KV k="Sale tokens" v="Locked until the pool is seeded" mono={false} />
+              <KV k="LP shares" v="Kept by the sale contract" mono={false} />
+              <KV k="Time to seed it" v={duration(c.settleTimeoutMs)} />
+              <KV k="Not seeded in time" v="Anyone can abandon it" mono={false} />
+              <KV k="Abandoned pool" v="USDC to the creator, tokens burned" mono={false} />
+            </Group>
+          )}
           <Group title="Bid window">
             <KV k="Opens" v={<span suppressHydrationWarning>{dateTime(c.bidStart)}</span>} />
             <KV k="Closes" v={<span suppressHydrationWarning>{dateTime(c.bidEnd)}</span>} />

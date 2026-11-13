@@ -19,6 +19,15 @@ const EVENT_TONE: Partial<Record<SaleEventKind, string>> = {
   refund_mode: "text-bad",
 };
 
+const POOL_TITLE: Record<string, string> = {
+  liquidity_seeded: "Launch pool seeded.",
+  liquidity_abandoned: "Launch pool abandoned.",
+  liquidity_step_failed: "Launch pool step failed.",
+  liquidity_step_lost: "Launch pool step needs verification.",
+  liquidity_reconciled: "Launch pool state checked.",
+  liquidity_withdrawn: "Launch pool funds withdrawn.",
+};
+
 /** Runs of this many claims or more collapse into one row. */
 const GROUP_MIN = 3;
 
@@ -173,6 +182,8 @@ export function EventLog({
  * too coarse for (a reveal is a "bid", a creator payout a "claimed").
  */
 function titleOf(e: SaleEvent): string {
+  const poolTitle = e.detail ? POOL_TITLE[e.detail] : undefined;
+  if (poolTitle) return poolTitle;
   if (e.note) return e.note;
   if (e.detail === "bid_revealed") return "Bid revealed.";
   if (e.detail === "proceeds_claimed") return "Creator paid out.";
@@ -223,6 +234,9 @@ function Row({ e, now, index, nested }: { e: SaleEvent; now: number; index: numb
         {/* The time sits on the right where the card is wide (the sale page). */}
         <span className="hidden shrink-0 text-label whitespace-nowrap text-subtle @md:inline">{when}</span>
       </div>
+      {e.detail && POOL_TITLE[e.detail] && e.note && (
+        <p className="mt-0.5 text-label text-muted">{e.note}</p>
+      )}
       {/* In a narrow card (the 340px column of the result page) it joins this line, so the note keeps the row. */}
       <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-label text-subtle">
         {e.account && <span>{shortAccount(e.account, 24)}</span>}

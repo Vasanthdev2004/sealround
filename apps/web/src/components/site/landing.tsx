@@ -374,8 +374,8 @@ function Verify() {
           <ShieldCheck className="size-6 text-accent-bright" strokeWidth={1.6} aria-hidden />
           <h2 className="mt-4 text-h1 text-fg">Don&apos;t trust the result. Check it.</h2>
           <p className="mt-4 text-lead text-muted">
-            Every result page re-runs five checks in your browser: the attested enclave run, its code hash against a
-            reproducible build, the sealer key, the bid-set hash and the contract&apos;s own checks.
+            On NEAR, the result page shows the checks recorded by the contract. For enclave-cleared sales, you can
+            compare OutLayer&apos;s attestation with the hashes recorded on NEAR.
           </p>
           <ul className="mt-6 flex flex-col gap-2.5 text-small text-muted">
             {[

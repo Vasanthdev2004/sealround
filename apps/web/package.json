@@ -10,7 +10,9 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "e2e:sandbox": "tsx scripts/e2e/run.ts",
-    "live-bot": "tsx scripts/live-bot/run.ts"
+    "live-bot": "tsx scripts/live-bot/run.ts",
+    "mcp": "tsx scripts/mcp/server.ts",
+    "verify-sale": "tsx scripts/verify-sale.ts"
   },
   "dependencies": {
     "@fairground/arena": "workspace:*",
@@ -28,6 +30,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@tailwindcss/turbopack": "^4",
     "@types/libsodium-wrappers": "^0.8.2",
     "@types/node": "^20",
@@ -38,6 +41,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "zod": "4.6.7"
   }
 }

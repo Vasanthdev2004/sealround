@@ -5,5 +5,6 @@ mod commit_reveal;
 mod failures;
 mod gas;
 mod guards;
+mod liquidity;
 mod rejections;
 mod tee;

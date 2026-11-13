@@ -37,6 +37,7 @@ import {
   checkAccessKey,
   checkDelegate,
   checkValidity,
+  needsSaleReservation,
   totalDeposit,
   totalGas,
 } from "./policy.ts";
@@ -83,6 +84,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   const { policy, limits } = config;
   /** Senders with a relay in flight: one at a time, so a replayed or reordered delegate cannot make the relayer pay twice. */
   const inFlight = new Set<string>();
+  /** Creator payouts and pool steps can change the same sale across senders. */
+  const salesInFlight = new Set<string>();
   const head = cached(() => chain.head(), HEAD_CACHE_MS);
   const relayerBalance = cached(() => chain.relayerBalance(), BALANCE_CACHE_MS);
   const app = new Hono<Env>();
@@ -183,8 +186,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // replay) was refused above, so nothing they send can use up the sender's quota.
     c.set("account", senderId);
     if (inFlight.has(senderId)) return refuse(c, "sender_busy");
+    const reservedSales = allowed.calls.flatMap((call) =>
+      call.kind === "fairground" && needsSaleReservation(call.method) ? [call.saleId] : [],
+    );
+    if (reservedSales.some((saleId) => salesInFlight.has(saleId))) return refuse(c, "wrong_phase");
 
     inFlight.add(senderId);
+    for (const saleId of reservedSales) salesInFlight.add(saleId);
+    const release = () => {
+      inFlight.delete(senderId);
+      for (const saleId of reservedSales) salesInFlight.delete(saleId);
+    };
     let sent = false;
     try {
       const callProblem = await checkOnChain(allowed.calls, {
@@ -209,7 +221,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         throw error;
       }
       sent = true;
-      void settleWhenDone(submission, budget, reservation, deposits).finally(() => inFlight.delete(senderId));
+      void settleWhenDone(submission, budget, reservation, deposits).finally(release);
 
       const { txHash, outcome } = submission;
       if (!outcome) {
@@ -221,7 +233,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       logLine(c, { decision: "relayed", tx_hash: txHash, status, cost: summary.relayer_cost });
       return c.json<RelayResponse>({ tx_hash: txHash, status, outcome: summary });
     } finally {
-      if (!sent) inFlight.delete(senderId);
+      if (!sent) release();
     }
   });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState } from "react";
+import { BidSetPanel } from "@/components/result/bid-inclusion";
 import { effectiveFills } from "@/components/result/compute";
 import { EventLog } from "@/components/sale-common/event-log";
 import { SaleHeader } from "@/components/sale-common/sale-header";
@@ -155,6 +156,8 @@ function SaleLoaded({ sale }: { sale: Sale }) {
 
         <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-2">
           <BidTable sale={sale} account={account} />
+          {/* Once closed: anyone can recompute the frozen bid set and find a bid in it. */}
+          {sale.bidSetHash !== null && <BidSetPanel sale={sale} />}
           <EventLog saleId={sale.id} />
         </div>
       </div>

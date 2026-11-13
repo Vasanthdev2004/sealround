@@ -12,7 +12,7 @@ async fn init_and_private_methods_are_guarded() -> Result<()> {
     let stranger = env.account("stranger", 20).await?;
 
     // Fairground: initialised once, and only by its own account.
-    let config = fairground_config(env.outlayer.id(), &[env.usdc.id()]);
+    let config = fairground_config(env.outlayer.id(), &[env.usdc.id()], None);
     let again = env
         .fairground
         .call("new")

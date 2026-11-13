@@ -17,9 +17,11 @@ import { KV } from "@/components/ui/stat";
 import { getClient } from "@/lib/client";
 import { priceStr, shortAccount, tokenFull, usdcStr } from "@/lib/format";
 import { useAction } from "@/lib/hooks";
+import { locksTokens } from "@/lib/liquidity";
 import type { ClaimResult, Sale, SaleResult } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { fillStatus, isPenalized, penaltyOf, STATUS_BADGE, voidSentence, type ResultFill } from "./compute";
+import { LiquidityAction } from "./pool-panel";
 
 /**
  * The connected account's outcome and the one main action on this page:
@@ -102,12 +104,18 @@ function Mine({ sale, result, fill, account }: { sale: Sale; result: SaleResult;
     if (r) setReceipt(r);
   };
 
+  const hasTokens = fill.tokens > 0n;
+  // Launch pool not seeded yet: the sale tokens stay in the contract and a claim pays the unspent USDC only.
+  const pool = result.liquidity ?? null;
+  const locked = hasTokens && locksTokens(pool);
   const claimTx = receipt?.txHash ?? fill.claimTx;
-  const claimed = fill.claimed || !!receipt;
+  const claimed = fill.claimed || (!!receipt && !locked);
+  // The unspent USDC went out earlier, in a claim made while the tokens were locked.
+  const refundPaid = !!fill.refundClaimed || (locked && !!receipt);
   const failed = result.status === "failed";
   const penalty = penaltyOf(fill);
-  const hasTokens = fill.tokens > 0n;
   const hasRefund = fill.refund > 0n;
+  const refundDue = hasRefund && !refundPaid;
   // The last claim may still land: no second one until the chain has spoken.
   const inDoubt = !!claim.errorDetails?.maybeSubmitted;
 
@@ -147,7 +155,7 @@ function Mine({ sale, result, fill, account }: { sale: Sale; result: SaleResult;
         <KV k="Deposit" v={`${usdcStr(fill.deposit, 6)} USDC`} />
         {hasTokens && <KV k={`Spent at ${priceStr(result.clearingPrice)}`} v={`${usdcStr(fill.spent, 6)} USDC`} />}
         {penalty > 0n && <KV k="Penalty, 1 %" v={`${usdcStr(penalty, 6)} USDC`} />}
-        {hasTokens && <KV k="Refund" v={refund} />}
+        {hasTokens && <KV k={refundPaid ? "Refund, paid" : "Refund"} v={refund} />}
       </dl>
 
       {note && <p className="mt-3 text-small text-muted">{note}</p>}
@@ -161,12 +169,52 @@ function Mine({ sale, result, fill, account }: { sale: Sale; result: SaleResult;
             </div>
             <p className="mt-1 text-small text-muted">
               <span className="num text-fg">
-                {hasTokens && hasRefund ? `${tokens} and ${refund}` : hasTokens ? tokens : refund}
+                {hasTokens && refundDue ? `${tokens} and ${refund}` : hasTokens ? tokens : refund}
               </span>{" "}
               sent to your account.
             </p>
             {claimTx && <TxLink hash={claimTx} prefix="claim tx" className="mt-2" />}
             <RelayLine relay={receipt?.relay} className="mt-2" />
+          </div>
+        ) : locked && pool ? (
+          <div className="flex flex-col gap-2.5">
+            {refundPaid ? (
+              <div className="anim-fade" role="status">
+                <div className="flex items-center gap-2 text-small font-[510] text-fg">
+                  <span className="size-1.5 shrink-0 rounded-full bg-ok" aria-hidden />
+                  Refund claimed
+                </div>
+                <p className="mt-1 text-small text-muted">
+                  <span className="num text-fg">{refund}</span> sent to your account.
+                </p>
+                {receipt?.txHash && <TxLink hash={receipt.txHash} prefix="claim tx" className="mt-2" />}
+                <RelayLine relay={receipt?.relay} className="mt-2" />
+              </div>
+            ) : (
+              hasRefund && (
+                <>
+                  <PaidFallbackPrompt fallback={fallback} what="the claim" />
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    className="w-full"
+                    loading={claim.pending}
+                    disabled={inDoubt}
+                    onClick={onClaim}
+                  >
+                    {inDoubt ? "Checking the chain" : "Claim refund now"}
+                  </Button>
+                  {claim.errorDetails ? (
+                    <ActionError info={claim.errorDetails} what="claim" />
+                  ) : (
+                    <GasNote what="The claim" />
+                  )}
+                </>
+              )
+            )}
+            <p className="text-small text-muted">Your tokens unlock once the launch pool is seeded. Anyone can seed it.</p>
+            <LiquidityAction sale={sale} liquidity={pool} kind="seed" receipt={false} nextStep />
+            <LiquidityAction sale={sale} liquidity={pool} kind="abandon" receipt={false} />
           </div>
         ) : (
           <div className="flex flex-col gap-2.5">
@@ -181,7 +229,7 @@ function Mine({ sale, result, fill, account }: { sale: Sale; result: SaleResult;
             >
               {inDoubt
                 ? "Checking the chain"
-                : hasTokens && hasRefund
+                : hasTokens && refundDue
                   ? "Claim tokens and refund"
                   : hasTokens
                     ? "Claim tokens"
