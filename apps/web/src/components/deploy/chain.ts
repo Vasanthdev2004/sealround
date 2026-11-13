@@ -17,6 +17,7 @@ export const TESTNET = {
 };
 
 /** contracts/res/fairground.wasm, 616,196 bytes (AGENTS.md "Pinned hashes"). */
+export const PINNED_CONTRACT_BYTES = 616_196;
 export const PINNED_CONTRACT_SHA256 = "e93c42759bd63edfba428cf16f043bdad1ae2f3a54d45ca8f9f41e74fe65a941";
 /** enclave/res/fairground_sealer.wasm, the job the contract pins. */
 export const PINNED_SEALER_SHA256 = "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb";

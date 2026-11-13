@@ -148,15 +148,22 @@ export function SwapRoute() {
   );
 }
 
+/**
+ * The clearing run of testnet sale smoke-11120830 on fairground.itzbeast.testnet, as
+ * `pnpm --filter web verify-sale` reported it on 13 Nov 2026. Hashes are shortened.
+ */
 const CHECKS = [
-  { label: "Attested run's hashes match what the contract stored", detail: "attested output f57440…1edbaa = on chain f57440…1edbaa" },
-  { label: "Enclave code hash equals the reproducible build", detail: "attested f8408a87…d8cb = public build f8408a87…d8cb" },
-  { label: "Sealer public key on chain matches the attestation", detail: "on chain 86c543…2e492a = attested 86c543…2e492a" },
-  { label: "Result's bid-set hash equals the stored hash", detail: "stored at close 6949ea…4e90c3 = reported 6949ea…4e90c3" },
+  { label: "Attested build is the sealer the contract pins", detail: "attested f8408a87…d8cb = pinned f8408a87…d8cb" },
+  { label: "Enclave measurements are approved on chain", detail: "worker.outlayer.testnet: approved" },
+  { label: "The TDX quote commits to this run", detail: "task hash ce168b…ebe1 = report data ce168b…ebe1" },
+  { label: "Input hash matches the request on chain", detail: "on chain f0d83a…b285 = attested f0d83a…b285" },
+  { label: "Output hash matches what the contract received", detail: "received 200b46…ee3d = attested 200b46…ee3d" },
+  { label: "The request came from the sale contract", detail: "fairground.itzbeast.testnet, for smoke-11120830" },
+  { label: "Bid set recomputed from the chain", detail: "recomputed 4019e5…5608 = frozen 4019e5…5608" },
   { label: "All contract-side checks passed", detail: "14 of 14 passed" },
 ];
 
-/** An illustrative run of the verification checks for an enclave-cleared sale. */
+/** A replay of the checks on a real testnet sale (see CHECKS). */
 export function ChecksDemo() {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, amount: 0.4 });
@@ -184,9 +191,9 @@ export function ChecksDemo() {
     <div ref={ref} className="panel overflow-hidden">
       <div className="flex items-center justify-between gap-4 px-5 pt-[18px] pb-2">
         <div>
-          <div className="text-h3 text-fg">Verification example</div>
+          <div className="text-h3 text-fg">Testnet sale smoke-11120830</div>
           <p className="mt-0.5 text-label text-subtle" aria-live="polite">
-            <span className="num">{passed}</span> of 5 checks passed
+            <span className="num">{passed}</span> of {CHECKS.length} checks passed on the clearing run
           </p>
         </div>
         <Button

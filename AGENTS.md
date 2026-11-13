@@ -56,8 +56,11 @@ Run the ones that cover what you touched before you hand work back.
 | Web | in `apps/web`: `npx tsc --noEmit --incremental false`, `npx eslint src scripts`, `npx vitest run`, `pnpm build` |
 | End to end | `pnpm --filter web e2e:sandbox` |
 
-Last full pass (2026-11-10): all green. 178 Rust unit, 17 integration, 1028
-clearing TS, 386 relayer, 263 relayer client, 103 web, 21/21 e2e scenarios.
+Last full pass (2026-11-13): all green. 201 Rust unit (1 ignored), 20 enclave
+job native, 1032 clearing TS, 27 arena, 411 relayer, 269 relayer client, 232
+web, 21/21 e2e scenarios (483/483 checks), MCP sandbox 13/13 (90/90), live-bot
+sandbox 8/8 (69/69), `pnpm check` 13/13. Contract sandbox integration (26) last
+ran 2026-11-12, not rerun.
 
 ## Rules that bite
 

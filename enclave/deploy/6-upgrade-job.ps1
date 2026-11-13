@@ -60,7 +60,7 @@ if (-not $Wasm) { $Wasm = Get-DefaultJobWasm }
 
 $net = Get-DeployNetwork $Network
 Assert-AccountId $Account '-Account'
-if (-not $OldContract) { $OldContract = "fairground.$Account" }
+if (-not $OldContract) { $OldContract = "sealround.$Account" }
 Assert-AccountId $OldContract '-OldContract'
 Assert-AccountId $NewContract '-NewContract'
 if ($NewContract -eq $OldContract) { throw 'The new build needs a new contract account: a deployed contract cannot change its pinned build.' }

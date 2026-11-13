@@ -26,7 +26,7 @@ account; unused bid slots come back through claim_proceeds.
 The creator: signs create_sale and pays for it.
 
 .PARAMETER Contract
-Default fairground.<Account>.
+Default sealround.<Account>.
 
 .PARAMETER QuoteToken
 Default: the first allowed quote token in templates\new-args.<network>.json.
@@ -54,7 +54,7 @@ param(
 
 $net = Get-DeployNetwork $Network
 Assert-AccountId $Account '-Account'
-if (-not $Contract) { $Contract = "fairground.$Account" }
+if (-not $Contract) { $Contract = "sealround.$Account" }
 Assert-AccountId $Contract '-Contract'
 if (-not $SaleId) { $SaleId = 'smoke-' + [DateTime]::UtcNow.ToString('MMddHHmm') }
 if ($SaleId -cnotmatch '^[a-z0-9]([a-z0-9_-]{0,30}[a-z0-9])?$') { throw "-SaleId '$SaleId' breaks the sale id rule." }

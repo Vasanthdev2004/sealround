@@ -35,7 +35,7 @@ delete` asks no confirmation. Copy the printed commands; do not retype them.
 
 .PARAMETER Contract
 The Fairground contract account that will call OutLayer. Default:
-fairground.<Account>.
+sealround.<Account>.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -File enclave\deploy\3-master-secret.ps1 -Account alice.testnet
@@ -57,7 +57,7 @@ if (-not $Wasm) { $Wasm = Get-DefaultJobWasm }
 
 $net = Get-DeployNetwork $Network
 Assert-AccountId $Account '-Account'
-if (-not $Contract) { $Contract = "fairground.$Account" }
+if (-not $Contract) { $Contract = "sealround.$Account" }
 Assert-AccountId $Contract '-Contract'
 if ($Profile -cnotmatch '^[A-Za-z0-9_-]{1,64}$') { throw "-Profile must be 1-64 letters, digits, '-' or '_'." }
 $sha = Get-JobSha256 -Wasm $Wasm -Sha256 $Sha256

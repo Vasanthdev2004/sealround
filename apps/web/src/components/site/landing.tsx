@@ -374,8 +374,9 @@ function Verify() {
           <ShieldCheck className="size-6 text-accent-bright" strokeWidth={1.6} aria-hidden />
           <h2 className="mt-4 text-h1 text-fg">Don&apos;t trust the result. Check it.</h2>
           <p className="mt-4 text-lead text-muted">
-            On NEAR, the result page shows the checks recorded by the contract. For enclave-cleared sales, you can
-            compare OutLayer&apos;s attestation with the hashes recorded on NEAR.
+            On NEAR, the result page checks OutLayer&apos;s Intel TDX attestation in your browser: the enclave build, its
+            measurements, the input and output hashes, and the bid set the contract froze. The same checks run from the
+            command line with <span className="font-mono text-fg">verify-sale</span>.
           </p>
           <ul className="mt-6 flex flex-col gap-2.5 text-small text-muted">
             {[

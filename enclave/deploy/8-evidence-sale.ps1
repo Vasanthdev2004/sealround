@@ -284,38 +284,78 @@ switch ($Phase) {
     'Close' {
         $saleIdArgs = New-JsonFile -Network $Network -OutName "sale-id-$($script:Sale).json" -Object ([ordered]@{ sale_id = $script:Sale })
         $end = [long]$state.bid_end
-        Add-Check $plan 'Wait for the end of bidding' { Wait-Until ($end + 5L * 1000000000L) 'Until bidding ends' }
-        Add-Command $plan 'Close the sale: the frozen bid set goes to the enclave' 'near' `
-            @('contract', 'call-function', 'as-transaction', $Contract, 'close_sale', 'file-args', $saleIdArgs,
-              'prepaid-gas', '300 Tgas', 'attached-deposit', '0.02 NEAR', 'sign-as', $Account,
-              'network-config', $net.nearCliNetwork, 'sign-with-keychain', 'send') -Signs `
-            -Expect 'Return value "settled": sale_closed, clearing_requested, OutLayer execution_completed, sale_settled with clearing_price "2000".'
+
+        # The phase can be run again after a failed step: read what is already done
+        # (read-only) and leave those steps out of the plan.
+        $now = $null
+        try {
+            $now = Invoke-NearView -RpcUrl $net.rpcUrl -Account $Contract -Method 'get_result' -ArgsJson ([IO.File]::ReadAllText($saleIdArgs))
+        } catch {
+            Write-Host "Could not read the sale's result ($($_.Exception.Message)); planning every step."
+        }
+        $closed = $now -and @('settled', 'failed') -contains [string]$now.status
+        $seeded = $now -and $now.liquidity -and [string]$now.liquidity.status -eq 'seeded'
+        $proceedsDone = $now -and $now.proceeds -and $now.proceeds.raise_paid -and $now.proceeds.allocation_paid -and
+            $now.proceeds.unsold_burned -and $now.proceeds.reserve_returned
+
+        if ($closed) {
+            Add-Note $plan "Already closed: the sale is $($now.status). Skipping close_sale."
+        } else {
+            Add-Check $plan 'Wait for the end of bidding' { Wait-Until ($end + 5L * 1000000000L) 'Until bidding ends' }
+            Add-Command $plan 'Close the sale: the frozen bid set goes to the enclave' 'near' `
+                @('contract', 'call-function', 'as-transaction', $Contract, 'close_sale', 'file-args', $saleIdArgs,
+                  'prepaid-gas', '300 Tgas', 'attached-deposit', '0.02 NEAR', 'sign-as', $Account,
+                  'network-config', $net.nearCliNetwork, 'sign-with-keychain', 'send') -Signs `
+                -Expect 'Return value "settled": sale_closed, clearing_requested, OutLayer execution_completed, sale_settled with clearing_price "2000".'
+        }
         Add-Check $plan 'Read the result' {
             $result = Invoke-NearView -RpcUrl $net.rpcUrl -Account $Contract -Method 'get_result' -ArgsJson ([IO.File]::ReadAllText($saleIdArgs))
+            $failed = @($result.failed_checks)
             Write-Host ("status {0}, clearing price {1} USDC, raised {2} USDC, {3} valid, {4} invalid, failed checks: {5}" -f `
                 $result.status, ([decimal]$result.clearing_price / $usdc), ([decimal]$result.total_raised / $usdc),
-                $result.n_valid, $result.n_invalid, (@($result.failed_checks) -join ', '))
-            if ($result.status -ne 'settled') { throw "The sale is $($result.status), not settled. Run close_sale again to retry a failed run." }
+                $result.n_valid, $result.n_invalid, $(if ($failed.Count) { $failed -join ', ' } else { 'none' }))
+            if ($result.status -ne 'settled') {
+                throw "The sale is $($result.status), not settled. If it is still clearing, wait and run this phase again. If it failed, every bidder gets a refund: run this phase again to claim them."
+            }
         }
-        Add-Command $plan 'Seed the Rhea pool at the clearing price (anyone may call it)' 'near' `
-            @('contract', 'call-function', 'as-transaction', $Contract, 'seed_liquidity', 'file-args', $saleIdArgs,
-              'prepaid-gas', '300 Tgas', 'attached-deposit', '0 NEAR', 'sign-as', $Account,
-              'network-config', $net.nearCliNetwork, 'sign-with-keychain', 'send') -Signs `
-            -Expect 'liquidity_seeded with the pool id, 4 USDC and 2,000 NOSNIPE. If a step failed, run this phase again from here.'
-        Add-Check $plan 'Check the pool' {
-            $result = Invoke-NearView -RpcUrl $net.rpcUrl -Account $Contract -Method 'get_result' -ArgsJson ([IO.File]::ReadAllText($saleIdArgs))
-            $liq = $result.liquidity
-            Write-Host "Liquidity: $($liq.status), pool $($liq.pool_id) on $($liq.dex), LP shares $($liq.shares)"
-            if ($liq.status -ne 'seeded') { throw "The pool is $($liq.status) (next step $($liq.next_step)). Call seed_liquidity again." }
+        if ($seeded) {
+            Add-Note $plan "Already seeded: pool $($now.liquidity.pool_id). Skipping seed_liquidity."
+        } else {
+            Add-Command $plan 'Seed the Rhea pool at the clearing price (anyone may call it)' 'near' `
+                @('contract', 'call-function', 'as-transaction', $Contract, 'seed_liquidity', 'file-args', $saleIdArgs,
+                  'prepaid-gas', '300 Tgas', 'attached-deposit', '0 NEAR', 'sign-as', $Account,
+                  'network-config', $net.nearCliNetwork, 'sign-with-keychain', 'send') -Signs `
+                -Expect 'liquidity_seeded with the pool id, 4 USDC and 2,000 NOSNIPE. If a step failed, run this phase again: done steps are skipped.'
+            Add-Check $plan 'Check the pool' {
+                $result = Invoke-NearView -RpcUrl $net.rpcUrl -Account $Contract -Method 'get_result' -ArgsJson ([IO.File]::ReadAllText($saleIdArgs))
+                $liq = $result.liquidity
+                Write-Host "Liquidity: $($liq.status), pool $($liq.pool_id) on $($liq.dex), LP shares $($liq.shares)"
+                if ($liq.status -ne 'seeded') { throw "The pool is $($liq.status) (next step $($liq.next_step)). Run this phase again to call seed_liquidity again." }
+            }
         }
         foreach ($name in $bidders.Keys) {
+            $bid = $null
+            if ($closed) {
+                try {
+                    $bid = Invoke-NearView -RpcUrl $net.rpcUrl -Account $Contract -Method 'get_bid' `
+                        -ArgsJson (ConvertTo-Json -Compress @{ sale_id = $script:Sale; bidder = (Get-BidderId $name) })
+                } catch { $bid = $null }
+            }
+            if ($bid -and $bid.claimed) {
+                Add-Note $plan "$name has claimed already. Skipping."
+                continue
+            }
             Add-Command $plan "$name claims (tokens and refund) and checks its price" 'pnpm' `
                 (Get-BotArguments 'report' @('--key-file', (Get-KeyFile $name), '--claim', '--direct')) -Signs
         }
-        Add-Command $plan 'The creator claims the raise, the allocation and the NEAR reserve; unsold tokens burn' 'near' `
-            @('contract', 'call-function', 'as-transaction', $Contract, 'claim_proceeds', 'file-args', $saleIdArgs,
-              'prepaid-gas', '300 Tgas', 'attached-deposit', '0 NEAR', 'sign-as', $Account,
-              'network-config', $net.nearCliNetwork, 'sign-with-keychain', 'send') -Signs
+        if ($proceedsDone) {
+            Add-Note $plan 'The creator has claimed the proceeds already. Skipping claim_proceeds.'
+        } else {
+            Add-Command $plan 'The creator claims the raise, the allocation and the NEAR reserve; unsold tokens burn' 'near' `
+                @('contract', 'call-function', 'as-transaction', $Contract, 'claim_proceeds', 'file-args', $saleIdArgs,
+                  'prepaid-gas', '300 Tgas', 'attached-deposit', '0 NEAR', 'sign-as', $Account,
+                  'network-config', $net.nearCliNetwork, 'sign-with-keychain', 'send') -Signs
+        }
         Add-Note $plan 'Next: -Phase Report (read-only) prints the evidence for README section 7'
     }
 
@@ -326,13 +366,21 @@ switch ($Phase) {
             $result = Invoke-NearView -RpcUrl $net.rpcUrl -Account $Contract -Method 'get_result' -ArgsJson ([IO.File]::ReadAllText($saleIdArgs))
             $fills = Invoke-NearView -RpcUrl $net.rpcUrl -Account $Contract -Method 'get_fills' -ArgsJson (ConvertTo-Json -Compress @{ sale_id = $script:Sale; from_index = 0; limit = 50 })
             $explorer = 'https://testnet.nearblocks.io/address/'
+            $keysBody = [ordered]@{
+                jsonrpc = '2.0'; id = 'fairground'; method = 'query'
+                params = [ordered]@{ request_type = 'view_access_key_list'; finality = 'final'; account_id = $Contract }
+            } | ConvertTo-Json -Depth 4 -Compress
+            $keyCount = @((Invoke-RestMethod -Method Post -Uri $net.rpcUrl -ContentType 'application/json' -Body $keysBody).result.keys).Count
+            $keyNote = if ($keyCount -eq 0) { 'no access keys: locked' } else { "$keyCount access key(s): not locked yet (LAUNCH.md T8)" }
+            $failedChecks = @($result.failed_checks)
+            $failedText = if ($failedChecks.Count) { $failedChecks -join ', ' } else { 'none' }
             $lines = @(
                 "### Testnet evidence sale: $($script:Sale)",
                 '',
-                "- Contract: [$Contract]($explorer$Contract) (no access keys; check with ``near account list-keys $Contract network-config testnet now``)",
+                "- Contract: [$Contract]($explorer$Contract) ($keyNote; check with ``near account list-keys $Contract network-config testnet now``)",
                 "- Token: [$($view.token)]($explorer$($view.token)) (NOSNIPE, fixed supply)",
                 "- Bidding: $(Format-Ns ([long]$view.bid_start)) to $(Format-Ns ([long]$view.bid_end))",
-                "- Clearing price: $([decimal]$result.clearing_price / $usdc) USDC per token (floor $([decimal]$view.floor_price / $usdc)); raised $([decimal]$result.total_raised / $usdc) USDC; $($result.n_valid) valid bids, $($result.n_invalid) voided; failed checks: none" + $(if (@($result.failed_checks).Count) { ' (' + (@($result.failed_checks) -join ', ') + ')' } else { '' }),
+                "- Clearing price: $([decimal]$result.clearing_price / $usdc) USDC per token (floor $([decimal]$view.floor_price / $usdc)); raised $([decimal]$result.total_raised / $usdc) USDC; $($result.n_valid) valid bids, $($result.n_invalid) voided; failed checks: $failedText",
                 ''
             )
             if ($AppUrl) { $lines += "- Result page with the Verified panel: $AppUrl/sale/$($script:Sale)/result"; $lines += '' }

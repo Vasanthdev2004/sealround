@@ -96,7 +96,7 @@ param(
 
 $net = Get-DeployNetwork $Network
 Assert-AccountId $Account '-Account'
-if (-not $Contract) { $Contract = "fairground.$Account" }
+if (-not $Contract) { $Contract = "sealround.$Account" }
 Assert-AccountId $Contract '-Contract'
 if (-not $Bidder) { $Bidder = $Account }
 Assert-AccountId $Bidder '-Bidder'

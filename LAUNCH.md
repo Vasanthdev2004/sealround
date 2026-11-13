@@ -25,12 +25,13 @@ Contents: [placeholders](#placeholders) ·
 
 | Placeholder | What it is | Example |
 | --- | --- | --- |
-| `<owner>` | your account name without `.testnet` / `.near`. Keep it short: each sale's token lives at `<sale id>.fairground.<owner>.testnet`, at most 64 characters | `alice` |
+| `<owner>` | your account name without `.testnet` / `.near`. Keep it short: each sale's token lives at `<sale id>.sealround.<owner>.testnet`, at most 64 characters | `alice` |
 | `<relayer>.testnet` | a separate testnet account that only relays | `sealround-relayer-alice.testnet` |
 | `<bidder>` | a testnet account in a browser wallet that signs delegates (HOT, Meteor or Intear) | `alice-bids.testnet` |
 | `<relayer-app-testnet>`, `<relayer-app-mainnet>` | Fly.io app names (globally unique) | `sealround-relayer-testnet` |
 | `<web-demo>`, `<web-testnet>`, `<web-pilot>` | Vercel project names; each serves at `https://<name>.vercel.app` | `sealround`, `sealround-testnet`, `sealround-pilot` |
 | `<sale id>` | the smoke sale's id, printed by `5-smoke-sale.ps1` | `smoke-11111530` |
+| `<evidence sale id>` | the evidence sale's id, printed by `8-evidence-sale.ps1 -Phase Create` and kept in `enclave\deploy\out\testnet\evidence-sale.json` | `nosnipe-11131200` |
 | `<tx hash>` | a transaction hash from near CLI's output | |
 | `<rpc-url>` | a mainnet JSON-RPC URL from a provider (the public `rpc.mainnet.near.org` is rate limited) | |
 | `<pilot start>` | the announced pilot start, UTC, at least a day ahead | `2026-11-13T12:00:00Z` |
@@ -41,15 +42,17 @@ mainnet values in part 6):
 ```powershell
 $NET = 'testnet'                      # mainnet: 'mainnet'
 $ME  = '<owner>.testnet'              # mainnet: '<owner>.near'
-$FG  = "fairground.$ME"               # the contract account; 4-deploy-contract.ps1 creates it
+$FG  = "sealround.$ME"                # the contract account (T5); mainnet: "fairground.$ME" (part 6)
 $SHA = (Get-FileHash enclave\res\fairground_sealer.wasm -Algorithm SHA256).Hash.ToLower()
 $env:OUTLAYER_NETWORK = $NET
 $out = Join-Path $PWD "enclave\deploy\out\$NET"
 ```
 
-Keep the default contract name `fairground.<owner>`. Another name works, but
-then every script needs the same `-Contract` value, and the master secret
-(step T4) must name it.
+The testnet contract is `sealround.<owner>.testnet`. The `/deploy` page (T5)
+and `8-evidence-sale.ps1` default to that name, and the hosted relayer and web
+app (parts 3 and 4) point at it. Scripts 3 to 7 default to
+`fairground.<owner>`, so every line below passes `-Contract $FG`. The master
+secret must name the same account (T4, or T4b when the account changes).
 
 Suggested timeline (from the spec's plan):
 
@@ -101,9 +104,10 @@ shows the real balance.
 
 | Account | Network | Role | Fund | Why that amount |
 | --- | --- | --- | --- | --- |
-| `<owner>.testnet` | testnet | owner of the OutLayer project `<owner>.testnet/fairground-sealer` and of its secret row; parent of the contract; creates and closes test sales | about 15 NEAR | 7.2 for the contract account, about 1.73 for the smoke sale, about 2.2 per pilot-shaped dry run (two), 0.3 attached to OutLayer (mostly refunded), and headroom: a 300 TGas call needs 0.3 NEAR free up front |
-| `fairground.<owner>.testnet` | testnet | the sale contract; created by step T5 | 7.2 NEAR, sent by the owner | the script: (wasm bytes + 2,000) x 1e19 yoctoNEAR plus 1 NEAR |
-| `<relayer>.testnet` | testnet | pays gas for bids, claims and refund mode, and new bidders' USDC registration | about 6 NEAR | `/health` reports `ok` from 5 NEAR, `low` below that, `empty` (503) below 0.5 |
+| `<owner>.testnet` | testnet | owner of the OutLayer project `<owner>.testnet/fairground-sealer` and of its secret row; parent of the contract and of the evidence bidders; creates and closes test sales | about 20 NEAR | 7.2 for the contract account, about 1.73 for the smoke sale, about 3.3 for the evidence sale (1.5 for its six bidder accounts, about 1.8 for `create_sale` with 8 bid slots and a pool; the script attaches 3 and the excess comes back), about 2.2 per pilot-shaped dry run (two), 0.3 attached to OutLayer (mostly refunded), and headroom: a 300 TGas call needs 0.3 NEAR free up front |
+| `sealround.<owner>.testnet` | testnet | the sale contract; created by step T5 | 7.2 NEAR, sent by the owner | the `/deploy` page and the script: (wasm bytes + 2,000) x 1e19 yoctoNEAR plus 1 NEAR, rounded up to 0.1 |
+| `sniper`, `ana`, `ravi`, `mei`, `copy`, `late` `.<owner>.testnet` | testnet | the evidence sale's bidders; created by step T7b | 0.25 NEAR each, sent by the owner, and 10 test USDC each | each signs its own bid and claim and pays the gas |
+| `<relayer>.testnet` | testnet | pays gas for bids, claims, refund mode and launch pool steps, and new bidders' USDC registration | about 6 NEAR | `/health` reports `ok` from 5 NEAR, `low` below that, `empty` (503) below 0.5 |
 | `<bidder>` | testnet | you, bidding in the browser | whatever the wallet or faucet gives; test USDC comes from the app | |
 | `<owner>.near` | mainnet | the same roles as on testnet | about 13 NEAR and 2 USDC (native USDC on NEAR) | 7.2 contract, 1.73 smoke sale, about 2.2 pilot sale (50 bid slots; `get_create_cost` gives the exact figure), 0.3 OutLayer, headroom. 1 USDC for the smoke bid |
 | `fairground.<owner>.near` | mainnet | the sale contract | 7.2 NEAR, sent by the owner | as on testnet |
@@ -123,7 +127,7 @@ near account create-account sponsor-by-faucet-service <relayer>.testnet autogene
 near account view-account-summary <owner>.testnet network-config testnet now
 ```
 
-If the owner holds less than about 15 NEAR, create one more faucet account
+If the owner holds less than about 20 NEAR, create one more faucet account
 and send from it:
 `near tokens <spare>.testnet send-near <owner>.testnet '9 NEAR' network-config testnet sign-with-keychain send`.
 Create `<bidder>` inside the browser wallet you will test with.
@@ -133,6 +137,8 @@ Create `<bidder>` inside the browser wallet you will test with.
 | Secret | Lives in | Never in |
 | --- | --- | --- |
 | account keys | near CLI's keychain (your OS) | the repo |
+| the contract account's key from `/deploy` (T5) | the key file you downloaded, and that browser tab's session storage, until T8 deletes the key | the repo, chat, screenshots |
+| the evidence bidders' keys | `~/.near-credentials/testnet/<bidder>.<owner>.testnet.json` (near CLI's legacy keychain, plain text; the bot reads them there) | the repo |
 | OutLayer CLI login | `~/.outlayer/<network>/credentials.json`, plain text. Run `outlayer logout` on a shared machine | the repo |
 | relayer key | Fly secrets only | `fly.toml`, the image, any `NEXT_PUBLIC_` variable |
 | 1Click API key (`ONECLICK_JWT`) | Vercel environment variables, server side only | any `NEXT_PUBLIC_` variable |
@@ -141,7 +147,9 @@ Get the 1Click key at partners.near-intents.org (spec, "Cross-chain funding
 and settlement"). Without it the quotes still work, with higher fees.
 
 `enclave/deploy/out/<network>/` receives the JSON arguments the scripts
-render: account ids, hashes and sealed bids, no keys. It is git-ignored
+render: account ids, hashes and sealed bids, no keys. T7b also writes
+`evidence-sale.json`, the sniper's log and the evidence Markdown there. It is
+git-ignored
 (`enclave/deploy/.gitignore`). It still holds example files for
 `alice.testnet` and `alice.near`; the scripts overwrite what they use.
 
@@ -201,7 +209,7 @@ powershell -ExecutionPolicy Bypass -File enclave\deploy\Verify-Attestation.ps1 -
 ### T4. Generate the master secret (README 4). Once per network
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File enclave\deploy\3-master-secret.ps1 -Network $NET -Account $ME -Execute
+powershell -ExecutionPolicy Bypass -File enclave\deploy\3-master-secret.ps1 -Network $NET -Account $ME -Contract $FG -Execute
 ```
 
 - Does: generates `PROTECTED_FAIRGROUND_MASTER` inside OutLayer's keystore
@@ -216,29 +224,81 @@ powershell -ExecutionPolicy Bypass -File enclave\deploy\3-master-secret.ps1 -Net
   `default` profile again: a new master breaks every open sale, and a delete
   is final.
 
-### T5. Deploy the contract (README 5)
+### T4b. Point the master secret at a new contract account
+
+When: the contract account changes but the job build does not, as in the
+move from `fairground.<owner>.testnet` to `sealround.<owner>.testnet`. Skip it
+when T4 already named `$FG`. A new build goes through `6-upgrade-job.ps1`
+instead (it refuses a build with the same sha256).
+
+Print the plan; do not add `-Execute` (it refuses, because the row exists):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -Network $NET -Account $ME -Execute
+powershell -ExecutionPolicy Bypass -File enclave\deploy\3-master-secret.ps1 -Network $NET -Account $ME -Contract $FG
 ```
 
-Or from the browser: run `pnpm dev` and open `http://localhost:3000/deploy`
-(dev server only; a production build answers 404). Type `$ME`; no testnet
-wallet is needed. The page checks that T2 and T4 are done and makes a fresh
-key for `$FG`. It then prints one `near account create-account ...` line that
-near CLI signs as `$ME` (create `$FG` with 7.2 NEAR and add that key); a
-wallet with testnet support (Meteor, Intear, Nightly) can sign it instead.
-The tab then signs deploy plus `new` with the new key and reads the config
-and code hash back. Download the key file it offers first: it is the only
-copy, and T8 needs it. The file has the same fields as a near CLI
-credentials file.
+It renders `enclave\deploy\out\testnet\update-access-default.json`, the T4
+condition with `$FG` as the only caller, and prints the `update_access` line
+under "Fallback". Run that line; it is this one:
 
-- Does: checks that the version and the secret row exist, creates `$FG`
-  with 7.2 NEAR, then deploys `contracts\res\fairground.wasm` and calls `new`
-  in the same transaction (signed by `$FG`, so nobody can front-run the
-  init), and reads the config back.
-- `new` arguments, rendered from `enclave\deploy\templates\new-args.testnet.json`
-  into `enclave\deploy\out\testnet\new-args.json`:
+```powershell
+near contract call-function as-transaction outlayer.testnet update_access file-args "$out\update-access-default.json" prepaid-gas '30 Tgas' attached-deposit '0.01 NEAR' sign-as $ME network-config testnet sign-with-keychain send
+near contract call-function as-read-only outlayer.testnet get_secrets file-args "$out\get-secrets-default.json" network-config testnet now
+```
+
+- Does: replaces the row's access condition and keeps its value, so the
+  master stays the same. From then on only build `$SHA` called from `$FG`
+  can read it. The deposit the row already holds is credited; the excess of
+  the 0.01 NEAR comes back.
+- Success: the call logs `Access control updated: ...`, and `get_secrets`
+  shows `WasmHash` `$SHA` and the `Predecessor` whitelist `[$FG]` (the two
+  conditions may print in either order). The `/deploy` page's step 3 runs
+  the same check.
+- The old contract account is no longer admitted: a sale of it that is still
+  open can no longer clear and ends in refunds after its settle timeout. Run
+  T4b only when the old contract has no open sale.
+
+### T5. Deploy the contract (README 5)
+
+From the browser, with no testnet wallet. Start the dev server and open
+`http://localhost:3000/deploy` (dev server only; a production build answers
+404):
+
+```powershell
+pnpm dev
+```
+
+1. **Your owner account**: type `$ME`.
+2. **Settings and build**: the contract account defaults to
+   `sealround.<owner>.testnet` (`$FG`); leave the project
+   (`fairground-sealer`), sealer build (`$SHA`) and secret profile
+   (`default`) as they are. Press **Load from the repo**: the page reads
+   `contracts\res\fairground.wasm`, checks its sha256 against the pinned
+   `e93c4275...a941` (616,196 bytes) and computes the funding, 7.2 NEAR.
+   **The new arguments** shows what `new` will get (below).
+3. **Run the checks**: OutLayer has version `$SHA` (T2), the secret row names
+   `$SHA` and `$FG` (T4 or T4b), `$FG` does not exist yet, and `$ME` holds
+   7.2 NEAR plus 0.5 for gas.
+4. **Create `$FG`**: make the key, press **Download the key file** and
+   tick "I saved the key file". The file is the only copy of `$FG`'s key, and
+   T8 needs it; it has the same fields as a near CLI credentials file. Run
+   the line the page prints, which near CLI signs as `$ME`:
+
+   ```powershell
+   near account create-account fund-myself $FG '7.2 NEAR' use-manually-provided-public-key ed25519:<the page's key> sign-as $ME network-config testnet sign-with-keychain send
+   ```
+
+   Then press **I ran it, check the account**. A wallet with testnet
+   support (Meteor, Intear, Nightly) connected in step 1 can sign it instead.
+5. **Deploy and call new**: the tab signs the wasm and `new` in one
+   transaction with `$FG`'s own key (100 TGas, paid from its 7.2 NEAR), so
+   nobody can call `new` first.
+6. **Check what was deployed**: code hash, `get_config` and storage.
+
+Steps 7 and 8 of the page are T6 and T7 (the smoke tests) and T8 (the lock).
+
+- `new` arguments (`newArgs` in `apps/web/src/components/deploy/chain.ts`,
+  the same as `enclave\deploy\templates\new-args.testnet.json`):
 
   ```json
   {
@@ -246,26 +306,35 @@ credentials file.
     "sealer_source": { "Project": { "project_id": "<owner>.testnet/fairground-sealer", "version_key": "<$SHA>" } },
     "sealer_code_hash": "<$SHA>",
     "sealer_secrets": { "profile": "default", "account_id": "<owner>.testnet" },
-    "allowed_quote_tokens": [ "usdc.fakes.testnet", "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af" ]
+    "allowed_quote_tokens": [ "usdc.fakes.testnet", "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af" ],
+    "dex": "ref-finance-101.testnet"
   }
   ```
 
-  Mainnet uses `outlayer.near` and only
-  `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` (USDC).
-  The contract has no owner, no admin and no upgrade method; this config
-  never changes.
-- Success: `New account <$FG> created successfully`, the deploy succeeds,
-  `get_config` echoes the arguments, and `view-account-summary` shows
+  `dex` is the Rhea exchange that launch pools are seeded on; `null` turns
+  launch liquidity off. Mainnet uses `outlayer.near`, only
+  `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` (USDC)
+  and `"dex": "v2.ref-finance.near"`. The contract has no owner, no admin and
+  no upgrade method; this config never changes.
+- Success: every row of the page's step 6 passes, and
+  `near account view-account-summary $FG network-config testnet now` shows
   `Contract (SHA-256 checksum hex): e93c4275...a941`.
 - If it fails: `invalid config: ...` names the rule; nothing is half
-  deployed. If the account was created but the deploy failed, running
-  `-Execute` again stops at the account creation: run the printed
+  deployed. Step 3 "The master secret names this build and this contract"
+  fails: run T4b. Step 3 says `$FG` already holds a contract: pick another
+  name and run T4b for it. The tab was closed after step 4: **Import the key
+  file** in step 4 and go on.
+- Without the browser (and on mainnet, where `/deploy` does not work), the
+  script does the same and keeps `$FG`'s key in near CLI's keychain:
+  `powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -Network $NET -Account $ME -Contract $FG -Execute`.
+  If the account was created but the deploy failed, running `-Execute`
+  again stops at the account creation: run the printed
   `near contract deploy ...` line by hand instead.
 
 ### T6. Smoke sale: the key path (README 6)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File enclave\deploy\5-smoke-sale.ps1 -Network $NET -Account $ME -StartInMinutes 3 -DurationMinutes 10 -Execute
+powershell -ExecutionPolicy Bypass -File enclave\deploy\5-smoke-sale.ps1 -Network $NET -Account $ME -Contract $FG -StartInMinutes 3 -DurationMinutes 10 -Execute
 powershell -ExecutionPolicy Bypass -File enclave\deploy\Verify-Attestation.ps1 -Network $NET -TxHash <create_sale tx hash> -Signer $ME -ExpectedWasmSha256 $SHA -Contract $FG -SaleId <sale id>
 ```
 
@@ -276,16 +345,24 @@ powershell -ExecutionPolicy Bypass -File enclave\deploy\Verify-Attestation.ps1 -
   `"sealer_key_setup":"done"`, a 64-hex `sealer_pubkey` and
   `sealer_code_hash` equal to `$SHA`; the attestation check passes. Note the
   sale id and the `create_sale` transaction hash.
+- The same check without the transaction hash, on any OS with Node:
+  `pnpm --filter web verify-sale --network testnet --contract $FG --sale <sale id>`
+  finds the transaction from the block the contract recorded and checks the
+  sale key run (the clearing run follows after T7).
 - If it fails: "bid_start: must not be in the past": run the line again (the
   times are relative to now). `sealer_key_setup` `"failed"`: README 10, then
   `retry_setup` (part 7).
 
 ### T7. Smoke clear (README 6b)
 
+The evidence sale (T7b) closes and clears the same way with six bidders.
+This step needs one 1 USDC bid and finds a clear problem before the bidder
+accounts are made.
+
 Once the sale is open (3 minutes after T6):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File enclave\deploy\7-smoke-clear.ps1 -Network $NET -Account $ME -SaleId <sale id> -Phase Bid -GetTestUsdc -Execute
+powershell -ExecutionPolicy Bypass -File enclave\deploy\7-smoke-clear.ps1 -Network $NET -Account $ME -Contract $FG -SaleId <sale id> -Phase Bid -GetTestUsdc -Execute
 ```
 
 Success: the transfer returns `"1000000"` and logs `bid_placed`;
@@ -295,7 +372,7 @@ Success: the transfer returns `"1000000"` and logs `bid_placed`;
 After `bid_end` (10 minutes later):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File enclave\deploy\7-smoke-clear.ps1 -Network $NET -Account $ME -SaleId <sale id> -Phase Close -Execute
+powershell -ExecutionPolicy Bypass -File enclave\deploy\7-smoke-clear.ps1 -Network $NET -Account $ME -Contract $FG -SaleId <sale id> -Phase Close -Execute
 powershell -ExecutionPolicy Bypass -File enclave\deploy\Verify-Attestation.ps1 -Network $NET -TxHash <close_sale tx hash> -Signer $ME -ExpectedWasmSha256 $SHA -Contract $FG -SaleId <sale id>
 ```
 
@@ -312,32 +389,168 @@ powershell -ExecutionPolicy Bypass -File enclave\deploy\Verify-Attestation.ps1 -
   the answer failed the contract's checks; `get_result` names them. Do not
   lock (T8) until this step passes.
 
+### T7b. Evidence sale (README section 7)
+
+One sale on `$FG` that shows the whole story with links: a sniper bot bids
+as the window opens, four people bid, a copycat replays a sealed bid, a late
+bidder bids in the last two minutes; the enclave clears it at one price, a
+Rhea pool opens at exactly that price, and everyone claims.
+`enclave\deploy\8-evidence-sale.ps1` runs it in five phases (its header has
+the numbers). Every phase except Report prints its plan without `-Execute`;
+with `-Execute` it asks you to type `testnet` once, then runs the whole
+phase, waits included. It signs as `$ME` and as the bidder accounts. Testnet
+only. `-Contract` defaults to `sealround.<owner>.testnet`; it is passed below
+so it always matches `$FG`.
+
+The sale: 20,000 NOSNIPE in all, 10,000 for sale at a floor of 0.001 USDC,
+2,000 reserved for the pool and 8,000 for the creator; 1 to 10 USDC per
+bidder, 8 bid slots, 20 % of the raise to the pool at a 0.3 % fee. The
+script's header works out the expected result: a clearing price of 0.002
+USDC, 2,500 tokens each for sniper, ana, ravi and late, mei refunded, copy
+voided with the 1 % penalty, and a pool of 4 USDC and 2,000 NOSNIPE.
+
+1. **Accounts**, once, any time before Create:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File enclave\deploy\8-evidence-sale.ps1 -Account $ME -Contract $FG -Phase Accounts -Execute
+   ```
+
+   Creates `sniper`, `ana`, `ravi`, `mei`, `copy` and `late` as
+   sub-accounts of `$ME` with 0.25 NEAR each (keys in
+   `~/.near-credentials/testnet/`, where the bot reads them), registers each
+   on `usdc.fakes.testnet` and mints it 10 USDC. Success: the last check
+   prints `key file ok, 10 USDC` for all six. Your home folder's path must
+   have no space (the sniper is started with the key file path as an
+   argument).
+
+2. **Create**:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File enclave\deploy\8-evidence-sale.ps1 -Account $ME -Contract $FG -Phase Create -Execute
+   ```
+
+   Checks that the 3 NEAR it attaches covers `get_create_cost` and that
+   `get_config` has a `dex`, creates the sale `nosnipe-<MMddHHmm>` (UTC; or
+   `-SaleId`), waits up to 3 minutes for the token and the sale key, and
+   saves the sale to `enclave\deploy\out\testnet\evidence-sale.json` for the
+   later phases. Bidding opens 6 minutes after the command starts and lasts
+   10 (`-StartInMinutes` 3 to 120, `-DurationMinutes` 6 to 240). Success:
+   `Sale <evidence sale id> is ready`, then `Bidding: <start> to <end>`. Keep
+   the `create_sale` transaction hash.
+
+3. **Bid**, straight away, before the open time Create printed:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File enclave\deploy\8-evidence-sale.ps1 -Account $ME -Contract $FG -Phase Bid -Execute
+   ```
+
+   Starts the sniper in the background (`live-bot snipe`; log in
+   `enclave\deploy\out\testnet\evidence-sniper-<evidence sale id>.log`). It
+   seals its bid early and sends it in the first block at or after
+   `bid_start`, so it can land at second 0 only if this phase starts before
+   the open. Then the phase waits until 30 s after the open; ana, ravi and
+   mei bid; copy replays ravi's sealed bytes; the phase waits for the last
+   two minutes; late bids; and it prints the sniper's log (transaction hash,
+   bid index, the second it landed). It refuses to start less than 150 s
+   before the end. Type `testnet` at its prompt before the open, and keep
+   the PowerShell window open until the phase ends, about two minutes before
+   the close. Success: each bid logs `bid_placed`; copy's bid is accepted (its
+   account id has ravi's length) and voided later by the enclave.
+
+4. **Close**, after the bid window (it waits for `bid_end` itself, so you can
+   start it as soon as Bid finishes):
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File enclave\deploy\8-evidence-sale.ps1 -Account $ME -Contract $FG -Phase Close -Execute
+   ```
+
+   Closes the sale (0.02 NEAR attached, the rest refunded), reads the result,
+   calls `seed_liquidity` at 300 TGas, checks that the pool is `seeded`, then
+   claims for each of the six bidders (`live-bot report --claim`, which also
+   checks each fill against the clearing price) and calls `claim_proceeds`
+   for the creator (the raise less the pool's USDC, the creator's 8,000
+   tokens and the unspent NEAR reserve; unsold tokens burn). Success:
+   `close_sale` returns `"settled"`; `status settled, clearing price 0.002`,
+   `raised 20 USDC` and nothing after `failed checks:`;
+   `Liquidity: seeded, pool <id> on ref-finance-101.testnet`. Keep the
+   `close_sale`, `seed_liquidity` and claim transaction hashes.
+   - `close_sale` returned `"closed"` (the run failed or was refused): run
+     the phase again; it closes again.
+   - The sale settled but the pool is not `seeded`: do not run the phase
+     again, because `close_sale` refuses a settled sale and the run stops
+     there. Run the phase without `-Execute` to print its lines, and run the
+     `seed_liquidity` line until `get_result` shows `seeded` (or press
+     **Seed the pool** in the result page's pool panel), then the claim lines and
+     `claim_proceeds`.
+
+5. **Check it**, read-only, any time after Close:
+
+   ```powershell
+   pnpm --filter web verify-sale --network testnet --contract $FG --sale <evidence sale id>
+   ```
+
+   Finds the `create_sale` and `close_sale` transactions, fetches OutLayer's
+   TDX attestation for each run, checks the eight run checks for each, and
+   recomputes the frozen bid set. Success: `Every check passed.` (exit code
+   0). Keep the output for README section 7.
+
+6. **Report**, read-only, after T8 so its "no access keys" line is true (it
+   can run again at any time):
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File enclave\deploy\8-evidence-sale.ps1 -Account $ME -Contract $FG -Phase Report -AppUrl https://<web-testnet>.vercel.app
+   ```
+
+   Prints the evidence as Markdown for README section 7 and saves it to
+   `enclave\deploy\out\testnet\evidence-<evidence sale id>.md` (git-ignored,
+   so copy it into the README): the contract and token links, the bidding
+   window, the clearing price, raise and valid bids, each bidder's time after
+   the open, tokens, spend, refund and penalty, the pool and its reserves and
+   price now, and the `verify-sale` line. Leave out `-AppUrl` while the
+   testnet web app is not hosted.
+
 ### T8. Lock the contract. Irreversible
 
-When: after T7 passes, and before anyone else learns the contract or the
-testnet web URL. Until the contract account's full-access key is deleted,
-whoever holds it can read every sealed bid (README 5, `contracts/DESIGN.md`
-"Deployment invariants"). After it, nobody can redeploy or fix `$FG`.
+When: after the evidence sale (T7b) has closed, its pool is seeded and its
+claims are done, and before anyone else learns the contract or the testnet
+web URL. Until the contract account's full-access key is deleted, whoever
+holds it can read every sealed bid (README 5, `contracts/DESIGN.md`
+"Deployment invariants"). After it, nobody can redeploy or fix `$FG`. The
+lock comes after T7b because the evidence sale is the first pool on the real
+Rhea exchange: a problem found there needs a fresh account (below), not a
+locked one. Every bidder in it is your own account, so no one else's bid was
+readable while the key existed. The lock transaction's time is public.
+
+From `/deploy` (T5): step 8 of the page, with the key file imported if the
+tab was closed. It refuses unless `$FG` has exactly that one key, asks you to
+type `$FG`, deletes the key and checks that no keys are left. Keep the lock
+transaction hash from the page's Transactions panel.
+
+If you deployed with `4-deploy-contract.ps1`, near CLI holds the key:
 
 ```powershell
 near account list-keys $FG network-config $NET now      # one full-access key, the one near CLI made in T5
-powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -Network $NET -Account $ME -Lock -PublicKey ed25519:<that key> -Execute
+powershell -ExecutionPolicy Bypass -File enclave\deploy\4-deploy-contract.ps1 -Network $NET -Account $ME -Contract $FG -Lock -PublicKey ed25519:<that key> -Execute
 ```
 
-- Does: checks the key belongs to `$FG`, deletes it, lists the keys again.
-  (`-Lock` without `-PublicKey` and `-Execute` only prints these steps.)
-- If you deployed from `/deploy`, near CLI does not hold `$FG`'s key. Lock
-  from step 8 of the same page instead (import the key file first if the tab
-  was closed): it refuses unless the account has exactly that one key, asks
-  you to type `$FG`, deletes the key and checks that no keys are left.
-- Success: the last `list-keys` shows no keys.
-- If T5 to T7 showed a problem in the contract itself, do not lock this
-  account. Deploy a fresh one (`-Contract fairground2.$ME` on
-  `4-deploy-contract.ps1` and every later script, and update `$FG`). First
-  point the secret at it: `3-master-secret.ps1 -Network $NET -Account $ME -Contract fairground2.$ME`
-  without `-Execute` renders `update-access-default.json` for the new
-  account and prints the `update_access` command to run (with `-Execute` it
-  refuses, because the row exists).
+(`-Lock` without `-PublicKey` and `-Execute` only prints these steps.)
+
+Record the result either way, for README section 7 and the checklist in
+part 8:
+
+```powershell
+near account list-keys $FG network-config $NET now
+```
+
+- Success: `list-keys` shows no keys. Save its output and the lock
+  transaction hash with the evidence; then run T7b's Report.
+- If T5 to T7b showed a problem in the contract itself, do not lock this
+  account. Deploy a fresh one (for example `sealround2.$ME`): set `$FG` to
+  it, point the secret at it with T4b, deploy it with T5 (type the new name
+  in step 2 of `/deploy`), and run T6 to T7b on it. The hosted relayer
+  (`FAIRGROUND_CONTRACT` in `apps/relayer/fly.testnet.toml`) and web app
+  (`NEXT_PUBLIC_FAIRGROUND_CONTRACT`) name `sealround.<owner>.testnet` and
+  must then be pointed at the new account (parts 3 and 4).
 
 ## 3. Relayer on Fly.io
 
@@ -374,11 +587,10 @@ and the list of missing variables.
 ### Fly configuration
 
 For testnet, use [`apps/relayer/fly.testnet.toml`](apps/relayer/fly.testnet.toml).
-It points to `sealround.itzbeast.testnet`. Before hosting, verify that the
-owner has deployed that account, allowed both testnet quote tokens, and
-updated the OutLayer master secret's caller condition to the new account.
-Use `$FG = 'sealround.itzbeast.testnet'` for this rollout and the dry run
-in part 5.
+It points to `sealround.itzbeast.testnet`, the `$FG` of part 2. Before
+hosting, check that T4b (the master secret names that account) and T5
+(deployed with both testnet quote tokens) are done for it, and lock it (T8)
+before the testnet web URL is shared.
 
 The policy sponsors `claim`, `claim_proceeds`, `clear_onchain`,
 `reveal_bid`, and `trigger_refund_mode` with zero attached deposit.
@@ -585,9 +797,15 @@ Checks after each deploy, on the production URL:
   render, also at phone width.
   `https://<web-demo>.vercel.app/api/oneclick/tokens` returns a JSON list.
 - `<web-testnet>`: the footer reads "Sealround runs on NEAR testnet.
-  Unaudited." The smoke sale from T6 is listed. In the browser's network tab,
+  Unaudited." The smoke sale from T6 and the evidence sale from T7b are
+  listed. In the browser's network tab,
   `GET <relayer>/policy` returns 200 with no CORS error and shows
-  `fairground_contract: sealround.itzbeast.testnet`. Part 5 tests bidding.
+  `fairground_contract: sealround.itzbeast.testnet`. The evidence sale's
+  result page shows the reveal, the fairness timeline, the launch pool panel
+  (pool price equal to the clearing price, LP shares held by the contract)
+  and the Verified panel with every check passing. Its link, pasted into X's
+  composer, shows the sale's share card with the clearing price. Part 5
+  tests bidding.
 - `<web-pilot>`: the same, with "mainnet".
 - Use the production URLs only. Preview deployments have other origins,
   which the relayer's CORS refuses (the app then falls back to paid
@@ -732,16 +950,21 @@ Run `scripts\build-enclave.ps1 -Verify` first (part 1), then steps T1 to T7
 with these variables. Differences:
 
 - T1: `outlayer login mainnet`.
+- T4 names `$FG` directly, so T4b does not apply.
+- T5: `/deploy` is testnet only. Use `4-deploy-contract.ps1 -Network mainnet -Account $ME -Contract $FG -Execute`;
+  its `new` arguments come from `new-args.mainnet.json`, with
+  `"dex": "v2.ref-finance.near"`.
 - T6: `get_create_cost` is about 1.73 NEAR on mainnet.
 - T7 `-Phase Bid`: leave out `-GetTestUsdc` (mainnet has no test USDC). The
   bid uses 1 USDC of yours, and the sale settles it as on testnet.
 - The attestation check compares the measurements with
   `worker.outlayer.near`.
+- T7b is testnet only (the script refuses mainnet).
 
 ### M3. Lock before anything is announced
 
-Step T8 with the mainnet variables, after T7 passes and before the pilot sale
-is created or announced.
+Step T8 with the mainnet variables and `4-deploy-contract.ps1 -Lock`, after
+T7 passes and before the pilot sale is created or announced.
 
 ### M4. Mainnet relayer and web app
 
@@ -811,8 +1034,8 @@ Invoke-RestMethod https://<relayer-app-mainnet>.fly.dev/health
 fly logs -a <relayer-app-mainnet>
 ```
 
-Run the openly announced bot if it is ready: `apps/web/scripts/live-bot`
-(its CLI was still being written on 11 Nov; see the header of `bot.ts`).
+Run the openly announced bot: `pnpm --filter web live-bot snipe` with
+`--network mainnet` and `--yes-mainnet` (`apps/web/scripts/live-bot/README.md`).
 Screen-record the window.
 
 ### M9. Close, verify, claim
@@ -821,7 +1044,7 @@ After `bid_end` (anyone can close; the closer attaches `get_close_deposit`,
 0.01401 NEAR for 50 bids, and OutLayer refunds what it does not charge):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File enclave\deploy\7-smoke-clear.ps1 -Network mainnet -Account $ME -SaleId pilot -Phase Close -Execute
+powershell -ExecutionPolicy Bypass -File enclave\deploy\7-smoke-clear.ps1 -Network mainnet -Account $ME -Contract $FG -SaleId pilot -Phase Close -Execute
 powershell -ExecutionPolicy Bypass -File enclave\deploy\Verify-Attestation.ps1 -Network mainnet -TxHash <close_sale tx hash> -Signer $ME -ExpectedWasmSha256 $SHA -Contract $FG -SaleId pilot
 ```
 
@@ -855,7 +1078,8 @@ From the spec, "What to record":
 | Relayer key exposed | it can spend only the relayer's balance. Add a new full-access key to the relayer account, import the new `RELAYER_PRIVATE_KEY` with the pipe from part 3, delete the old key (`apps/relayer/README.md`, "Rotate") |
 | `/health` shows `budget_exhausted` | the budget resets at 00:00 UTC. To raise it, import a new `DAILY_BUDGET_NEAR` (this restarts the machine, which also resets every in-memory counter) |
 | `sealer_key_setup` `"failed"` | `near contract call-function as-transaction $FG retry_setup file-args "$out\sale-id-<sale>.json" prepaid-gas '300 Tgas' attached-deposit '0.02 NEAR' sign-as $ME network-config $NET sign-with-keychain send` (anyone may; README 10) |
-| Clear failed, sale `"closed"` | read `execution_completed`'s `error_message` (README 10) and close again (`7-smoke-clear.ps1 -Phase Close` or the app) |
+| Clear failed, sale `"closed"` | read `execution_completed`'s `error_message` (README 10) and close again (`7-smoke-clear.ps1 -Phase Close`, `8-evidence-sale.ps1 -Phase Close`, or the app) |
+| Launch pool not seeded after settlement | anyone calls `seed_liquidity` again (the line `8-evidence-sale.ps1 -Phase Close` prints without `-Execute`, or **Seed the pool** on the result page); each call runs the next step. A step waiting 600 blocks for its result is given up by the next call, which reads the exchange first. From the deadline, `abandon_liquidity` unlocks the tokens (`contracts/DESIGN.md`, "Launch liquidity") |
 | OutLayer down, sale stuck | wait. After `refund_mode_at` anyone calls `trigger_refund_mode` (part 5), then everyone claims the full deposit |
 | Bug in the contract after the lock | it cannot be patched or paused. Stop promoting the sale, let it settle or time out into refunds, then deploy a new contract account (README 8) and point the relayer and the web app at it |
 | Bug before the lock | deploy a fresh contract account as in T8, and lock that one |
@@ -875,13 +1099,16 @@ version. Each makes every open sale end in refunds.
       git grep -nE "ed25519:[1-9A-HJ-NP-Za-km-z]{60,}" $(git rev-list --all)
       git log --all --name-only --format= | Sort-Object -Unique | Select-String '\.env|credentials|deploy/out'
       ```
-- [ ] Contracts locked: `near account list-keys fairground.<owner>.testnet network-config testnet now`
+- [ ] Contracts locked: `near account list-keys sealround.<owner>.testnet network-config testnet now`
       and the same for `fairground.<owner>.near` on mainnet list no keys.
 - [ ] Hosted demo up: judge mode on `<web-demo>` under 2 minutes from a
       fresh browser; `<web-testnet>` lists sales; the relayer's `/health` says
       `ok`. All of it stays up through 18 Nov (ideally 25 Nov).
 - [ ] README links: demo URL, testnet URL, contract accounts, pilot
       transaction links, `$SHA` with its source commit.
+- [ ] README section 7 has the evidence sale (T7b): the Report's Markdown,
+      the `verify-sale` output, and T8's `list-keys` output and lock
+      transaction.
 - [ ] Mainnet NEAR account ready for the prize payout.
 - [ ] Code from before 19 Oct (openlaunch) separated by a branch or tag, with
       a diff link.

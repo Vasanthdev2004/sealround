@@ -47,7 +47,7 @@ Sale costs are paid by each sale's creator, not by this balance.
 Parent account (signs the account creation) and owner of the secret row.
 
 .PARAMETER Contract
-The contract account. Default fairground.<Account>. Must match the --via
+The contract account. Default sealround.<Account>. Must match the --via
 account the master secret admits (3-master-secret.ps1).
 
 .PARAMETER ContractWasm
@@ -91,7 +91,7 @@ if (-not $ContractWasm) { $ContractWasm = Get-DefaultContractWasm }
 
 $net = Get-DeployNetwork $Network
 Assert-AccountId $Account '-Account'
-if (-not $Contract) { $Contract = "fairground.$Account" }
+if (-not $Contract) { $Contract = "sealround.$Account" }
 Assert-AccountId $Contract '-Contract'
 
 if ($Lock) {

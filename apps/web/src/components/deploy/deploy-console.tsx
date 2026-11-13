@@ -10,6 +10,7 @@ import { CheckRow, type CheckState } from "@/components/ui/bits";
 import { Logo } from "@/components/shell/app-shell";
 import { cn } from "@/lib/cn";
 import {
+  PINNED_CONTRACT_BYTES,
   PINNED_CONTRACT_SHA256,
   PINNED_SEALER_SHA256,
   TESTNET,
@@ -35,7 +36,7 @@ import {
  *
  * 1. The owner connects a testnet wallet.
  * 2. This page generates an ed25519 key in the tab. The wallet signs one small
- *    transaction: create fairground.<owner>.testnet, fund it, add that key.
+ *    transaction: create sealround.<owner>.testnet, fund it, add that key.
  * 3. The page signs deploy + `new` with that key, from the contract account
  *    itself, so nobody can front-run the init (the wasm is too big for most
  *    wallets to carry anyway).
@@ -175,7 +176,7 @@ function Console() {
   const [wasm, setWasm] = useState<Wasm | null>(null);
   const [wasmError, setWasmError] = useState<string | null>(null);
   const [allowOtherBuild, setAllowOtherBuild] = useState(false);
-  const funding = wasm ? fundingFor(wasm.bytes.length) : "6.5";
+  const funding = wasm ? fundingFor(wasm.bytes.length) : fundingFor(PINNED_CONTRACT_BYTES);
   const args = owner ? newArgs(owner, project, sealerSha, profile) : null;
 
   const contractValid =
@@ -330,7 +331,7 @@ function Console() {
         label: `${contractId} is free`,
         detail: s.exists
           ? s.codeHash
-            ? "It already holds a contract. Pick another account (for example fairground2)."
+            ? "It already holds a contract. Pick another account (for example sealround2)."
             : "It exists with no contract: the create step ran. Continue with deploy if this tab holds its key."
           : "Not created yet",
       });
@@ -451,7 +452,7 @@ function Console() {
   const holdsKey = !!keyFor && !!keys?.some((k) => k.publicKey === keyFor.publicKey);
   const locked = deployed && keys !== null && keys.length === 0;
   const smokeEnv = [
-    `NEXT_PUBLIC_FAIRGROUND_CONTRACT=${contractId || "fairground.<owner>.testnet"}`,
+    `NEXT_PUBLIC_FAIRGROUND_CONTRACT=${contractId || "sealround.<owner>.testnet"}`,
     "NEXT_PUBLIC_NEAR_NETWORK=testnet",
     `NEXT_PUBLIC_SEALER_CODE_HASH=${sealerSha}`,
   ].join("\n");
@@ -542,7 +543,7 @@ function Console() {
             label="Contract account"
             value={contractId}
             onChange={(e) => setContractId(e.target.value.trim().toLowerCase())}
-            placeholder="fairground.<owner>.testnet"
+            placeholder="sealround.<owner>.testnet"
             error={contractId && owner && !contractValid ? `Must be a valid sub-account of ${owner}` : undefined}
             spellCheck={false}
           />
@@ -775,8 +776,10 @@ function Console() {
         <p className="text-small text-muted">
           Point the app at the new contract and run one sale end to end: create it, place one bid, close it, claim. Put
           these lines in <span className="font-mono">apps/web/.env.local</span> and restart the dev server, or run{" "}
-          <span className="font-mono">5-smoke-sale.ps1</span> and <span className="font-mono">7-smoke-clear.ps1</span>.
-          The sale must reach <span className="font-mono">settled</span> with no failed checks before step 8.
+          <span className="font-mono">5-smoke-sale.ps1</span> and <span className="font-mono">7-smoke-clear.ps1</span> with{" "}
+          <span className="font-mono">-Contract {contractId || "<contract>"}</span>, then the evidence sale (
+          <span className="font-mono">8-evidence-sale.ps1</span>, LAUNCH.md T7b). The sale must reach{" "}
+          <span className="font-mono">settled</span> with no failed checks before step 8.
         </p>
         <pre className="inset mt-3 overflow-x-auto p-3 font-mono text-[12px] text-fg">{smokeEnv}</pre>
         {contractValid && (
@@ -796,7 +799,7 @@ function Console() {
         <p className="text-small text-muted">
           Deletes the contract account&apos;s only key. After this nobody, you included, can redeploy, fix or read the bids
           of <span className="font-mono">{contractId || "the contract"}</span>. If the smoke test showed a problem in the
-          contract, do not lock: deploy a fresh account (for example <span className="font-mono">fairground2.{owner || "<owner>.testnet"}</span>) and
+          contract, do not lock: deploy a fresh account (for example <span className="font-mono">sealround2.{owner || "<owner>.testnet"}</span>) and
           point the secret at it first.
         </p>
         {locked ? (

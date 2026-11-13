@@ -33,7 +33,35 @@ with the sales board at `/`. Every other page (`/sale/<id>`, `/create`,
 | Group | Layout | Pages |
 | --- | --- | --- |
 | `src/app/(site)` | `SiteShell`: slim bar, footer | `/`, the landing page (`components/site`) |
-| `src/app/(app)` | `AppShell`: app bar, wallet, page transition | `/sales`, `/sale/[id]`, `/sale/[id]/result`, `/create`, `/judge`, `/arena`, `/how`, `/lab` (control review sheet, not linked, noindex) |
+| `src/app/(app)` | `AppShell`: app bar, wallet, page transition | `/sales`, `/sale/[id]`, `/sale/[id]/result`, `/create`, `/judge`, `/arena`, `/how`, `/lab` |
+| `src/app/deploy` | its own page, no shell | `/deploy` |
+| `src/app/api` | route handlers | `/api/oneclick/*` (1Click proxy), `/api/deploy/wasm` (dev server only) |
+
+What each page has:
+
+| Page | What is on it |
+| --- | --- |
+| `/sales` | The sales board |
+| `/sale/[id]` | The rules, countdown and status, the sealed bid form, funding from another chain, where's-my-money and the event log. After close, the Bid set panel: the frozen bid-set hash recomputed in the browser from `get_bids`, and "your bid is #k of N" for any account |
+| `/sale/[id]/result` | The reveal (four steps from the sealed bids to one price, played once per browser, then shown at rest), the fairness timeline (when each bid landed in the window and what each winner paid per token; max prices stay sealed), Share on X, your result and claims, the launch pool panel for a sale with launch liquidity, the Verified panel, and every fill |
+| `/create` | The sale form, the optional launch pool section, Simulate this launch, review and the cost check before signing |
+| `/judge` | Judge mode: a seeded sale with 50 simulated bidders and 3 sniper bots, closed, cleared and settled in the browser. Mock mode only |
+| `/arena` | Bot Arena: Sealround, a bonding curve and a first-come sale over the 60 seeded runs, the supply Sealround burned as demand changes, and one run you can repeat in the browser from a seed |
+| `/how` | How a sale works, and its limits |
+| `/lab` | Every control in every state, for design review. Not linked, noindex |
+| `/deploy` | Owner tool for `LAUNCH.md` T5 and T8: create, deploy, check and lock the testnet contract. Dev server only (a production build answers 404), noindex |
+
+"Simulate this launch" on `/create` runs the Bot Arena's crowd model
+(`@fairground/arena`) against the creator's own rules, from half to four
+times the demand that would buy every token at the floor, and shows what
+sells, what burns, whether the min raise is met and what bots make. It runs
+in the browser and is labelled a simulation in both modes.
+
+The launch pool section on `/create` appears only when the contract's
+`get_config` names a `dex` (always in mock mode). It sets the share of the
+raise, the reserved tokens and the pool fee; after settlement anyone seeds
+the pool at the clearing price from the result page (`contracts/DESIGN.md`,
+"Launch liquidity").
 
 `src/proxy.ts` rewrites `/` to `/sales` on any host that starts with `app.`.
 When `NEXT_PUBLIC_APP_URL` is set, it also redirects app paths on the landing
@@ -44,9 +72,30 @@ Checks (from `apps/web`):
 
 ```powershell
 npx tsc --noEmit --incremental false
-npx eslint src
-pnpm test             # vitest: the data layer in src/lib
+npx eslint src scripts
+pnpm test             # vitest: every src/**/*.test.ts
 ```
+
+Do not run `pnpm build` or `pnpm typecheck` (it runs `next typegen`) while
+`next dev` runs from this folder: they share `.next` and corrupt each other.
+
+## Scripts
+
+From the repository root. Each script runs the web app's own code from Node.
+
+| Command | What it does |
+| --- | --- |
+| `pnpm --filter web dev` | The dev server on :3000 |
+| `pnpm --filter web test` | vitest |
+| `pnpm --filter web e2e:sandbox` | The whole local stack: a sandbox chain in Docker (`near-sandbox-web`, RPC on 127.0.0.1:3050), the real contract, OutLayer's contract with a stand-in worker running the pinned sealer, and the relayer on :8790. Runs every scenario through the NEAR client and exits 0 only if all pass. Needs Docker and the built `contracts/res` and `enclave/res` (header of `scripts/e2e/run.ts`) |
+| `pnpm --filter web live-bot <command>` | The live sniper bot: `status`, `bid`, `snipe`, `copycat`, `report`, `reveal`, `result` (`scripts/live-bot/README.md`) |
+| `pnpm --filter web verify-sale --contract <contract> --sale <sale id>` | Checks a sale's enclave runs and its bid set, read-only, with no key: the same checks as the Verified panel. Options: `--network testnet` (default) or `mainnet`, `--rpc <url>`, `--json`. Exit code 0 when every check passed, 1 when one failed or could not run, 2 on bad options |
+| `pnpm --silent --filter web mcp` | A stdio MCP server that lets an AI agent read sales, place one sealed bid within a deposit cap, claim and verify a sale (`scripts/mcp/README.md`). `--silent` keeps pnpm's own output off stdout, which carries the protocol |
+
+Their sandbox tests: `pnpm --filter web exec tsx scripts/live-bot/sandbox-test.ts`
+and `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts` (add `--offline`
+for the MCP checks that need no chain). The agent skill
+`skills/sealround-bid/SKILL.md` drives `live-bot bid` and `live-bot result`.
 
 ## Mock mode
 
@@ -59,8 +108,12 @@ result checks, the 1 % penalty on invalid bids, the 1 USDC minimum deposit,
 sale id rules, commit-reveal with on-chain clearing).
 
 What is simulated: the chain itself, transaction hashes, the enclave (its key
-sits in this browser), the TDX attestation, test USDC, and the relayer (every
-call counts as gasless). The UI labels all of it.
+sits in this browser), the TDX attestation, test USDC, the launch pool and its
+exchange, and the relayer (every call counts as gasless). The UI labels all of
+it. The Verified panel runs the same checks as in NEAR mode over a simulated,
+unsigned attestation, with real sha256 over the simulated request and answer,
+and labels every row simulated. The judge-mode sale opens a simulated launch
+pool after it settles.
 
 State is kept in localStorage under `fairground:mock:v2`. "Reset demo data" in
 the sidebar wipes it.
@@ -81,6 +134,12 @@ server. Every variable is documented in `.env.example`; in short:
 | `NEXT_PUBLIC_DEV_ACCOUNTS` | sandbox only: accounts and their secret keys, used instead of a wallet |
 
 An unusable value stops the app with a message that names the variable.
+`.env.example` has a ready block for the hosted testnet app.
+
+In either mode, `NEXT_PUBLIC_APP_URL` is the app's own origin when the
+landing page and the app run on two hosts (see Routes); it is also the base
+of the share cards' URLs (see Share cards). The server-only `ONECLICK_*`
+variables are under "Funding from another chain".
 
 ### Reads
 
@@ -88,19 +147,30 @@ Views go straight to the RPC node with `fetch` (`src/lib/near/rpc.ts`) and are
 translated in `src/lib/near/views.ts`. Results are reused for 3 seconds, so
 the pages' one-second polling does not become one RPC call per second.
 
-The contract has no event view. The timeline on a sale page is derived from
+The contract has no event view. The event log on a sale page is derived from
 the views (`eventsFromViews`): creation, every bid and the close carry their
-real block times; reveals, the outcome, claims and creator payouts are visible
-in the views but not timed there, so those rows are marked approximate.
-Transaction hashes, and bids the contract returned, are known only for calls
-this browser sent (kept in localStorage under `fairground:txlog:v1`).
+real block times; reveals, the outcome, claims, creator payouts and the launch
+pool's stages are visible in the views but not timed there, so those rows are
+marked approximate. Transaction hashes, and bids the contract returned, are
+known only for calls this browser sent (kept in localStorage under
+`fairground:txlog:v1`).
+
+The fairness timeline on the result page uses only public data: each bid's
+`placed_at` from `get_bids` and the fills from `get_fills`. A real contract
+stores no bidder roles, so on chain its headline names the first and the last
+winning bid; on the simulated chain it names a bot and a person.
 
 ### Writes and the relayer
 
 The relayer (`apps/relayer`) pays the gas of the calls that attach no NEAR:
 bids (a USDC `ft_transfer_call`, whose 1 yoctoNEAR the relayer also pays),
-claims, reveals, `clear_onchain`, `claim_proceeds` and `trigger_refund_mode`.
-The wallet signs a NEP-366 delegate; the relayer submits it.
+claims, reveals, `clear_onchain`, `claim_proceeds`, `trigger_refund_mode`,
+and the launch pool's `seed_liquidity` and `abandon_liquidity`. The wallet
+signs a NEP-366 delegate; the relayer submits it. A relayed pool call gets
+150 TGas and runs one or two of the seeding steps, so a pool can take more
+than one call; paid from the wallet it gets 300 TGas and runs them all. The
+app relays a pool call only when the relayer's `GET /policy` lists the
+method.
 
 The app pays with the user's wallet instead, and says so first, when:
 
@@ -127,12 +197,36 @@ browser before the bid is sent (`src/lib/bid-secrets.ts`, localStorage key
 `fairground:bid-secrets:v1`) and can be exported to a file and imported on
 another device. A bid that is not revealed pays the 1 % penalty.
 
+### The Verified panel
+
+The result page checks each enclave run of the sale (the sale key and the
+clearing) in the browser, read-only (`src/lib/near/attestation.ts`, a port of
+`enclave/deploy/Verify-Attestation.ps1`). For each run it finds the
+transaction, fetches OutLayer's attestation for it and checks eight things:
+the attested build is the sealer the contract pins, the worker measured that
+build, the input and output hashes match the chain, the TDX quote's report
+data commits to this record, the enclave measurements are approved on
+OutLayer's register contract (`worker.outlayer.testnet` / `.near`), the
+request came from the sale contract for this sale, and the job's answer names
+the sale's key. It then recomputes the frozen bid-set hash from every bid the
+contract lists (`src/lib/bid-inclusion.ts`) and shows where any account's bid
+sits in it. Not checked here: the quote's signature chain up to Intel; the
+panel links OutLayer's verifier for that. OutLayer takes no nonce, so the
+panel shows how fresh each run is instead (block, time).
+
+The contract stores no transaction hashes, so `src/lib/near/attestation-sources.ts`
+finds each run's transaction by scanning the block the contract recorded for
+the request (`get_sale.key_request_block`, `get_result.clear_request_block`)
+and the few before it, then this browser's transaction log, then OutLayer's
+public job list for the sealer project; every candidate is confirmed from its
+receipts. History calls fall back to an archival RPC node. On a local sandbox
+there is no OutLayer service, so both runs show as not checked and only the
+bid set is compared. `pnpm --filter web verify-sale` runs the same code from
+the command line.
+
 ### What NEAR mode does not have
 
 - Judge mode and the demo sales: they need the simulated chain.
-- A fresh attestation fetch: the "Verified" data comes from what the contract
-  stored (the pinned code hash, the sale key, the sha256 of the clearing input
-  and of the enclave's answer). No TDX quote is fetched.
 - The time a sale settled, and transaction hashes of other people's calls: the
   views do not hold them.
 
@@ -158,8 +252,44 @@ expired or predates signed tracking, use the original transaction and quote
 reference for support. Funding credits the connected NEAR account. Placing
 a sealed bid is a separate action.
 
+With live swaps on, the funding panel can also ask 1Click for a confidential
+swap (`confidentiality: "basic"`). The proxy refuses a quote whose answer
+omits or changes the requested mode, and the receipt records it. The NEAR bid
+deposit stays public either way.
+
+| Server-only variable | Meaning |
+| --- | --- |
+| `ONECLICK_JWT` | optional 1Click partner key, sent only with shared quotas |
+| `ONECLICK_REDIS_URL`, `ONECLICK_REDIS_TOKEN` | Upstash Redis REST URL and token for the shared quota |
+| `ONECLICK_RECEIPT_SECRET` | 32 random bytes as 64 hex characters; signs deposit receipts. Keep it stable across deploys |
+| `ONECLICK_REAL_SWAPS` | `1` turns on live deposit quotes; needs mainnet, Circle's native USDC, both Redis values and the receipt secret |
+
 To exercise deposit quotes and status locally without sending funds, run
 `pnpm --filter web exec vitest run src/app/api/oneclick`.
+
+## Share cards
+
+Every page in the two route groups has an Open Graph card, which X also reads
+(`twitter:card` is `summary_large_image`). Each group has an `opengraph-image.tsx`: the
+landing page, the app, and one sale (`src/app/(app)/sale/[id]/opengraph-image.tsx`,
+which the result page inherits). The cards are drawn in `src/lib/og/`.
+
+- In NEAR mode a sale's card and page title are read on the server from
+  `get_sale` and `get_result` (3 s RPC timeout): the token, the phase and,
+  once settled, the one clearing price. In mock mode sales live in the
+  visitor's browser, so a sale gets the generic app card.
+- `metadataBase` in the root layout makes the card URLs absolute
+  (`src/lib/og/site-url.ts`): `NEXT_PUBLIC_APP_URL`, else the Vercel URL of
+  the deployment (the production domain on production), else
+  `http://localhost:<PORT>`.
+- The cards use Inter, fetched from Google Fonts once per server process.
+  Offline they fall back to `next/og`'s bundled font; a card is always served.
+
+"Share on X" on the result page is a plain link to X's post intent with one
+factual sentence from the result (the clearing price, and when the first and
+last winning bids landed) and the result's URL. No script from X loads. A
+judge-mode sale exists only in the browser that ran it, so its share link
+points at `/judge`.
 
 ## Local sandbox
 
@@ -217,9 +347,17 @@ const client = new NearClient(config.near, { signers: devSigners(config.near), c
 | `src/lib/client/rules.ts` | the contract's rules both clients share |
 | `src/lib/client/errors.ts` | `FairgroundError`, messages for every rejection and relayer refusal |
 | `src/lib/near/` | RPC reader, view translation, signers, dev signer, local transaction log |
+| `src/lib/near/attestation.ts`, `attestation-sources.ts` | the Verified panel's checks, and the read-only fetches behind them |
+| `src/lib/bid-inclusion.ts` | the bid-set hash recomputed from `get_bids`, and one bid's place in it |
+| `src/lib/liquidity.ts` | launch pool maths and stages, over `poolPlan` in `@fairground/clearing` |
 | `src/lib/crypto.ts` | bid sealing (padded plaintext), commitments |
 | `src/lib/bid-secrets.ts` | commit-reveal salts kept in the browser |
 | `src/lib/wallet.tsx` | wallet context: demo account, NEAR Connect, dev accounts |
 | `src/lib/oneclick.ts` | 1Click preview and deposit quotes, status tracking, simulated funding, USDC storage registration |
+| `src/lib/og/` | share cards, sale page titles, `metadataBase` |
+| `src/components/result/` | result page: reveal, fairness timeline, Share on X, pool panel, Verified panel, bid inclusion |
+| `src/components/create/` | create form, pool section, launch simulator |
+| `src/components/deploy/` | the `/deploy` page |
 | `src/lib/__tests__/` | vitest suites, including byte parity with the Rust sealer |
+| `scripts/` | `e2e/`, `live-bot/`, `mcp/`, `verify-sale.ts` (see Scripts) |
 | `UI-DIRECTION.md` | the design brief |
