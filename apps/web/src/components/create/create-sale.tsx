@@ -198,7 +198,7 @@ export function CreateSale() {
       const sale = await client.createSale(account, config, meta);
       // Stay in the pending state until the sale page takes over.
       setCreated(true);
-      router.push(`/sale/${sale.id}`);
+      router.push(`/sale/${sale.id}/kit`);
     } catch (e) {
       setSubmitError(message(e));
       setSubmitting(false);

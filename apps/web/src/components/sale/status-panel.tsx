@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Wallet } from "lucide-react";
+import { BurnMoment, useBurnCapture } from "@/components/burn/burn-moment";
 import {
   ActionError,
   GasNote,
@@ -802,6 +803,8 @@ function Done({ sale, account }: { sale: Sale; account: string | null }) {
   // The number waits for the result, so a refund total never shows before its penalties are known.
   const waiting = loading && !result;
   const pending = <Skeleton className="inline-block h-[0.8em] w-[4.5em] align-baseline" />;
+  // After a payout that burned the unsold tokens: the burn moment, once the views confirm it.
+  const burn = useBurnCapture(sale, result);
 
   return (
     <>
@@ -875,10 +878,11 @@ function Done({ sale, account }: { sale: Sale; account: string | null }) {
             variant="tactile"
             size="md"
             subject="payout"
-            run={(caller, opts) => getClient().claimProceeds(sale.id, caller, opts)}
+            run={(caller, opts) => burn.capture(() => getClient().claimProceeds(sale.id, caller, opts))}
           />}
         </div>
       )}
+      {burn.moment && <BurnMoment sale={sale} moment={burn.moment} />}
       <PublicStats sale={sale} result={result} className="mt-6 sm:mt-8" />
     </>
   );

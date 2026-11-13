@@ -24,6 +24,7 @@ import { useWallet } from "@/lib/wallet";
 import { fillStatus, isPenalized, penaltyOf, STATUS_BADGE, voidSentence, type ResultFill } from "./compute";
 import { LiquidityAction } from "./pool-panel";
 import { YourTokens } from "./trade";
+import { WinCard } from "./win-card";
 
 /**
  * The connected account's outcome and the one main action on this page:
@@ -261,6 +262,9 @@ function Mine({ sale, result, fill, account }: { sale: Sale; result: SaleResult;
           </div>
         )}
       </div>
+
+      {/* A winner can post the card; renders nothing for a refund or a failed sale. */}
+      <WinCard sale={sale} result={result} fill={fill} className="mt-4 border-t border-line pt-4" />
     </>
   );
 }

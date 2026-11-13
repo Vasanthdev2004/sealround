@@ -5,9 +5,17 @@ export function saleHref(sale: Sale): string {
   return sale.status === "settled" || sale.status === "failed" ? `/sale/${sale.id}/result` : `/sale/${sale.id}`;
 }
 
+/**
+ * The token page of a settled sale: launch price, supply, burn and where it
+ * trades. Null for any other sale (a failed sale sold no tokens).
+ */
+export function tokenHref(sale: Sale): string | null {
+  return sale.status === "settled" ? `/token/${encodeURIComponent(sale.id)}` : null;
+}
+
 export const isDone = (sale: Sale) => sale.status === "settled" || sale.status === "failed";
 
-const FAIL_TEXT: Record<NonNullable<SaleResult["failReason"]>, string> = {
+export const FAIL_TEXT: Record<NonNullable<SaleResult["failReason"]>, string> = {
   below_min_raise: "Missed its minimum raise",
   no_valid_bids: "No valid bids",
   settle_timeout: "Enclave timed out",

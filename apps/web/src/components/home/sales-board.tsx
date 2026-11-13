@@ -11,13 +11,15 @@ import { usdcStr } from "@/lib/format";
 import { useNow, useSales } from "@/lib/hooks";
 import type { Sale } from "@/lib/types";
 import { CountersSkeleton, FeaturedSkeleton, SaleTableSkeleton } from "./board-skeleton";
+import { FairLeaderboard } from "./fair-leaderboard";
 import { FeaturedSale } from "./featured-sale";
 import { EMPTY_COPY, FILTERS, matchesFilter, sortSales, type SaleFilter } from "./sale-filters";
 import { SaleRow, SaleTableHead } from "./sale-row";
 
 /**
  * Everything on the home page that reads live data: the featured sale, the
- * totals and the sales table. The layout matches BoardSkeleton box for box.
+ * totals, the sales table and the fair-launch leaderboard. The layout matches
+ * BoardSkeleton box for box.
  */
 export function SalesBoard() {
   const { data: sales, loading, error, refetch } = useSales();
@@ -100,6 +102,8 @@ export function SalesBoard() {
           </div>
         )}
       </section>
+
+      {(sales || !error) && <FairLeaderboard sales={sales} />}
     </div>
   );
 }

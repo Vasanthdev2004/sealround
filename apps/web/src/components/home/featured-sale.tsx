@@ -14,7 +14,7 @@ import { ago, shortAccount, usdcStr } from "@/lib/format";
 import { useBids, useClientQuery } from "@/lib/hooks";
 import type { BidRecord, Sale } from "@/lib/types";
 import { TradingTag } from "./sale-row";
-import { isDone, saleHref, salePrice, saleTiming } from "./sale-state";
+import { isDone, saleHref, salePrice, saleTiming, tokenHref } from "./sale-state";
 
 const SHOWN_BIDS = 7;
 
@@ -45,6 +45,7 @@ export function FeaturedSale({ sale, now }: { sale: Sale; now: number }) {
   const timing = saleTiming(sale, now, result);
   const price = salePrice(sale, result);
   const span = c.bidEnd - c.bidStart;
+  const token = tokenHref(sale);
 
   return (
     <section aria-label={`${c.tokenName} sale`} className="panel spotlight grid overflow-hidden lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
@@ -88,6 +89,11 @@ export function FeaturedSale({ sale, now }: { sale: Sale; now: number }) {
           <ButtonLink href={saleHref(sale)} variant="primary" size="lg">
             {ACTION[sale.status]}
           </ButtonLink>
+          {token && (
+            <ButtonLink href={token} size="lg">
+              Token page
+            </ButtonLink>
+          )}
           {price.note && <span className="text-small text-muted">{price.note}</span>}
         </div>
 

@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import arena from "@/data/arena-results.json";
+import { BurnCounter } from "@/components/burn/burn-counter";
 import { ButtonLink } from "@/components/ui/button";
 import { Reveal } from "@/components/visual/reveal";
 import { REPO_URL, appHref } from "@/lib/site";
@@ -35,6 +36,7 @@ export function Landing() {
       <Steps />
       <Unique />
       <Verify />
+      <Burns />
       <Launch />
       <FinalCta />
     </>
@@ -395,6 +397,21 @@ function Verify() {
           <ChecksDemo />
         </Reveal>
       </div>
+    </section>
+  );
+}
+
+/** The burn counter: what demand left unsold across launches, read live from the sales. */
+function Burns() {
+  return (
+    <section className={`${wrap} mt-28 sm:mt-36`}>
+      <SectionTitle
+        title="Demand sets the supply."
+        lead="Every winner pays the clearing price, and every token the bids did not take burns when the creator is paid. The supply that is left is the supply the community asked for."
+      />
+      <Reveal className="mt-10">
+        <BurnCounter />
+      </Reveal>
     </section>
   );
 }

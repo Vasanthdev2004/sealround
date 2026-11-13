@@ -1,6 +1,7 @@
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
 import { StatRow } from "@/components/ui/stat";
 import { cn } from "@/lib/cn";
+import { LeaderboardSkeleton } from "./fair-leaderboard";
 import { SALE_COLUMNS, SaleTableHead } from "./sale-row";
 
 /** One counter cell: a label, a 22px value, a hint (Stat size="md"). */
@@ -119,6 +120,13 @@ export function BoardSkeleton() {
           <Skeleton className="h-6 w-20" />
         </div>
         <SaleTableSkeleton />
+      </div>
+      <div className="flex flex-col gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-6 w-60 max-w-full" />
+          <Skeleton className="h-3.5 w-80 max-w-full" rounded="sm" />
+        </div>
+        <LeaderboardSkeleton />
       </div>
     </LoadingRegion>
   );

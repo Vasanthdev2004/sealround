@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, ArrowUpRight } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Megaphone } from "lucide-react";
 import { SaleStatusBadge, Tag } from "@/components/ui/badge";
 import { SimulatedNote } from "@/components/ui/bits";
 import { ButtonLink } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { accountUrl } from "@/lib/format";
 import { useClientQuery } from "@/lib/hooks";
 import { isRhea, poolUrl } from "@/lib/liquidity";
 import type { LiquidityState, Sale } from "@/lib/types";
+import { useWallet } from "@/lib/wallet";
 
 /**
  * Identity and status at the top of a sale: a back link, the name with its
@@ -37,8 +38,21 @@ export function SaleHeader({
   const mock = getClient().mode === "mock";
   const c = sale.config;
   const trade = useTradeLink(sale);
-  const allActions = (actions || trade) && (
+  // The creator's launch kit, while there is still a sale to promote.
+  const { account } = useWallet();
+  const kit = account === sale.creator && (sale.status === "upcoming" || sale.status === "open") && (
+    <ButtonLink
+      href={`/sale/${encodeURIComponent(sale.id)}/kit`}
+      variant="outline"
+      size="sm"
+      icon={<Megaphone className="size-3.5" strokeWidth={1.75} aria-hidden />}
+    >
+      Launch kit
+    </ButtonLink>
+  );
+  const allActions = (actions || trade || kit) && (
     <>
+      {kit}
       {trade}
       {actions}
     </>

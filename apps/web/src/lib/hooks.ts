@@ -191,19 +191,39 @@ export function useBidSecret(saleId: string, account: string | null): BidSecret 
   );
 }
 
+let titleOwner = 0;
+
 /**
  * Names the browser tab after what the page shows ("Fair Test · Sealround"),
- * for client-loaded pages whose static metadata cannot know it. Restores the
- * previous title on unmount.
+ * for client-loaded pages whose static metadata cannot know it. `full` is used
+ * as the whole title instead.
+ *
+ * Streamed page metadata can land after this effect and put the route's fixed
+ * title back, so the title is set again whenever the head changes, but only
+ * while the URL path is the one it mounted on: after a client navigation the
+ * next route owns the title. On unmount without a navigation the previous
+ * title comes back.
  */
-export function DocumentTitle({ title }: { title: string }): null {
+export function DocumentTitle({ title, full }: { title?: string; full?: string }): null {
+  const want = full ?? `${title ?? ""} · Sealround`;
   useEffect(() => {
+    const path = location.pathname;
     const before = document.title;
-    document.title = `${title} · Sealround`;
-    return () => {
-      document.title = before;
+    // Only the most recently mounted title reacts, so two mounted at once
+    // cannot keep overwriting each other.
+    const me = ++titleOwner;
+    const mine = () => titleOwner === me && location.pathname === path;
+    const set = () => {
+      if (mine() && document.title !== want) document.title = want;
     };
-  }, [title]);
+    set();
+    const watch = new MutationObserver(set);
+    watch.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => {
+      watch.disconnect();
+      if (mine()) document.title = before;
+    };
+  }, [want]);
   return null;
 }
 

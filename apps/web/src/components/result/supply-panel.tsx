@@ -58,8 +58,19 @@ const LABEL_MIN_PX = 44;
  * after the sale; and the log of the mint and the burn with their
  * transactions. Every amount comes from the views (get_sale, get_result) and
  * the parts add up to the supply at launch in base units.
+ *
+ * `hideNoPool` drops the closing "No Sealround pool" line, for a page that
+ * already says so (the token page's trade column).
  */
-export function SupplyStory({ sale, result }: { sale: Sale; result: SaleResult }) {
+export function SupplyStory({
+  sale,
+  result,
+  hideNoPool = false,
+}: {
+  sale: Sale;
+  result: SaleResult;
+  hideNoPool?: boolean;
+}) {
   const c = sale.config;
   const sym = c.tokenSymbol;
 
@@ -91,7 +102,7 @@ export function SupplyStory({ sale, result }: { sale: Sale; result: SaleResult }
         </div>
         <Ledger sale={sale} result={result} ledger={ledger} />
         <SupplyLog sale={sale} ledger={ledger} />
-        {!c.liquidity && (
+        {!c.liquidity && !hideNoPool && (
           <p className="border-t border-line px-5 py-3.5 text-small text-muted sm:px-6">
             <span className="text-fg">No Sealround pool.</span> This sale opened no market for {sym}: making one is the
             creator&rsquo;s job.

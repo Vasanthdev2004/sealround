@@ -56,6 +56,7 @@ export function ResultHeader({ sale, action }: { sale: Sale; action?: React.Reac
         </span>
         <span className="min-w-0 break-all max-sm:hidden">{sale.tokenAccount}</span>
         <span>No admin key</span>
+        {sale.status === "settled" && <Link href={`/token/${encodeURIComponent(sale.id)}`} className="text-muted underline decoration-line-strong underline-offset-2 transition-colors hover:text-fg">Token page</Link>}
       </p>
     </header>
   );

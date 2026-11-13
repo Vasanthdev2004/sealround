@@ -174,7 +174,7 @@ type State = {
 type ProceedsPaid = { raise: bigint; burned: bigint; allocation: boolean; reserve: boolean };
 
 /** The demo sales seeded on first visit. Their times are relative to that visit. */
-const SEEDED_IDS = ["lantern", "driftwood", "ashfall", "kiln", "fairt", "moth"];
+const SEEDED_IDS = ["lantern", "thistle", "driftwood", "ashfall", "kiln", "fairt", "moth"];
 /** The seeded sale that is taking bids on first visit. Rolling copies are made from it. */
 const LIVE_SEED = "fairt";
 
@@ -302,6 +302,13 @@ export class MockClient implements FairgroundClient {
     } else if (!this.hasLiveSeed(Date.now())) {
       await this.refreshSeed(Date.now());
       this.persist();
+    } else {
+      // A demo sale added by a later build: seed just that one.
+      const missing = new Set(SEEDED_IDS.filter((id) => !this.s.sales[id]));
+      if (missing.size > 0) {
+        await this.seed(Date.now(), new Set(SEEDED_IDS.filter((id) => !missing.has(id))));
+        this.persist();
+      }
     }
     // Sales stored by builds that used a placeholder build hash.
     for (const s of Object.values(this.state.sales)) {
@@ -1916,6 +1923,13 @@ function seedDefs(now: number): SeedDef[] {
       hue: 38, saleSupply: 150_000, floor: 0.001, minRaise: 50,
       start: now - 3 * DAY, end: now - 3 * DAY + 4 * HOUR, crowd: 45, bots: 3, copycat: true,
       closeAt: now - 3 * DAY + 4 * HOUR + 2 * MIN, claimShare: 0.6,
+    },
+    {
+      id: "thistle", mark: "🌿", name: "Thistle", symbol: "THSL", creator: "meadow.testnet",
+      description: "Demand took only part of the supply. The unsold rest burned when the creator collected.",
+      hue: 140, saleSupply: 400_000, floor: 0.001, minRaise: 50,
+      start: now - 2 * DAY, end: now - 2 * DAY + 4 * HOUR, crowd: 18, bots: 1,
+      closeAt: now - 2 * DAY + 4 * HOUR + 3 * MIN, claimShare: 0.5,
     },
     {
       id: "driftwood", mark: "🌊", name: "Driftwood", symbol: "DRFT", creator: "shoreline.testnet",

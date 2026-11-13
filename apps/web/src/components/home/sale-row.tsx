@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { usdcStr } from "@/lib/format";
 import { useClientQuery } from "@/lib/hooks";
 import type { Sale, SaleResult } from "@/lib/types";
-import { isDone, saleHref, salePrice, saleTiming } from "./sale-state";
+import { isDone, saleHref, salePrice, saleTiming, tokenHref } from "./sale-state";
 
 /**
  * A settled sale whose launch pool is seeded: its token trades. The board
@@ -50,7 +50,12 @@ export function SaleTableHead() {
   );
 }
 
-/** One sale as a row. The whole row is the link. */
+/**
+ * One sale as a row. The whole row is the link to the sale (or its result):
+ * the name link is stretched over the row, which is `relative`. A settled
+ * row also links its token page; that link sits above the stretched one
+ * (`relative z-10`), so neither link is nested in the other.
+ */
 export function SaleRow({ sale, now }: { sale: Sale; now: number }) {
   // Only a finished sale has a result to fetch, so the hook lives in its own component.
   return isDone(sale) ? <DoneRow sale={sale} now={now} /> : <Row sale={sale} now={now} />;
@@ -69,19 +74,25 @@ function Row({ sale, now, result }: { sale: Sale; now: number; result?: SaleResu
   const time = timing.until !== undefined ? <Countdown to={timing.until} /> : <span className="num">{timing.value}</span>;
 
   return (
-    <Link
-      href={saleHref(sale)}
+    <div
       className={cn(
         SALE_COLUMNS,
-        "group min-h-[68px] border-b border-line py-3 transition-colors duration-[120ms] ease-surface last:border-b-0 hover:bg-wash-soft focus-visible:outline-offset-[-2px]",
+        "group relative min-h-[68px] border-b border-line py-3 transition-colors duration-[120ms] ease-surface last:border-b-0 hover:bg-wash-soft",
       )}
     >
       <span className="flex min-w-0 items-center gap-3 max-sm:items-start">
         <TokenMark symbol={c.tokenSymbol} hue={sale.meta.hue} icon={sale.meta.icon} size={32} alt="" className="max-sm:mt-0.5" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-small font-semibold text-fg">{c.tokenName}</span>
-          <span className="flex min-w-0 items-center gap-2">
+          <Link
+            href={saleHref(sale)}
+            className="block truncate text-small font-semibold text-fg after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-[-2px] focus-visible:after:outline-accent"
+          >
+            {c.tokenName}
+          </Link>
+          {/* Wraps where the symbol, the token link and a pool tag do not fit side by side. */}
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="truncate text-label text-subtle max-sm:hidden">${c.tokenSymbol}</span>
+            <TokenLink sale={sale} />
             <TradingTag result={result} />
           </span>
           <span className="block sm:hidden">
@@ -128,6 +139,20 @@ function Row({ sale, now, result }: { sale: Sale; now: number; result?: SaleResu
         strokeWidth={1.75}
         aria-hidden
       />
+    </div>
+  );
+}
+
+/** A settled sale’s token page, as a small link above the row’s own link. */
+function TokenLink({ sale }: { sale: Sale }) {
+  const href = tokenHref(sale);
+  if (!href) return null;
+  return (
+    <Link
+      href={href}
+      className="relative z-10 shrink-0 rounded-sm text-label whitespace-nowrap text-muted underline decoration-line-strong underline-offset-4 transition-colors hover:text-fg"
+    >
+      <span className="sr-only">{sale.config.tokenName} </span>Token page
     </Link>
   );
 }

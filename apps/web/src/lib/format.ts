@@ -10,7 +10,10 @@ export const priceStr = (v: bigint) => formatUnits(v, 6, 6);
 
 /** Token amount, compact for big numbers: "150K", "1.25M", "842.31". */
 export function tokenStr(v: bigint, decimals = 18): string {
-  const whole = Number(v / 10n ** BigInt(Math.max(0, decimals - 6))) / 1e6;
+  // Work in millionths of a token: scale down for more than 6 decimals, up for
+  // fewer (the contract allows 0 to 24).
+  const micro = decimals >= 6 ? v / 10n ** BigInt(decimals - 6) : v * 10n ** BigInt(6 - decimals);
+  const whole = Number(micro) / 1e6;
   if (whole >= 1e9) return `${trim(whole / 1e9)}B`;
   if (whole >= 1e6) return `${trim(whole / 1e6)}M`;
   if (whole >= 1e4) return `${trim(whole / 1e3)}K`;
