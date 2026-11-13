@@ -16,6 +16,7 @@ import { useAction, useClientQuery, useNow, useRelayerPolicy } from "@/lib/hooks
 import { bpsPct, poolUrl, SEED_STEPS, STAGE_LABEL, STEP_LABEL, stepBusy, stepPhrase } from "@/lib/liquidity";
 import type { DexPool, LiquidityStage, LiquidityState, LiquidityWriteResult, Sale, SaleResult } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
+import { TradeAction } from "./trade";
 
 const STAGE_TONE: Record<LiquidityStage, Tone> = {
   waiting: "neutral",
@@ -137,6 +138,7 @@ export function PoolPanel({ sale, result }: { sale: Sale; result: SaleResult }) 
               exchange so far. Each one can be run again.
             </p>
           )}
+          <TradeAction sale={sale} result={result} className="mt-4" />
           <LiquidityAction sale={sale} liquidity={l} kind="seed" className="mt-4" />
           <LiquidityAction sale={sale} liquidity={l} kind="abandon" className="mt-4" />
         </div>

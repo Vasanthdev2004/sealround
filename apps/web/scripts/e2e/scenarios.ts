@@ -30,6 +30,7 @@ import { createDevSigner, devSigners } from "../../src/lib/near/dev-signer";
 import { browserSigners, staticSigners } from "../../src/lib/near/signers";
 import type { BidView, FillView, ResultView, SaleView } from "../../src/lib/near/views";
 import { ensureDeliverable } from "../../src/lib/oneclick";
+import { markIcon } from "../../src/lib/token-icon";
 import type { ClientNotice, PaidReason, RelayInfo, SaleConfig, SaleMeta } from "../../src/lib/types";
 import { removeSandbox, sandboxExists, sleep, type Named } from "./chain";
 import { sha256Hex } from "./outlayer";
@@ -294,17 +295,17 @@ export async function runScenarios(w: World, report: Report): Promise<void> {
     quoteToken: usdc,
     ...o,
   });
-  const meta = (description: string): SaleMeta => ({ description, hue: 0, website: "https://example.com/e2e" });
+  const meta = (description: string, icon?: string): SaleMeta => ({ description, hue: 0, website: "https://example.com/e2e", ...(icon ? { icon } : {}) });
 
-  /** create_sale through the client, checked against the contract's own views; leaves the sale open. */
-  async function createAndOpen(t: Checks, saleId: string, config: SaleConfig, description: string) {
+  /** create_sale through the client, checked against the contract's own views; leaves the sale open. With `icon`, the token carries it. */
+  async function createAndOpen(t: Checks, saleId: string, config: SaleConfig, description: string, icon?: string) {
     const windowMs = config.bidEnd - config.bidStart;
     const options = { saleId, minStartLeadMs: START_LEAD_MS };
     // The contract's own price for this sale, asked with parameters written out here, not by the client.
-    const asked = BigInt(await w.chain.view<string>(fg, "get_create_cost", { params: rawCreateParams(saleId, config, description, await w.chain.nowNs()) }));
-    const cost = await client.getCreateCost(creator.id, config, meta(description), options);
+    const asked = BigInt(await w.chain.view<string>(fg, "get_create_cost", { params: rawCreateParams(saleId, config, description, await w.chain.nowNs(), icon) }));
+    const cost = await client.getCreateCost(creator.id, config, meta(description, icon), options);
     const near0 = await w.chain.settledNear(creator.id);
-    const sale = await client.createSale(creator.id, config, meta(description), options);
+    const sale = await client.createSale(creator.id, config, meta(description, icon), options);
     const spent = near0 - (await w.chain.settledNear(creator.id));
     const view = await x.sale(saleId);
     if (!view) throw new Error(`the contract has no sale ${saleId} after createSale`);
@@ -329,6 +330,10 @@ export async function runScenarios(w: World, report: Report): Promise<void> {
     // "upcoming" unless this machine took longer than the ten seconds to bid_start.
     t.ok("client createSale: the sale is out of setup", sale.chainStatus === "upcoming" || sale.chainStatus === "open", show(sale.chainStatus));
     t.eq("the sale token exists with its whole supply held by the contract", [await w.chain.ftSupply(view.token), await w.chain.ft(view.token, fg)], [config.totalSupply, config.totalSupply]);
+    if (icon) {
+      const ftMeta = await w.chain.view<{ icon?: string | null }>(view.token, "ft_metadata");
+      t.eq("the token icon: get_sale, the token's NEP-148 ft_metadata and the client's sale all carry the one the client sent", [view.icon, ftMeta.icon, sale.meta.icon], [icon, icon, icon]);
+    }
 
     await w.chain.advanceTo(BigInt(view.bid_start));
     const open = await client.getSale(saleId);
@@ -589,7 +594,7 @@ export async function runScenarios(w: World, report: Report): Promise<void> {
 
   await report.scenario("tee-create", "TEE: create_sale (wallet transaction), sale key from the pinned enclave job", ["setup"], async (t) => {
     const config = saleConfig(teeParams, { tokenName: "E2E Sealed", tokenSymbol: "ETEE", revealMode: "tee", maxBids: teeBids.length }, await x.nowMs(), 300_000);
-    const { sale, view } = await createAndOpen(t, TEE, config, "Sealed-bid sale of the sandbox end-to-end run.");
+    const { sale, view } = await createAndOpen(t, TEE, config, "Sealed-bid sale of the sandbox end-to-end run.", markIcon("🐸", 142)!);
     const served = await w.worker.last("pubkey", TEE);
     const answer = JSON.parse(served.run.output) as { ok: boolean; op: string; sale_id: string; pubkey: string };
     teePubkey = answer.pubkey;
@@ -954,7 +959,7 @@ function requestFacts(request: Record<string, unknown>): unknown[] {
  * contract what creating it costs. The cost does not depend on the times, so
  * the window simply starts an hour after `nowNs`.
  */
-function rawCreateParams(saleId: string, config: SaleConfig, description: string, nowNs: bigint): Record<string, unknown> {
+function rawCreateParams(saleId: string, config: SaleConfig, description: string, nowNs: bigint, icon?: string): Record<string, unknown> {
   const start = nowNs + 3_600n * 1_000_000_000n;
   return {
     sale_id: saleId,
@@ -975,6 +980,7 @@ function rawCreateParams(saleId: string, config: SaleConfig, description: string
     ...(config.revealWindowMs === undefined ? {} : { reveal_window: (BigInt(config.revealWindowMs) * MS).toString() }),
     settle_timeout: (BigInt(config.settleTimeoutMs) * MS).toString(),
     quote_token: config.quoteToken,
+    ...(icon ? { icon } : {}),
     description,
     website: "https://example.com/e2e",
   };

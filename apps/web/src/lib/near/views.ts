@@ -277,6 +277,8 @@ export function saleFromView(
     description: v.description ?? "",
     hue: hueOf(v.sale_id),
     ...(v.website ? { website: v.website } : {}),
+    // Older views may lack the field; the UI checks the value again before showing it.
+    icon: typeof v.icon === "string" && v.icon ? v.icon : null,
   };
   const closedAt = optMs(v.closed_at);
   const failReason = v.status === "failed" ? (extra.failReason ?? null) : null;
@@ -334,6 +336,8 @@ export function createSaleParams(saleId: string, config: SaleConfig, meta: SaleM
     ...(commitReveal && config.revealWindowMs !== undefined ? { reveal_window: msToNs(config.revealWindowMs) } : {}),
     settle_timeout: msToNs(config.settleTimeoutMs),
     quote_token: config.quoteToken,
+    // Sent as is: the contract checks a data: URL of at most 2,048 bytes (near.ts checks first).
+    ...(meta.icon ? { icon: meta.icon } : {}),
     ...(meta.description.trim() ? { description: meta.description.trim() } : {}),
     ...(meta.website?.trim() ? { website: meta.website.trim() } : {}),
     // The contract picks the exchange (get_config `dex`); the terms name only the share, the reserve and the fee.

@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { SaleStatusBadge, Tag } from "@/components/ui/badge";
 import { SimulatedNote } from "@/components/ui/bits";
+import { ButtonLink } from "@/components/ui/button";
+import { TokenMark } from "@/components/ui/token-mark";
 import { getClient } from "@/lib/client";
 import { accountUrl } from "@/lib/format";
-import type { Sale } from "@/lib/types";
+import { useClientQuery } from "@/lib/hooks";
+import { isRhea, poolUrl } from "@/lib/liquidity";
+import type { LiquidityState, Sale } from "@/lib/types";
 
 /**
  * Identity and status at the top of a sale: a back link, the name with its
@@ -32,6 +36,13 @@ export function SaleHeader({
   // Demo accounts exist only on the simulated chain, so they get no explorer link.
   const mock = getClient().mode === "mock";
   const c = sale.config;
+  const trade = useTradeLink(sale);
+  const allActions = (actions || trade) && (
+    <>
+      {trade}
+      {actions}
+    </>
+  );
 
   return (
     <header>
@@ -46,11 +57,14 @@ export function SaleHeader({
 
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
-          <h1 className="min-w-0 text-h1 break-words text-fg">{c.tokenName}</h1>
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+            <HeaderMark sale={sale} />
+            <h1 className="min-w-0 text-h1 break-words text-fg">{c.tokenName}</h1>
+          </div>
           <SaleStatusBadge status={sale.status} size="lg" />
           {sale.isJudgeSale && <Tag>demo run</Tag>}
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+        {allActions && <div className="flex flex-wrap items-center gap-2">{allActions}</div>}
       </div>
 
       <p className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-small text-subtle sm:mt-3">
@@ -82,5 +96,60 @@ export function SaleHeader({
         </SimulatedNote>
       )}
     </header>
+  );
+}
+
+/**
+ * The token's icon beside its name, at the height of the title's line: 34 px
+ * on phones, 44 px from `sm`. Shared with the result page's header.
+ */
+export function HeaderMark({ sale }: { sale: Sale }) {
+  const c = sale.config;
+  return (
+    <>
+      <TokenMark symbol={c.tokenSymbol} hue={sale.meta.hue} icon={sale.meta.icon} size={34} className="sm:hidden" />
+      <TokenMark symbol={c.tokenSymbol} hue={sale.meta.hue} icon={sale.meta.icon} size={44} className="max-sm:hidden" />
+    </>
+  );
+}
+
+/**
+ * Where a settled sale's token trades, once its launch pool is seeded: the
+ * pool on Rhea (`poolUrl`; another exchange's account on the explorer), or
+ * "simulated" on the mock chain, whose pool id is made up and must never
+ * point at the real Rhea app. Null when there is nothing to show.
+ */
+export function tradeTarget(
+  status: Sale["status"],
+  l: LiquidityState | null | undefined,
+  mock: boolean,
+): { kind: "link"; url: string; label: string } | { kind: "simulated" } | null {
+  if (status !== "settled" || l?.stage !== "seeded") return null;
+  if (mock || l.simulated) return { kind: "simulated" };
+  const url = poolUrl(l.dex, l.poolId);
+  return url ? { kind: "link", url, label: isRhea(l.dex) ? "Trade on Rhea" : "View the pool" } : null;
+}
+
+/** The header's trade link (see `tradeTarget`). Reads the result only once the sale has settled; the client notifies when it changes. */
+function useTradeLink(sale: Sale): React.ReactNode {
+  const settled = sale.status === "settled";
+  const { data: result } = useClientQuery(
+    () => (settled ? getClient().getResult(sale.id) : Promise.resolve(null)),
+    ["sale-header:result", sale.id, settled],
+    0,
+  );
+  const target = tradeTarget(sale.status, result?.liquidity, getClient().mode === "mock");
+  if (!target) return null;
+  if (target.kind === "simulated") return <Tag>Simulated Rhea pool</Tag>;
+  return (
+    <ButtonLink
+      href={target.url}
+      external
+      variant="outline"
+      size="sm"
+      icon={<ArrowUpRight className="order-last size-3.5" strokeWidth={1.75} aria-hidden />}
+    >
+      {target.label}
+    </ButtonLink>
   );
 }

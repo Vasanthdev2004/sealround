@@ -23,7 +23,8 @@ function Lane({ className }: { className: string }) {
 /**
  * Loading state for the result page, box for box with the settled layout: the
  * header, the outcome block with "Your result" beside it and the reveal band
- * under its headline, the fairness timeline, then the same-price comparison.
+ * under its headline, the fairness timeline, the same-price comparison, then
+ * the start of "Where every token went".
  * Heights follow a typical settled sale of about 50 bids at 1440 and 375 px.
  */
 export function ResultSkeleton() {
@@ -195,6 +196,44 @@ export function ResultSkeleton() {
               <Line row="h-[1lh]" bar="h-3 w-96 max-w-full" />
               <Line row="h-[1lh] sm:hidden" bar="h-3 w-24" />
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SupplyStory: a section title, the lead, then the card: supply at launch and after, the
+          segmented bar, the ledger's header and rows. The mint and burn log sits below the fold. */}
+      <div aria-hidden>
+        <Line row="h-[30px]" bar="h-6 w-60 max-w-full" />
+        <div className="mt-2 max-w-[68ch] text-body">
+          <Line row="h-[1lh]" bar="h-3.5 w-full" />
+          <Line row="h-[1lh]" bar="h-3.5 w-3/5" />
+        </div>
+        <div className="panel mt-5">
+          <div className="px-5 pt-5 sm:px-6">
+            <div className="grid gap-3 sm:grid-cols-2 sm:gap-0 [&>*+*]:border-line max-sm:[&>*+*]:border-t max-sm:[&>*+*]:pt-3 sm:[&>*+*]:border-l sm:[&>*+*]:pl-6">
+              {Array.from({ length: 2 }, (_, i) => (
+                <div key={i} className="min-w-0 sm:pr-4">
+                  <Line row="h-[18px]" bar="h-3 w-24 max-w-full" />
+                  <Line row="h-[1lh] text-num-md" bar="h-5 w-32 max-w-full" className="mt-1" />
+                </div>
+              ))}
+            </div>
+            <Skeleton className="mt-5 h-7 w-full" rounded="sm" />
+          </div>
+          <div className="mt-5 border-t border-line">
+            <div className="flex h-9 items-center justify-between border-b border-line px-5 sm:px-6">
+              <Skeleton className="h-3 w-10" rounded="sm" />
+              <Skeleton className="h-3 w-24" rounded="sm" />
+            </div>
+            {Array.from({ length: 3 }, (_, i) => (
+              <div key={i} className="flex items-start justify-between gap-4 border-b border-line px-5 py-3 last:border-b-0 sm:px-6">
+                <div className="min-w-0 flex-1">
+                  <Line row="h-[21px]" bar="h-3.5 w-32" />
+                  <Line row="h-[18px]" bar="h-3 w-full max-w-[22rem]" className="mt-0.5" />
+                </div>
+                <Line row="h-[21px]" bar="h-3.5 w-24" />
+              </div>
+            ))}
           </div>
         </div>
       </div>

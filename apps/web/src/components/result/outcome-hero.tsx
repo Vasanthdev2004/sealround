@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/stat";
 import { dateTime, duration, priceStr, tokenFull, tokenStr, usdcStr } from "@/lib/format";
 import type { Sale, SaleResult } from "@/lib/types";
 import { failText, floorMultiple, pct, pctStr, validDeposits, type ResultFill } from "./compute";
+import { poolLeftover, supplyLedger } from "./supply";
 
 type FactItem = {
   label: string;
@@ -51,7 +52,9 @@ function Settled({ sale, result, fills, aside, reveal }: Props) {
   const winners = fills.filter((f) => f.tokens > 0n).length;
   const bids = result.nValid + result.nInvalid;
   const penalties = result.totalPenalties ?? 0n;
-  const toBurn = !!result.proceeds && !result.proceeds.unsoldBurned && result.unsold > 0n;
+  // The burn is the unsold sale supply plus any pool reserve the pool did not take, so it is not all "unsold".
+  const burn = supplyLedger(sale, result);
+  const burned = burn.burnState === "burned" || burn.burnState === "none";
 
   return (
     <Frame
@@ -104,10 +107,20 @@ function Settled({ sale, result, fills, aside, reveal }: Props) {
       facts={[
         { label: "Raised", value: usdcStr(result.totalRaised), unit: "USDC" },
         {
-          label: toBurn ? "Unsold, to burn" : "Unsold, burned",
+          label: burned ? "Burned" : "To burn",
           value: tokenStr(result.unsold, c.decimals),
           unit: c.tokenSymbol,
-          title: toBurn ? "Burns with the creator payout." : undefined,
+          title: `${
+            burn.burnPool > 0n
+              ? `${tokenFull(burn.burnUnsold, c.decimals)} unsold and ${tokenFull(burn.burnPool, c.decimals)} ${poolLeftover(result.liquidity)}. `
+              : ""
+          }${
+            burn.burnState === "none"
+              ? "Nothing to burn: every token for sale sold."
+              : burned
+                ? "Burned at the creator payout."
+                : "Burns with the creator payout."
+          }`,
         },
         { label: "Valid bids", value: result.nValid, unit: `of ${bids}` },
         closeFact(sale, result),

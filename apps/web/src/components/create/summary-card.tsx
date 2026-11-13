@@ -4,7 +4,8 @@ import { ArrowRight } from "lucide-react";
 import { SimulatedNote } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
 import { SectionProgress, type SectionStatuses } from "./progress";
-import { CostRow, SummaryTerms, TokenMark } from "./rules";
+import { DraftToken } from "./draft-token";
+import { CostRow, SummaryTerms } from "./rules";
 import type { Derived, Draft } from "./model";
 
 /**
@@ -38,7 +39,7 @@ export function SummaryCard({
       className="panel flex flex-col overflow-hidden lg:max-h-[calc(100dvh-88px)]"
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
-        <TokenMark draft={draft} />
+        <DraftToken draft={draft} />
         <SummaryTerms draft={draft} derived={derived} className="mt-4 border-t border-line" />
         <CostRow mode={mode} tee={draft.revealMode === "tee"} className="border-t border-line" />
       </div>

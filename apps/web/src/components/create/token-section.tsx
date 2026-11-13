@@ -5,6 +5,7 @@ import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
 import { palette } from "@/lib/palette";
 import { FormSection, Label, TextArea, radioKeys, type SectionProps } from "./form-kit";
+import { IconPicker } from "./icon-picker";
 import { DESCRIPTION_MAX, HUES, groupDigits, tokenAccountFor } from "./model";
 
 export const HUE_NAME: Record<number, string> = {
@@ -71,6 +72,8 @@ export function TokenSection({ draft, set, error, touch, status }: SectionProps)
         <HuePicker value={draft.hue} onChange={(h) => set("hue", h)} />
       </div>
 
+      <IconPicker draft={draft} set={set} error={error} touch={touch} />
+
       <TextArea
         label={
           <>
@@ -89,7 +92,7 @@ export function TokenSection({ draft, set, error, touch, status }: SectionProps)
   );
 }
 
-/** The hue that tints the token's mark: a row of small discs, the chosen one ringed. */
+/** The hue of the token's generated mark (and of its monogram's tint): a row of small discs, the chosen one ringed. */
 function HuePicker({ value, onChange }: { value: number; onChange: (h: number) => void }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">

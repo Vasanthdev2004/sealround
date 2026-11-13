@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { HeaderMark } from "@/components/sale-common/sale-header";
 import { SaleStatusBadge, Tag } from "@/components/ui/badge";
 import { getClient } from "@/lib/client";
 import { accountUrl } from "@/lib/format";
@@ -27,7 +28,10 @@ export function ResultHeader({ sale, action }: { sale: Sale; action?: React.Reac
       </Link>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h1 className="min-w-0 text-h1 break-words text-fg">{c.tokenName}</h1>
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+          <HeaderMark sale={sale} />
+          <h1 className="min-w-0 text-h1 break-words text-fg">{c.tokenName}</h1>
+        </div>
         <SaleStatusBadge status={sale.status} size="lg" />
         {sale.isJudgeSale && <Tag>demo run</Tag>}
         {action && <div className="ml-auto max-sm:w-full">{action}</div>}

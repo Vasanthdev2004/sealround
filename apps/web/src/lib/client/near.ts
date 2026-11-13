@@ -70,6 +70,7 @@ import {
 } from "../near/views";
 import { dateTime } from "../format";
 import { STAGE_LABEL, STEP_LABEL } from "../liquidity";
+import { iconError } from "../token-icon";
 import type {
   Attestation,
   Balances,
@@ -737,7 +738,10 @@ export class NearClient implements FairgroundClient {
   // ---------- create ----------
 
   /** The config with its window moved so bid_start is at least `leadMs` after the chain's clock, and the sale id. */
-  private async prepareCreate(config: SaleConfig, opts: CreateOptions) {
+  private async prepareCreate(config: SaleConfig, meta: SaleMeta, opts: CreateOptions) {
+    // The contract's icon rule (sale.rs), checked before anything is read or signed.
+    const iconProblem = iconError(meta.icon);
+    if (iconProblem) throw invalid(iconProblem);
     const saleId = opts.saleId ?? config.tokenSymbol.toLowerCase();
     const idError = saleIdError(saleId, this.contractId);
     if (idError) throw invalid(idError);
@@ -760,12 +764,12 @@ export class NearClient implements FairgroundClient {
 
   async getCreateCost(creator: string, config: SaleConfig, meta: SaleMeta, opts: CreateOptions = {}): Promise<bigint> {
     void creator;
-    const prepared = await this.prepareCreate(config, opts);
+    const prepared = await this.prepareCreate(config, meta, opts);
     return this.createCost(createSaleParams(prepared.saleId, prepared.config, meta));
   }
 
   async createSale(creator: string, config: SaleConfig, meta: SaleMeta, opts: CreateOptions = {}): Promise<Sale> {
-    const prepared = await this.prepareCreate(config, opts);
+    const prepared = await this.prepareCreate(config, meta, opts);
     const { saleId } = prepared;
     if (await this.freshSaleView(saleId)) throw invalid("a sale with this id already exists");
     const params = createSaleParams(saleId, prepared.config, meta);

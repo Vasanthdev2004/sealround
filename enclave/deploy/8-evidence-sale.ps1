@@ -180,11 +180,19 @@ switch ($Phase) {
         $bidStart = $nowNs + [long]$StartInMinutes * 60L * 1000000000L
         $bidEnd = $bidStart + [long]$DurationMinutes * 60L * 1000000000L
         $one = '000000000000000000'    # 18 decimals
+        # The token's face: a crosshair struck through. The contract takes a data: URL of at most 2,048 bytes.
+        $svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#0b0d12'/>" +
+            "<circle cx='32' cy='32' r='17' fill='none' stroke='#3d7eff' stroke-width='4'/>" +
+            "<path d='M32 9v10M32 45v10M9 32h10M45 32h10' stroke='#3d7eff' stroke-width='4' stroke-linecap='round'/>" +
+            "<path d='M14 50L50 14' stroke='#ff5c5c' stroke-width='5' stroke-linecap='round'/></svg>"
+        $icon = 'data:image/svg+xml,' + [Uri]::EscapeDataString($svg)
+        if ($icon.Length -gt 2048) { throw "The token icon is $($icon.Length) bytes; the contract takes at most 2,048." }
         $params = [ordered]@{
             sale_id = $SaleId
             token_name = 'No Snipe'
             token_symbol = 'NOSNIPE'
             decimals = 18
+            icon = $icon
             total_supply = "20000$one"
             sale_supply = "10000$one"
             floor_price = '1000'

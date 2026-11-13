@@ -13,7 +13,9 @@ import { parseUnits, poolPlan, type PoolPlan } from "@fairground/clearing";
 import { MIN_DEPOSIT_FLOOR, invalidBidPenalty, tokenAccountOf } from "@/lib/client/rules";
 import { priceStr, tokenFull, usdcStr } from "@/lib/format";
 import { MAX_RAISE_SHARE_BPS, reserveForSellOut } from "@/lib/liquidity";
+import { iconError, markIcon, markText, tickerMark } from "@/lib/token-icon";
 import type { RevealMode, SaleConfig, SaleMeta } from "@/lib/types";
+import type { IconUpload } from "./icon-image";
 
 export const DECIMALS = 18;
 export const ONE = 10n ** 18n;
@@ -57,6 +59,9 @@ export const DURATION_PRESETS: { value: DurationPreset; label: string; testnet?:
 
 export type StartMode = "now" | "scheduled";
 
+/** The token's icon: none (the monogram stands in), a generated mark, or an uploaded image. */
+export type IconMode = "none" | "mark" | "upload";
+
 /** Launch pool swap fee, basis points. */
 export type PoolFeePreset = "5" | "30" | "100";
 export const POOL_FEE_PRESETS: { value: PoolFeePreset; label: string }[] = [
@@ -72,6 +77,11 @@ export type Draft = {
   totalSupply: string;
   description: string;
   hue: number;
+  iconMode: IconMode;
+  /** The mark's text as typed: 1 to 3 letters or digits, or one emoji. Empty: the ticker's first two. */
+  mark: string;
+  /** The uploaded image, already cropped and shrunk to fit (icon-image.ts). */
+  iconUpload: IconUpload | null;
   saleSupply: string;
   creatorAllocation: string;
   floor: string;
@@ -102,6 +112,9 @@ export const DEFAULT_DRAFT: Draft = {
   totalSupply: "1,000,000",
   description: "",
   hue: 168,
+  iconMode: "mark",
+  mark: "",
+  iconUpload: null,
   saleSupply: "600,000",
   creatorAllocation: "100,000",
   floor: "0.001",
@@ -125,6 +138,7 @@ export type FieldKey =
   | "name"
   | "symbol"
   | "totalSupply"
+  | "icon"
   | "description"
   | "saleSupply"
   | "creatorAllocation"
@@ -145,6 +159,7 @@ export const FIELD_ORDER: FieldKey[] = [
   "name",
   "symbol",
   "totalSupply",
+  "icon",
   "description",
   "saleSupply",
   "creatorAllocation",
@@ -163,6 +178,7 @@ export const SECTION_OF: Record<FieldKey, SectionId> = {
   name: "token",
   symbol: "token",
   totalSupply: "token",
+  icon: "token",
   description: "token",
   saleSupply: "allocation",
   creatorAllocation: "allocation",
@@ -339,6 +355,15 @@ export function derive(
 
   if (d.description.length > DESCRIPTION_MAX) {
     err("description", `Keep it to ${DESCRIPTION_MAX} characters.`, true);
+  }
+
+  if (d.iconMode === "mark" && d.mark.trim() && markText(d.mark) === null) {
+    err("icon", "1 to 3 letters or digits, or one emoji.", true);
+  } else if (d.iconMode === "upload" && !d.iconUpload) {
+    err("icon", "Choose an image, or pick another option.");
+  } else {
+    const problem = iconError(draftIcon(d));
+    if (problem) err("icon", problem, true);
   }
 
   const total = wholeTokens(d.totalSupply, "Total supply must be above zero.");
@@ -620,7 +645,21 @@ export function buildConfig(d: Draft, r: Ready, now: number, quoteToken: string,
   };
 }
 
-export const buildMeta = (d: Draft): SaleMeta => ({ description: d.description.trim(), hue: d.hue });
+/**
+ * The icon the sale will carry, as create_sale gets it: a generated mark (the
+ * typed text, else the ticker's first two characters, on the chosen colour),
+ * the uploaded image, or null.
+ */
+export function draftIcon(d: Draft): string | null {
+  if (d.iconMode === "upload") return d.iconUpload?.dataUrl ?? null;
+  if (d.iconMode === "mark") return markIcon(d.mark.trim() || tickerMark(d.symbol), d.hue);
+  return null;
+}
+
+export function buildMeta(d: Draft): SaleMeta {
+  const icon = draftIcon(d);
+  return { description: d.description.trim(), hue: d.hue, ...(icon ? { icon } : {}) };
+}
 
 // ---------- display helpers ----------
 

@@ -12,7 +12,7 @@
 import { ImageResponse } from "next/og";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import type { OgFont } from "./fonts";
-import { heroFontSize, type CardTone, type SaleCard } from "./sale-card";
+import { heroFontSize, type CardIcon, type CardTone, type SaleCard } from "./sale-card";
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
@@ -371,31 +371,63 @@ export function AppCard() {
 
 // ---------- one sale ----------
 
+const FACE = 76;
+
+/** The token's icon, its generated mark redrawn, or its monogram: a 76 px square with the app's radius. */
+function TokenFace({ icon, monogram }: { icon: CardIcon | null; monogram: string }) {
+  const box: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    width: FACE,
+    height: FACE,
+    borderRadius: 18,
+    overflow: "hidden",
+  };
+  if (icon?.kind === "image") {
+    return (
+      <div style={{ ...box, border: `1px solid ${C.line}`, backgroundColor: C.elev2 }}>
+        {/* next/og draws <img>, not next/image. */}
+        {/* eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text */}
+        <img src={icon.src} width={FACE} height={FACE} style={{ width: FACE, height: FACE, objectFit: "cover" }} />
+      </div>
+    );
+  }
+  if (icon?.kind === "mark") {
+    // The mark's letter sizes (lib/token-icon.ts, a 64-unit box) scaled to 76 px.
+    const n = [...icon.text].length;
+    const size = Math.round(((n <= 1 ? 34 : n === 2 ? 28 : 21) * FACE) / 64);
+    return (
+      <div style={{ ...box, backgroundColor: icon.bg, color: icon.fg, fontSize: size, fontWeight: 600, letterSpacing: -0.02 * size }}>
+        {icon.text}
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{
+        ...box,
+        border: `1px solid ${C.line}`,
+        backgroundColor: C.elev2,
+        fontSize: 28,
+        fontWeight: 600,
+        letterSpacing: -0.6,
+        color: C.muted,
+      }}
+    >
+      {monogram}
+    </div>
+  );
+}
+
 export function SaleCardImage({ card }: { card: SaleCard }) {
   const heroSize = card.hero ? heroFontSize(card.hero.value, card.hero.unit) : 96;
   return (
     <Canvas>
       {/* Token, and the sale's phase. */}
       <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-            width: 76,
-            height: 76,
-            borderRadius: 18,
-            border: `1px solid ${C.line}`,
-            backgroundColor: C.elev2,
-            fontSize: 28,
-            fontWeight: 600,
-            letterSpacing: -0.6,
-            color: C.muted,
-          }}
-        >
-          {card.monogram}
-        </div>
+        <TokenFace icon={card.icon} monogram={card.monogram} />
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, gap: 4 }}>
           <div
             style={{

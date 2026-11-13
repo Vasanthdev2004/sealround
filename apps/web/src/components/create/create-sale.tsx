@@ -13,6 +13,7 @@ import { Insights } from "./insights";
 import { LimitsSection } from "./limits-section";
 import { FixedRules, ModeSection } from "./mode-section";
 import { PoolSection } from "./pool-section";
+import { PresetPicker } from "./presets";
 import { CreateSteps, sectionStatuses } from "./progress";
 import { PriceSection } from "./price-section";
 import { Review } from "./review";
@@ -109,6 +110,13 @@ export function CreateSale() {
     setReviewError(null);
   };
   const touch = (key: FieldKey) => setTouched((t) => (t[key] ? t : { ...t, [key]: true }));
+  /** A preset (or its undo): set several fields at once and mark `fields` touched, so their errors show. */
+  const applyPreset = (values: Partial<Draft>, fields: FieldKey[]) => {
+    setDraft((p) => ({ ...p, ...values }));
+    if (fields.length) setTouched((t) => ({ ...t, ...Object.fromEntries(fields.map((k) => [k, true as const])) }));
+    setNow(Date.now());
+    setReviewError(null);
+  };
 
   const review = () => {
     const t = Date.now();
@@ -230,6 +238,8 @@ export function CreateSale() {
 
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start xl:gap-14">
         <div className="flex min-w-0 flex-col gap-10 sm:gap-12">
+          {/* While get_config is loading, Pool first stays on offer; it goes if the contract has no dex. */}
+          <PresetPicker draft={draft} poolAvailable={dex !== null || dexQ.loading} onApply={applyPreset} />
           <TokenSection {...sectionProps} status={statuses.token} />
           <AllocationSection {...sectionProps} status={statuses.allocation} />
           <PriceSection {...sectionProps} status={statuses.price} />

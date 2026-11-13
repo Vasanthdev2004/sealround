@@ -9,7 +9,7 @@ import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
 import { CipherChip } from "@/components/visual/cipher-chip";
 import { isNearMode } from "@/lib/config";
 import { duration, shortAccount, shortHash, usdcStr } from "@/lib/format";
-import { useBids, useNow } from "@/lib/hooks";
+import { useNow, type Query } from "@/lib/hooks";
 import type { BidRecord, Sale } from "@/lib/types";
 
 const PAGE = 10;
@@ -18,10 +18,19 @@ const PAGE = 10;
  * The peek attack, answered: this is everything a sniper bot can read during
  * the window. Bidder, sealed payload, deposit, time. There is no price column.
  * A ledger with the home table's 36px header and 44px rows from `sm` up; a
- * two-line list on phones.
+ * two-line list on phones. `bids` is the page's bid list query (useBids),
+ * shared with the demand meter so the page polls it once.
  */
-export function BidTable({ sale, account }: { sale: Sale; account: string | null }) {
-  const { data: bids, error, refetch } = useBids(sale.id);
+export function BidTable({
+  sale,
+  account,
+  bids: query,
+}: {
+  sale: Sale;
+  account: string | null;
+  bids: Query<BidRecord[]>;
+}) {
+  const { data: bids, error, refetch } = query;
   const now = useNow(5000);
   const [all, setAll] = useState(false);
 

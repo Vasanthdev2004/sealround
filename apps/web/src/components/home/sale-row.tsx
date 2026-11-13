@@ -2,15 +2,31 @@
 
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { SaleStatusBadge } from "@/components/ui/badge";
+import { SaleStatusBadge, Tag } from "@/components/ui/badge";
 import { Countdown } from "@/components/ui/bits";
 import { Price } from "@/components/ui/price";
+import { TokenMark } from "@/components/ui/token-mark";
 import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
 import { usdcStr } from "@/lib/format";
 import { useClientQuery } from "@/lib/hooks";
 import type { Sale, SaleResult } from "@/lib/types";
 import { isDone, saleHref, salePrice, saleTiming } from "./sale-state";
+
+/**
+ * A settled sale whose launch pool is seeded: its token trades. The board
+ * already reads each finished sale's result, which carries the pool's stage.
+ * On the simulated chain no exchange was called, and the tag says so.
+ */
+export function TradingTag({ result }: { result?: SaleResult | null }) {
+  const l = result?.liquidity;
+  if (l?.stage !== "seeded") return null;
+  return l.simulated ? (
+    <Tag title="Simulated: the pool was seeded on the mock chain, no exchange was called.">Rhea pool (sim)</Tag>
+  ) : (
+    <Tag>Trading on Rhea</Tag>
+  );
+}
 
 /**
  * The table's columns, shared by the header, every row and the skeleton so
@@ -60,18 +76,24 @@ function Row({ sale, now, result }: { sale: Sale; now: number; result?: SaleResu
         "group min-h-[68px] border-b border-line py-3 transition-colors duration-[120ms] ease-surface last:border-b-0 hover:bg-wash-soft focus-visible:outline-offset-[-2px]",
       )}
     >
-      <span className="min-w-0">
-        <span className="block truncate text-small font-semibold text-fg">{c.tokenName}</span>
-        <span className="block truncate text-label text-subtle max-sm:hidden">${c.tokenSymbol}</span>
-        <span className="block sm:hidden">
-          <SaleStatusBadge status={sale.status} plain />
-        </span>
-        {timing.until !== undefined && (
-          <span className="block text-label text-subtle sm:hidden">
-            {timing.label} {time}
+      <span className="flex min-w-0 items-center gap-3 max-sm:items-start">
+        <TokenMark symbol={c.tokenSymbol} hue={sale.meta.hue} icon={sale.meta.icon} size={32} alt="" className="max-sm:mt-0.5" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-small font-semibold text-fg">{c.tokenName}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-label text-subtle max-sm:hidden">${c.tokenSymbol}</span>
+            <TradingTag result={result} />
           </span>
-        )}
-        {timing.canAct && <span className="block text-label font-medium text-muted sm:hidden">{timing.note}</span>}
+          <span className="block sm:hidden">
+            <SaleStatusBadge status={sale.status} plain />
+          </span>
+          {timing.until !== undefined && (
+            <span className="block text-label text-subtle sm:hidden">
+              {timing.label} {time}
+            </span>
+          )}
+          {timing.canAct && <span className="block text-label font-medium text-muted sm:hidden">{timing.note}</span>}
+        </span>
       </span>
 
       <span className="max-sm:hidden">

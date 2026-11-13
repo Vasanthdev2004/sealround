@@ -17,7 +17,8 @@ import { Panel } from "@/components/ui/panel";
 import { TipCard, TipRow } from "@/components/visual/chart-bits";
 import { shortAccount, tokenStr, usdcStr } from "@/lib/format";
 import type { Sale } from "@/lib/types";
-import { gini, isBot, isYou, pct, pctStr, toFloat, topShare, type ResultFill } from "./compute";
+import { isBot, isYou, pct, pctStr, toFloat, type ResultFill } from "./compute";
+import { FairScorecard } from "./scorecard";
 
 /*
  * Series colours are the viz tokens: people the neutral at half
@@ -39,7 +40,11 @@ type Datum = {
   kind: Kind;
 };
 
-/** Tokens received by each winner, largest first. The fills table above is its text equivalent. */
+/**
+ * Tokens received by each winner, largest first (the fills table above is its
+ * text equivalent), then the fair-launch scorecard: this sale against the Bot
+ * Arena's simulated launches.
+ */
 export function Distribution({ sale, fills, account }: { sale: Sale; fills: ResultFill[]; account: string | null }) {
   const c = sale.config;
   const reduce = useReducedMotion();
@@ -47,7 +52,6 @@ export function Distribution({ sale, fills, account }: { sale: Sale; fills: Resu
   // redraws them in place instead of replaying the animation.
   const [grown, setGrown] = useState(false);
   const winners = useMemo(() => fills.filter((f) => f.tokens > 0n), [fills]);
-  const sold = winners.reduce((a, f) => a + f.tokens, 0n);
 
   const data = useMemo<Datum[]>(
     () =>
@@ -73,14 +77,12 @@ export function Distribution({ sale, fills, account }: { sale: Sale; fills: Resu
     );
   }
 
-  const g = gini(winners.map((f) => toFloat(f.tokens, c.decimals)));
-  const top10 = topShare(winners, 10, sold);
   const kinds = new Set(data.map((d) => d.kind));
 
   return (
     <Panel
       title="Who got the tokens"
-      subtitle={`${winners.length} ${winners.length === 1 ? "winner" : "winners"}, largest fill first. A bigger bar is a bigger budget, never a better price.`}
+      subtitle={`${winners.length} ${winners.length === 1 ? "winner" : "winners"}, largest fill first. A bigger bar is a bigger budget, never a better price; deposits were capped at ${usdcStr(c.maxDepositPerAccount)} USDC.`}
     >
       <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-label text-muted" aria-label="Legend">
         {(["person", "bot", "you"] as const)
@@ -132,11 +134,7 @@ export function Distribution({ sale, fills, account }: { sale: Sale; fills: Resu
         </BarChart>
       </div>
 
-      <dl className="mt-5 grid grid-cols-3 border-t border-line [&>*]:min-w-0 [&>*]:pt-3.5 [&>*]:pr-3 [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-3 sm:[&>*+*]:pl-5">
-        <Fact k="Top 10 hold" v={pctStr(top10)} unit="of sold" />
-        <Fact k="Gini" v={g.toFixed(2)} unit="0 is even" />
-        <Fact k="Deposit cap" v={usdcStr(c.maxDepositPerAccount)} unit="USDC" />
-      </dl>
+      <FairScorecard fills={fills} decimals={c.decimals} className="mt-5 border-t border-line pt-4" />
     </Panel>
   );
 }
@@ -173,18 +171,6 @@ function Tip({ active, payload, sym }: TooltipContentProps & { sym: string }) {
       <TipRow color={COLOR[d.kind]} value={`${d.label} ${sym}`} label={`${d.share} of supply`} />
       <div className="num text-label text-muted">for {d.spent} USDC</div>
     </TipCard>
-  );
-}
-
-function Fact({ k, v, unit }: { k: string; v: string; unit?: string }) {
-  return (
-    <div>
-      <dt className="text-label text-subtle">{k}</dt>
-      <dd className="num mt-1 flex flex-wrap items-baseline gap-x-1.5 text-num-md text-fg">
-        {v}
-        {unit && <span className="text-label font-normal tracking-normal text-muted">{unit}</span>}
-      </dd>
-    </div>
   );
 }
 

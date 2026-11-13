@@ -14,6 +14,7 @@ import {
 import { TxLink } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
 import { KV } from "@/components/ui/stat";
+import { cn } from "@/lib/cn";
 import { getClient } from "@/lib/client";
 import { priceStr, shortAccount, tokenFull, usdcStr } from "@/lib/format";
 import { useAction } from "@/lib/hooks";
@@ -22,6 +23,7 @@ import type { ClaimResult, Sale, SaleResult } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { fillStatus, isPenalized, penaltyOf, STATUS_BADGE, voidSentence, type ResultFill } from "./compute";
 import { LiquidityAction } from "./pool-panel";
+import { YourTokens } from "./trade";
 
 /**
  * The connected account's outcome and the one main action on this page:
@@ -162,20 +164,34 @@ function Mine({ sale, result, fill, account }: { sale: Sale; result: SaleResult;
 
       <div className="mt-4 sm:mt-5 lg:mt-auto lg:pt-5">
         {claimed ? (
-          <div className="anim-fade" role="status">
-            <div className="flex items-center gap-2 text-small font-[510] text-fg">
-              <span className="size-1.5 shrink-0 rounded-full bg-ok" aria-hidden />
-              Claimed
+          <>
+            <div className="anim-fade" role="status">
+              <div className="flex items-center gap-2 text-small font-[510] text-fg">
+                <span className="size-1.5 shrink-0 rounded-full bg-ok" aria-hidden />
+                Claimed
+              </div>
+              <p className="mt-1 text-small text-muted">
+                {hasTokens ? (
+                  refundDue ? (
+                    <>
+                      Your tokens and <span className="num text-fg">{refund}</span> unspent were sent to your account.
+                    </>
+                  ) : (
+                    "Your tokens were sent to your account."
+                  )
+                ) : (
+                  <>
+                    <span className="num text-fg">{refund}</span> sent to your account.
+                  </>
+                )}
+              </p>
+              {claimTx && <TxLink hash={claimTx} prefix="claim tx" className="mt-2" />}
+              <RelayLine relay={receipt?.relay} className="mt-2" />
             </div>
-            <p className="mt-1 text-small text-muted">
-              <span className="num text-fg">
-                {hasTokens && refundDue ? `${tokens} and ${refund}` : hasTokens ? tokens : refund}
-              </span>{" "}
-              sent to your account.
-            </p>
-            {claimTx && <TxLink hash={claimTx} prefix="claim tx" className="mt-2" />}
-            <RelayLine relay={receipt?.relay} className="mt-2" />
-          </div>
+            {hasTokens && (
+              <YourTokens sale={sale} result={result} tokens={fill.tokens} className="mt-4 border-t border-line pt-4" />
+            )}
+          </>
         ) : locked && pool ? (
           <div className="flex flex-col gap-2.5">
             {refundPaid ? (
@@ -212,7 +228,13 @@ function Mine({ sale, result, fill, account }: { sale: Sale; result: SaleResult;
                 </>
               )
             )}
-            <p className="text-small text-muted">Your tokens unlock once the launch pool is seeded. Anyone can seed it.</p>
+            <div className={cn(refundPaid || hasRefund ? "mt-2 border-t border-line pt-4" : undefined)}>
+              <div className="text-label text-subtle">Your tokens</div>
+              <p className="mt-1 text-small text-muted">
+                <span className="num text-fg">{tokens}</span> stay locked in the sale contract until the launch pool is
+                seeded. Anyone can seed it; trading opens then.
+              </p>
+            </div>
             <LiquidityAction sale={sale} liquidity={pool} kind="seed" receipt={false} nextStep />
             <LiquidityAction sale={sale} liquidity={pool} kind="abandon" receipt={false} />
           </div>

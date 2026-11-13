@@ -19,15 +19,17 @@ import { getClient } from "@/lib/client";
 import { OUTLAYER_COMPUTE_DEPOSIT, invalidBidPenalty } from "@/lib/client/rules";
 import { cn } from "@/lib/cn";
 import { ago, dateTime, duration, priceStr, shortHash, usdcStr } from "@/lib/format";
-import { useAction, useBidSecret, useBids, useCloseDeposit, useNow, useResult } from "@/lib/hooks";
+import { useAction, useBidSecret, useCloseDeposit, useNow, useResult } from "@/lib/hooks";
 import { locksTokens } from "@/lib/liquidity";
 import { focusEl, scrollToEl } from "@/lib/scroll";
 import type { BidRecord, Sale, SaleStatus, StepState, WriteOptions } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { ImportSecrets } from "./bid-secret";
+import { ClearingSteps, resultHref, useClock, useRevealHandoff } from "./clearing-moment";
 import { HeroCountdown } from "./hero-countdown";
 import { PhaseTimeline } from "./phase-timeline";
 import { PublicStats } from "./public-stats";
+import { RevealReminder } from "./reveal-reminder";
 
 /**
  * The page's main block, set like the home page's featured sale. Every phase
@@ -55,6 +57,7 @@ export function StatusPanel({
   account,
   hasBid = false,
   myBid = null,
+  bids,
 }: {
   sale: Sale;
   account: string | null;
@@ -62,11 +65,15 @@ export function StatusPanel({
   hasBid?: boolean;
   /** That bid, for the reveal step of a commit-reveal sale. */
   myBid?: BidRecord | null;
+  /** The page's bid list (sale-page.tsx polls it once), for the reveal count. */
+  bids?: BidRecord[];
 }) {
   const now = useNow(5000);
   const commit = sale.config.revealMode === "commit_reveal";
   const stalled =
     sale.status === "clearing" && now > (sale.closedAt ?? sale.config.bidEnd) + sale.config.settleTimeoutMs;
+  // Watched the enclave clear it: take the viewer to the reveal on the result page.
+  const handoff = useRevealHandoff(sale);
 
   // A phase change unmounts the button that caused it (Close sale, Switch to
   // refunds). If focus fell to the page body, put it on the new statement.
@@ -95,8 +102,12 @@ export function StatusPanel({
           {sale.status === "open" && <Open sale={sale} hasBid={hasBid} />}
           {sale.status === "awaiting_close" && <AwaitingClose sale={sale} account={account} />}
           {sale.status === "clearing" && <Clearing sale={sale} account={account} />}
-          {sale.status === "revealing" && <Revealing sale={sale} account={account} myBid={myBid} />}
-          {(sale.status === "settled" || sale.status === "failed") && <Done sale={sale} account={account} />}
+          {sale.status === "revealing" && <Revealing sale={sale} account={account} myBid={myBid} bids={bids} />}
+          {handoff ? (
+            <ResultIsIn sale={sale} />
+          ) : (
+            (sale.status === "settled" || sale.status === "failed") && <Done sale={sale} account={account} />
+          )}
         </div>
       </div>
       {/* The page's one "simulated" disclosure. */}
@@ -278,7 +289,8 @@ function Upcoming({ sale, account }: { sale: Sale; account: string | null }) {
           </span>{" "}
           and runs for <Fg>{duration(c.bidEnd - c.bidStart)}</Fg>.
         </p>
-        <div className="mt-5 sm:mt-6">
+        <RevealReminder sale={sale} className="mt-3" />
+        <div className="mt-4 sm:mt-5">
           <Button size="lg" onClick={toFund} className="max-sm:w-full">
             Fund your account
           </Button>
@@ -383,7 +395,8 @@ function Open({ sale, hasBid }: { sale: Sale; hasBid: boolean }) {
             </span>
           </span>
         </div>
-        <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2.5 sm:mt-6">
+        <RevealReminder sale={sale} className="mt-3" />
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2.5 sm:mt-5">
           <Button variant={hasBid ? "tactile" : "primary"} size="lg" onClick={toBid} className="max-sm:w-full">
             {hasBid ? "See your bid" : commit ? "Place a committed bid" : "Place a sealed bid"}
           </Button>
@@ -505,50 +518,82 @@ function Refund({ sale, account }: { sale: Sale; account: string | null }) {
 
 // ---------- clearing (TEE) ----------
 
+/**
+ * The close of a sealed sale as the moment it is: how many bids the enclave
+ * is opening, how long since the close (a plain text timer, right after a
+ * hidden tab comes back too), and the three steps of the close. A watcher is
+ * taken to the result's reveal when it settles (useRevealHandoff). A failed
+ * run can be retried; past the settle timeout, refunds are next.
+ */
 function Clearing({ sale, account }: { sale: Sale; account: string | null }) {
-  const now = useNow(1000);
+  const now = useClock(1000);
   const closedAt = sale.closedAt ?? sale.config.bidEnd;
   const due = sale.refundModeFrom ?? closedAt + sale.config.settleTimeoutMs;
   const timedOut = now > due;
   // A real contract's "closed": the last clearing attempt ended without a
   // result (the run failed or timed out), and close_sale asks again.
   const retry = sale.chainStatus === "closed";
+  const n = sale.bidCount;
+  const dueAt = (
+    <span className="num text-fg" suppressHydrationWarning>
+      {dateTime(due)}
+    </span>
+  );
 
   return (
     <>
       <Frame
-        label={timedOut ? "Settle timeout passed" : "Clearing for"}
+        label={
+          timedOut ? (
+            "Settle timeout passed"
+          ) : (
+            <>
+              {retry ? "Clearing" : "Opening"} <span className="num">{n.toLocaleString("en-US")}</span> sealed{" "}
+              {n === 1 ? "bid" : "bids"} in the enclave
+            </>
+          )
+        }
         hero={
-          <span suppressHydrationWarning>{timedOut ? `${duration(now - due)} ago` : duration(now - closedAt)}</span>
+          <>
+            <span suppressHydrationWarning>{timedOut ? duration(now - due) : duration(now - closedAt)}</span>
+            <span className="ml-2 text-label font-normal tracking-normal text-subtle">
+              {timedOut ? "ago" : "since the close"}
+            </span>
+          </>
         }
       >
         <Statement tone={timedOut ? "bad" : retry ? "warn" : "neutral"}>
           {retry
             ? "The last clearing attempt gave no result."
             : timedOut
-              ? "The enclave has not answered."
-              : "The enclave is opening the bids and computing one price."}
+              ? "The enclave has not answered, so refunds are next."
+              : "The contract sent the frozen bid set to the attested enclave job."}
         </Statement>
         <Detail>
           {retry ? (
-            "Nothing is lost: the bid set stays frozen, and anyone can ask the enclave again."
+            <>
+              Nothing is lost: the bid set stays frozen, and anyone can ask the enclave again.
+              {!timedOut && <> With no result by {dueAt}, anyone can switch the sale to full refunds.</>}
+            </>
           ) : timedOut ? (
             <>
               It has been silent for <Fg>{duration(now - closedAt)}</Fg>, past the{" "}
-              <Fg>{duration(sale.config.settleTimeoutMs)}</Fg> timeout.
+              <Fg>{duration(sale.config.settleTimeoutMs)}</Fg> timeout. Anyone can switch the sale to full refunds
+              below; every bidder then claims their deposit on the result page.
             </>
           ) : (
             <>
-              The contract checks the maths before it settles. With no result by{" "}
-              <span className="num text-fg" suppressHydrationWarning>
-                {dateTime(due)}
-              </span>{" "}
-              (in <Countdown to={due} className="text-fg" />
+              The enclave opens every bid and computes one price. The result comes back on chain, and the contract
+              checks it before it settles. With no result by {dueAt} (in <Countdown to={due} className="text-fg" />
               ), anyone can switch the sale to full refunds.
             </>
           )}
         </Detail>
-        <BidSetHash sale={sale} />
+        <ClearingSteps
+          sale={sale}
+          state={timedOut ? "timed_out" : retry ? "failed" : "running"}
+          className="mt-5 sm:mt-6"
+        />
         {retry && (
           <PushAction
             className="mt-5 sm:mt-6"
@@ -577,9 +622,18 @@ function Clearing({ sale, account }: { sale: Sale; account: string | null }) {
  * have the contract clear the sale itself. A bid that was not revealed is void
  * and loses 1 % of its deposit, so the bidder's own step comes first here.
  */
-function Revealing({ sale, account, myBid }: { sale: Sale; account: string | null; myBid: BidRecord | null }) {
+function Revealing({
+  sale,
+  account,
+  myBid,
+  bids,
+}: {
+  sale: Sale;
+  account: string | null;
+  myBid: BidRecord | null;
+  bids: BidRecord[] | undefined;
+}) {
   const now = useNow(1000);
-  const bids = useBids(sale.id).data;
   const revealed = bids ? bids.filter((b) => b.revealed).length : null;
   const closedAt = sale.closedAt ?? sale.config.bidEnd;
   const revealEnd = sale.revealEnd ?? closedAt + (sale.config.revealWindowMs ?? 10 * 60_000);
@@ -701,6 +755,28 @@ function MyReveal({ sale, account, bid }: { sale: Sale; account: string; bid: Bi
 }
 
 // ---------- settled or refunding ----------
+
+/**
+ * The sale settled while this page watched it clear. The viewer is on the way
+ * to the result's reveal (useRevealHandoff), so the price is not shown here
+ * first; the button covers a tab that was hidden or a move that did not happen.
+ */
+function ResultIsIn({ sale }: { sale: Sale }) {
+  return (
+    <>
+      <Frame label="The enclave has answered" hero="Result is in">
+        <Statement>Opening the reveal on the result page.</Statement>
+        <Detail>Every winner pays one clearing price. The contract checked the result before it settled.</Detail>
+        <div className="mt-5 sm:mt-6">
+          <ButtonLink href={resultHref(sale.id)} variant="primary" size="lg" className="max-sm:w-full">
+            See the result
+          </ButtonLink>
+        </div>
+      </Frame>
+      <PublicStats sale={sale} className="mt-6 sm:mt-8" />
+    </>
+  );
+}
 
 const FAIL_TEXT: Record<string, string> = {
   below_min_raise: "The minimum raise was not met.",

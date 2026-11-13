@@ -73,6 +73,7 @@ import {
 } from "../crypto";
 import { getBidSecret, saveBidSecret } from "../bid-secrets";
 import { locksTokens, poolUsdcKept, SEED_STEPS, STAGE_LABEL, stepPhrase } from "../liquidity";
+import { iconError, markIcon } from "../token-icon";
 import { makeBots, makeCrowd, type CrowdBidder } from "./crowd";
 import { bidRejected, BID_REJECT_MESSAGES, FairgroundError } from "./errors";
 import type { BidPayload, FairgroundClient, JudgeProgress } from "./index";
@@ -305,6 +306,11 @@ export class MockClient implements FairgroundClient {
     // Sales stored by builds that used a placeholder build hash.
     for (const s of Object.values(this.state.sales)) {
       if (s.sealerCodeHash === OLD_SEALER_CODE_HASH) s.sealerCodeHash = SEALER_CODE_HASH;
+      // Demo sales stored before tokens had icons get their generated mark.
+      if (s.meta.icon === undefined) {
+        const mark = demoMark(s.id, s.isJudgeSale);
+        if (mark) s.meta.icon = markIcon(mark, s.meta.hue);
+      }
     }
     // A seeding step cut off by a closed page: its callback never ran, so count it failed and let it run again.
     for (const r of Object.values(this.state.results)) {
@@ -634,15 +640,16 @@ export class MockClient implements FairgroundClient {
   /** The mock charges no NEAR; it validates like create_sale does. */
   async getCreateCost(creator: string, config: SaleConfig, meta: SaleMeta): Promise<bigint> {
     void creator;
-    void meta;
     await this.ready();
     validateConfig(config, Object.values(this.s.sales));
+    validateIcon(meta);
     return 0n;
   }
 
   async createSale(creator: string, config: SaleConfig, meta: SaleMeta, opts: CreateOptions = {}) {
     await this.ready();
     validateConfig(config, Object.values(this.s.sales));
+    validateIcon(meta);
     const id = opts.saleId ?? config.tokenSymbol.toLowerCase();
     const idError = saleIdError(id, CONTRACT_ID);
     if (idError) throw invalid(idError);
@@ -1700,9 +1707,11 @@ export class MockClient implements FairgroundClient {
     await delay(700);
     const now = Date.now();
     const config = judgeConfig(n, now, windowMs);
+    const hue = (n * 47) % 360;
     const sale = await this.insertSale("judge.testnet", config, {
       description: "A seeded judge-mode sale. Every bidder is fictional.",
-      hue: (n * 47) % 360,
+      hue,
+      icon: markIcon(JUDGE_MARK, hue),
     }, now, { id: `judge-${n}`, judge: true });
     this.commit();
     const saleId = sale.id;
@@ -1823,7 +1832,7 @@ export class MockClient implements FairgroundClient {
     const sale = await this.insertSale(
       def.creator,
       config,
-      { description: def.description, hue: def.hue },
+      { description: def.description, hue: def.hue, icon: markIcon(def.mark, def.hue) },
       def.start - 6 * HOUR,
       { id: def.id },
     );
@@ -1878,6 +1887,8 @@ type SeedDef = {
   id: string;
   name: string;
   symbol: string;
+  /** The token's generated mark: letters or one emoji (lib/token-icon.ts). */
+  mark: string;
   creator: string;
   description: string;
   hue: number;
@@ -1900,45 +1911,61 @@ type SeedDef = {
 function seedDefs(now: number): SeedDef[] {
   return [
     {
-      id: "lantern", name: "Lantern", symbol: "LNTN", creator: "lantern-labs.testnet",
+      id: "lantern", mark: "🏮", name: "Lantern", symbol: "LNTN", creator: "lantern-labs.testnet",
       description: "A community token for a night-market collective. Oversubscribed; cleared well above the floor.",
       hue: 38, saleSupply: 150_000, floor: 0.001, minRaise: 50,
       start: now - 3 * DAY, end: now - 3 * DAY + 4 * HOUR, crowd: 45, bots: 3, copycat: true,
       closeAt: now - 3 * DAY + 4 * HOUR + 2 * MIN, claimShare: 0.6,
     },
     {
-      id: "driftwood", name: "Driftwood", symbol: "DRFT", creator: "shoreline.testnet",
+      id: "driftwood", mark: "🌊", name: "Driftwood", symbol: "DRFT", creator: "shoreline.testnet",
       description: "Missed its minimum raise. Every bidder was refunded in full.",
       hue: 200, saleSupply: 300_000, floor: 0.002, minRaise: 400,
       start: now - 5 * DAY, end: now - 5 * DAY + 3 * HOUR, crowd: 7, bots: 0,
       closeAt: now - 5 * DAY + 3 * HOUR + 5 * MIN, claimShare: 0.3,
     },
     {
-      id: "ashfall", name: "Ashfall", symbol: "ASHF", creator: "kilnworks.testnet",
+      id: "ashfall", mark: "🌋", name: "Ashfall", symbol: "ASHF", creator: "kilnworks.testnet",
       description: "The enclave never answered. After the 2-hour settle timeout anyone can switch it to refunds.",
       hue: 12, saleSupply: 200_000, floor: 0.001, minRaise: 50,
       start: now - 9 * HOUR, end: now - 5 * HOUR, crowd: 12, bots: 1,
       closeAt: now - 5 * HOUR + 3 * MIN, enclaveDown: true,
     },
     {
-      id: "kiln", name: "Kiln", symbol: "KILN", creator: "kilnworks.testnet",
+      id: "kiln", mark: "🔥", name: "Kiln", symbol: "KILN", creator: "kilnworks.testnet",
       description: "Bid window just ended. Anyone can close it and trigger clearing.",
       hue: 22, saleSupply: 120_000, floor: 0.001, minRaise: 50,
       start: now - 2 * HOUR, end: now - 4 * MIN, crowd: 31, bots: 2,
     },
     {
-      id: LIVE_SEED, name: "Fair Test", symbol: "FAIRT", creator: "fairground.testnet",
+      id: LIVE_SEED, mark: "FT", name: "Fair Test", symbol: "FAIRT", creator: "fairground.testnet",
       description: "The reference sale from the spec: 600k tokens, 0.001 USDC floor, 50 USDC minimum raise.",
       hue: 214, saleSupply: 600_000, floor: 0.001, minRaise: 50,
       start: now - 40 * MIN, end: now + 2 * HOUR, crowd: 26, bots: 2,
     },
     {
-      id: "moth", name: "Moth", symbol: "MOTH", creator: "nightshift.testnet",
+      id: "moth", mark: "🌙", name: "Moth", symbol: "MOTH", creator: "nightshift.testnet",
       description: "Opens tomorrow. Rules are already locked and readable.",
       hue: 280, saleSupply: 250_000, floor: 0.0015, minRaise: 100,
       start: now + 20 * HOUR, end: now + 26 * HOUR, crowd: 0, bots: 0,
     },
   ];
+}
+
+/** The judge-mode sale's mark. */
+const JUDGE_MARK = "⚖️";
+
+/** A demo sale's mark by id (rolling copies "fairt-2" take their base's), for state stored before icons. */
+function demoMark(id: string, judge: boolean): string | null {
+  if (judge) return JUDGE_MARK;
+  const base = id.replace(/-d+$/, "");
+  return seedDefs(0).find((d) => d.id === base)?.mark ?? null;
+}
+
+/** create_sale's icon rule (sale.rs): a data: URL of at most 2,048 bytes, when there is one. */
+function validateIcon(meta: SaleMeta) {
+  const problem = iconError(meta.icon);
+  if (problem) throw invalid(problem);
 }
 
 // ---------- helpers ----------

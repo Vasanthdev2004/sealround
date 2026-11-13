@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import { priceStr, tokenStr } from "@/lib/format";
 import type { BidRecord, Sale, SaleResult } from "@/lib/types";
 import { failText, pct, type ResultFill } from "./compute";
+import { burnStateOf, supplyLedger } from "./supply";
 
 /*
  * The reveal: four steps from sealed bids to the outcome, drawn from the
@@ -241,7 +242,9 @@ function buildSteps(sale: Sale, result: SaleResult, fills: ResultFill[], bids: B
     ];
   }
 
-  const toBurn = !!result.proceeds && !result.proceeds.unsoldBurned && result.unsold > 0n;
+  const toBurn = burnStateOf(result) !== "burned";
+  // The burn holds the unsold sale supply and any pool reserve the pool did not take.
+  const burn = supplyLedger(sale, result);
   const soldPct = pct(result.totalSold, c.saleSupply);
   return [
     sealed,
@@ -263,7 +266,13 @@ function buildSteps(sale: Sale, result: SaleResult, fills: ResultFill[], bids: B
               {toBurn ? "to burn" : "burned"}
             </>
           ),
-          detail: toBurn ? "Burns with the creator payout" : "The unsold supply, gone",
+          detail: toBurn
+            ? "Burns with the creator payout"
+            : burn.burnUnsold === 0n
+              ? "The spare pool reserve, gone"
+              : burn.burnPool > 0n
+                ? "Unsold supply and spare pool reserve, gone"
+                : "The unsold supply, gone",
           visual: (on, live) => <SupplyBar soldPct={soldPct} on={on} live={live} />,
         }
       : {

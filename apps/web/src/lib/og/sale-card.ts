@@ -5,17 +5,29 @@
 
 import { STATUS_LABEL, priceStr, tokenStr, usdcStr } from "../format";
 import { foldStatus, type ResultView, type SaleView } from "../near/views";
+import { isEmojiMark, parseMark, rasterIcon } from "../token-icon";
 import type { ChainFailReason } from "../types";
 
 export type CardTone = "accent" | "ok" | "warn" | "neutral";
 
 export type CardStat = { label: string; value: string; unit?: string };
 
+/**
+ * The token's icon as the card can draw it. next/og draws PNG and JPEG data
+ * URLs, not WebP or GIF (they come out blank), and has no font inside an SVG
+ * image (an emoji makes it throw). So: a PNG or JPEG is an image, a mark this
+ * app generated is redrawn from its colours and letters (an emoji mark shows
+ * the monogram on its colour), and anything else falls back to the monogram.
+ */
+export type CardIcon = { kind: "image"; src: string } | { kind: "mark"; bg: string; fg: string; text: string };
+
 export type SaleCard = {
   name: string;
   symbol: string;
   /** The token avatar's two letters, as on the sales board. */
   monogram: string;
+  /** The token's icon when the card can draw it; null: the monogram. */
+  icon: CardIcon | null;
   phase: string;
   tone: CardTone;
   /** The number that matters: the clearing price once settled, the floor before. Null when there is none. */
@@ -43,7 +55,8 @@ type SaleFields = Pick<
   | "min_raise"
   | "bid_count"
   | "reveal_mode"
->;
+> &
+  Partial<Pick<SaleView, "icon">>;
 type ResultFields = Pick<ResultView, "fail_reason" | "clearing_price" | "total_sold" | "unsold" | "proceeds">;
 
 const NAME_MAX = 34;
@@ -74,6 +87,15 @@ export function cardText(raw: string, max: number): string {
 
 const count = (n: number) => n.toLocaleString("en-US");
 
+/** The view's icon as the card draws it, or null for the monogram. */
+export function cardIcon(icon: unknown, monogram: string): CardIcon | null {
+  if (typeof icon !== "string" || !icon) return null;
+  const mark = parseMark(icon);
+  if (mark) return { kind: "mark", bg: mark.bg, fg: mark.fg, text: isEmojiMark(mark.text) ? monogram : mark.text };
+  const raster = rasterIcon(icon);
+  return raster && (raster.type === "png" || raster.type === "jpeg") ? { kind: "image", src: icon } : null;
+}
+
 export function saleCard(
   sale: SaleFields,
   result: ResultFields | null,
@@ -84,10 +106,12 @@ export function saleCard(
   const status = foldStatus(sale.status);
   const tee = sale.reveal_mode !== "CommitReveal";
   const perToken = `USDC per ${symbol}`;
+  const monogram = [...symbol].slice(0, 2).join("");
   const base = {
     name,
     symbol,
-    monogram: [...symbol].slice(0, 2).join(""),
+    monogram,
+    icon: cardIcon(sale.icon, monogram),
     phase: STATUS_LABEL[status] ?? status,
     network: `NEAR ${network}`,
     outcome: null,

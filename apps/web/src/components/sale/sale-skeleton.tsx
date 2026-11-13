@@ -89,7 +89,12 @@ export function SaleSkeleton() {
                   <Skeleton className="h-1 max-w-[280px] flex-1" rounded="full" />
                   <Skeleton className="h-3 w-40" rounded="sm" />
                 </div>
-                <Skeleton className="mt-5 h-11 w-[168px] max-sm:w-full sm:mt-6" rounded="tile" />
+                {/* Calendar and watch link */}
+                <div className="mt-3 flex h-8 items-center gap-5 max-sm:h-10">
+                  <Skeleton className="h-3 w-52" rounded="sm" />
+                  <Skeleton className="h-3 w-28" rounded="sm" />
+                </div>
+                <Skeleton className="mt-4 h-11 w-[168px] max-sm:w-full sm:mt-5" rounded="tile" />
               </div>
               <StatRow flush className="mt-6 -mb-4 border-t border-line sm:mt-8">
                 {Array.from({ length: 4 }, (_, i) => (
@@ -109,6 +114,35 @@ export function SaleSkeleton() {
                 <Skeleton className="h-3 w-full max-w-[34rem]" rounded="sm" />
               </div>
             )}
+          </div>
+
+          {/* Demand: the totals and targets, bids over time, what the chain sees */}
+          <div className="panel overflow-hidden">
+            <div className="flex h-[66px] flex-col justify-center gap-2 px-5">
+              <Skeleton className="h-3.5 w-28" rounded="sm" />
+              <Skeleton className="h-3 w-64 max-w-full" rounded="sm" />
+            </div>
+            <div className="grid xl:grid-cols-2">
+              <div className="px-5 pt-3 pb-5">
+                <Skeleton className="h-3 w-16" rounded="sm" />
+                <Skeleton className="mt-2.5 h-7 w-40" />
+                {Array.from({ length: 2 }, (_, i) => (
+                  <div key={i} className="mt-5">
+                    <div className="flex items-center justify-between">
+                      <Skeleton className="h-3 w-32" rounded="sm" />
+                      <Skeleton className="h-3 w-16" rounded="sm" />
+                    </div>
+                    <Skeleton className="mt-3 h-1" rounded="full" />
+                    <Skeleton className="mt-2.5 h-3 w-56 max-w-full" rounded="sm" />
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-line px-5 pt-4 pb-5 xl:border-t-0 xl:border-l xl:pt-3">
+                <Skeleton className="h-3.5 w-28" rounded="sm" />
+                <Skeleton className="mt-2.5 h-3 w-56 max-w-full" rounded="sm" />
+                <Skeleton className="mt-6 h-[130px]" rounded="sm" />
+              </div>
+            </div>
           </div>
 
           {/* Bid form: three fields, the preview ledger, the action row */}

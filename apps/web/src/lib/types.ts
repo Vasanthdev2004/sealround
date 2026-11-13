@@ -184,6 +184,12 @@ export type SaleMeta = {
   /** Hex colour used for the token avatar. */
   hue: number;
   website?: string;
+  /**
+   * The token's icon (contract `icon`, the token's NEP-148 metadata icon): a
+   * data URL of at most 2,048 bytes (lib/token-icon.ts). Absent or null: none,
+   * and the monogram stands in.
+   */
+  icon?: string | null;
 };
 
 export type Sale = {

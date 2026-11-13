@@ -70,7 +70,7 @@ export function SamePrice({ sale, result, fills }: { sale: Sale; result: SaleRes
       <dl className="grid grid-cols-3 border-b border-line [&>*]:min-w-0 [&>*]:pt-6 [&>*]:pr-3 [&>*]:pb-4 [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-3 sm:[&>*+*]:pl-5">
         {known ? (
           <>
-            <Fact k="Bots' share" v={pctStr(pct(bots.tokens, c.saleSupply))} unit="of supply" />
+            <Fact k="Bots' share" v={pctStr(pct(bots.tokens, result.totalSold))} unit="of tokens sold" />
             <Fact k="People filled" v={humans.filled} unit={`of ${humanFills.filter((f) => f.valid).length}`} />
             <Fact k="Bot bids void" v={botFills.filter((f) => !f.valid).length} />
           </>

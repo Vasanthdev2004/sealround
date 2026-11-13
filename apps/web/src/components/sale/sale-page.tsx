@@ -11,11 +11,12 @@ import { Empty } from "@/components/ui/panel";
 import { useLatestFunding } from "@/lib/funding";
 import { getClient } from "@/lib/client";
 import { isNearMode } from "@/lib/config";
-import { DocumentTitle, useBalances, useClientQuery, useMyBid, useSale } from "@/lib/hooks";
+import { DocumentTitle, useBalances, useBids, useClientQuery, useMyBid, useSale } from "@/lib/hooks";
 import type { Sale } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { BidForm } from "./bid-form";
 import { BidTable } from "./bid-table";
+import { DemandPanel } from "./demand-panel";
 import { FundPanel } from "./fund-panel";
 import { MyBidCard } from "./my-bid-card";
 import { RulesPanel } from "./rules-panel";
@@ -93,6 +94,8 @@ function SaleLoaded({ sale }: { sale: Sale }) {
   const myBid = useMyBid(sale.id, account);
   const balances = useBalances(account);
   const funding = useLatestFunding(account, sale.id);
+  // One poll of the bid list for the page: the demand meter and the bids table share it.
+  const bids = useBids(sale.id);
   const usdc = balances.data?.usdc ?? null;
   // Once a bid is on its way, keep the form mounted even if the window closes
   // meanwhile, so a late rejection is shown instead of vanishing.
@@ -115,14 +118,22 @@ function SaleLoaded({ sale }: { sale: Sale }) {
       <SaleHeader sale={sale} simulatedNote={false} />
 
       {/*
-        Desktop: the main column (status, bid form, then the bids and the log)
-        and a 340px side column (my bid, funding, where's my money, rules).
-        Phones: one column, with the side cards right after the bid form.
-        SaleSkeleton mirrors this grid.
+        Desktop: the main column (status, demand, bid form, then the bids and
+        the log) and a 340px side column (my bid, funding, where's my money,
+        rules). Phones: one column, with the side cards right after the bid
+        form. SaleSkeleton mirrors this grid.
       */}
       <div className="mt-5 grid gap-4 sm:mt-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[auto_1fr] xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-1">
-          <StatusPanel sale={sale} account={account} hasBid={!!myBid.data} myBid={myBid.data ?? null} />
+          <StatusPanel
+            sale={sale}
+            account={account}
+            hasBid={!!myBid.data}
+            myBid={myBid.data ?? null}
+            bids={bids.data}
+          />
+          {/* The live sale as an event: public demand only. Frozen from the close. */}
+          {sale.status !== "upcoming" && <DemandPanel sale={sale} bids={bids} result={result.data ?? null} />}
           {(sale.status === "open" || bidSent) && (
             <BidForm
               sale={sale}
@@ -155,7 +166,7 @@ function SaleLoaded({ sale }: { sale: Sale }) {
         </aside>
 
         <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-2">
-          <BidTable sale={sale} account={account} />
+          <BidTable sale={sale} account={account} bids={bids} />
           {/* Once closed: anyone can recompute the frozen bid set and find a bid in it. */}
           {sale.bidSetHash !== null && <BidSetPanel sale={sale} />}
           <EventLog saleId={sale.id} />

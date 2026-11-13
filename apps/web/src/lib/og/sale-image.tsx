@@ -22,7 +22,15 @@ export async function saleImage(saleId: string, deps: Deps = {}): Promise<Respon
   if (views) {
     try {
       const card = saleCard(views.sale, views.result, views.network);
-      const bytes = await renderCardBytes(<SaleCardImage card={card} />, fonts);
+      let bytes: ArrayBuffer;
+      try {
+        bytes = await renderCardBytes(<SaleCardImage card={card} />, fonts);
+      } catch (e) {
+        // A token icon the renderer cannot draw: the same card with the monogram.
+        if (!card.icon) throw e;
+        console.warn(`[og] icon of ${saleId} did not render, drawing the monogram: ${e instanceof Error ? e.message : e}`);
+        bytes = await renderCardBytes(<SaleCardImage card={{ ...card, icon: null }} />, fonts);
+      }
       return new Response(bytes, {
         headers: {
           "content-type": "image/png",

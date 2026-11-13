@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { SaleStatusBadge, Tag } from "@/components/ui/badge";
-import { Countdown, TokenAvatar } from "@/components/ui/bits";
+import { Countdown } from "@/components/ui/bits";
 import { ButtonLink } from "@/components/ui/button";
 import { Price } from "@/components/ui/price";
 import { Progress } from "@/components/ui/stat";
+import { TokenMark } from "@/components/ui/token-mark";
 import { CipherChip } from "@/components/visual/cipher-chip";
 import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
 import { ago, shortAccount, usdcStr } from "@/lib/format";
 import { useBids, useClientQuery } from "@/lib/hooks";
 import type { BidRecord, Sale } from "@/lib/types";
+import { TradingTag } from "./sale-row";
 import { isDone, saleHref, salePrice, saleTiming } from "./sale-state";
 
 const SHOWN_BIDS = 7;
@@ -49,13 +51,14 @@ export function FeaturedSale({ sale, now }: { sale: Sale; now: number }) {
       <div className="flex min-w-0 flex-col p-5 sm:p-8">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <TokenAvatar symbol={c.tokenSymbol} hue={sale.meta.hue} size={36} />
+            <TokenMark symbol={c.tokenSymbol} hue={sale.meta.hue} icon={sale.meta.icon} size={36} alt="" />
             <div className="min-w-0">
               <div className="truncate text-h3 text-fg">{c.tokenName}</div>
               <div className="truncate text-label text-subtle">${c.tokenSymbol}</div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <TradingTag result={result} />
             {sale.isJudgeSale && <Tag>demo run</Tag>}
             <SaleStatusBadge status={sale.status} plain />
           </div>

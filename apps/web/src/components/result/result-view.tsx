@@ -27,6 +27,7 @@ import { OutcomeReveal } from "./reveal";
 import { SamePrice } from "./same-price";
 import { ShareOnX } from "./share";
 import { ResultSkeleton } from "./skeleton";
+import { SupplyStory } from "./supply-panel";
 import { buildTimeline } from "./timeline";
 import { VerifiedPanel } from "./verified-panel";
 
@@ -164,6 +165,10 @@ function Outcome({ sale, result }: { sale: Sale; result: SaleResult }) {
           <SamePrice sale={sale} result={result} fills={fills} />
         </Reveal>
       )}
+
+      <Reveal>
+        <SupplyStory sale={sale} result={result} />
+      </Reveal>
 
       {result.liquidity && <PoolPanel sale={sale} result={result} />}
 

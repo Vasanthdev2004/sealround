@@ -9,7 +9,8 @@ import { KV } from "@/components/ui/stat";
 import { networkName, shortAccount } from "@/lib/format";
 import { Note } from "./form-kit";
 import { CreateSteps } from "./progress";
-import { Cost, CostRows, TermsLedger, TokenMark, type CreateCost, type EditTarget } from "./rules";
+import { DraftToken } from "./draft-token";
+import { Cost, CostRows, TermsLedger, type CreateCost, type EditTarget } from "./rules";
 import type { Derived, Draft } from "./model";
 
 const LINK =
@@ -93,7 +94,7 @@ export function Review({
             Sale terms
           </h2>
           <div className="border-b border-line p-5">
-            <TokenMark draft={draft} />
+            <DraftToken draft={draft} detail />
             {description && <p className="mt-3 max-w-[68ch] text-small break-words text-muted">{description}</p>}
           </div>
           <TermsLedger draft={draft} derived={derived} dex={dex} onEdit={busy ? undefined : onEdit} />
