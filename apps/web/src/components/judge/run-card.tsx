@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { SimulatedNote } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
+import { DemandPicker } from "./demand-picker";
 import { JudgeStepper } from "./judge-stepper";
 import type { RunState } from "./judge-store";
 
@@ -13,9 +14,10 @@ export function RunIntro({ onRun }: { onRun: () => void }) {
       <p className="anim-rise mt-4 max-w-[52ch] text-lead text-muted" style={{ "--i": 1 } as React.CSSProperties}>
         Watch a full sealed-bid sale: 50 people, 3 sniper bots and 1 copycat bid, and every winner pays one price.
       </p>
+      <DemandPicker className="anim-rise mt-6" style={{ "--i": 2 } as React.CSSProperties} />
       <div
         className="anim-rise mt-6 flex flex-wrap items-center gap-x-4 gap-y-3"
-        style={{ "--i": 2 } as React.CSSProperties}
+        style={{ "--i": 3 } as React.CSSProperties}
       >
         <Button variant="primary" size="lg" className="max-sm:w-full" onClick={onRun}>
           Run demo

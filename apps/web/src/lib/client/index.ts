@@ -47,6 +47,15 @@ export type JudgeStep =
   | "clearing"
   | "done";
 
+/**
+ * How much demand a judge-mode run simulates. low: bids cover about half the
+ * supply, so the sale clears at the floor and the rest burns at the creator
+ * payout. normal: bids ask for about three times the supply at the floor, so
+ * the price rises. high: people value the token more and spend more, so the
+ * price rises further. Every level sells enough to meet the minimum raise.
+ */
+export type JudgeDemand = "low" | "normal" | "high";
+
 export type JudgeProgress = {
   step: JudgeStep;
   saleId: string | null;
@@ -202,6 +211,8 @@ export interface FairgroundClient {
     onProgress: (p: JudgeProgress) => void;
     /** Seconds the bid window stays open, so a judge can add their own bid. */
     windowSeconds?: number;
+    /** The simulated crowd's demand. Default "normal". */
+    demand?: JudgeDemand;
   }): Promise<string>;
 
   /** Called on every state change (any sale). Returns unsubscribe. */

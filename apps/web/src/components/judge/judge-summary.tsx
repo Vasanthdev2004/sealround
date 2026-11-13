@@ -3,18 +3,21 @@
 import { useEffect } from "react";
 import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { CheckRow, SimulatedNote, TokenAvatar, type CheckState } from "@/components/ui/bits";
+import { CheckRow, SimulatedNote, type CheckState } from "@/components/ui/bits";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Stat, StatRow } from "@/components/ui/stat";
+import { TokenMark } from "@/components/ui/token-mark";
 import { CipherChip } from "@/components/visual/cipher-chip";
-import { effectiveFills, groupStats, type GroupStats } from "@/components/result/compute";
+import { effectiveFills, groupStats, pct, pctStr, type GroupStats } from "@/components/result/compute";
+import { supplyLedger } from "@/components/result/supply";
 import { invalidBidPenalty } from "@/lib/client/rules";
 import { cn } from "@/lib/cn";
-import { priceStr, tokenStr, usdcStr } from "@/lib/format";
+import { priceStr, tokenFull, tokenStr, usdcStr } from "@/lib/format";
 import { useBids, useResult } from "@/lib/hooks";
 import { focusEl } from "@/lib/scroll";
 import type { Sale, SaleResult } from "@/lib/types";
+import { DemandPicker } from "./demand-picker";
 import { JUDGE_GOAL_MS, clock } from "./judge-store";
 import { RunNotice } from "./run-card";
 
@@ -119,7 +122,7 @@ export function JudgeSummary({
       <div className={PAD}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <TokenAvatar symbol={c.tokenSymbol} hue={sale.meta.hue} size={36} />
+            <TokenMark symbol={c.tokenSymbol} hue={sale.meta.hue} icon={sale.meta.icon} size={36} alt="" />
             <div className="min-w-0">
               <div className="truncate text-h3 text-fg">{c.tokenName}</div>
               <div className="truncate text-label text-subtle">${c.tokenSymbol}</div>
@@ -145,6 +148,7 @@ export function JudgeSummary({
                 <span className="num text-fg">{priceStr(c.floorPrice)}</span> USDC
               </p>
             )}
+            {!r.oversubscribed && <Undersold sale={sale} result={r} />}
           </div>
         ) : (
           <p className="anim-rise mt-2 max-w-[60ch] text-body text-muted" style={{ "--i": 1 } as React.CSSProperties}>
@@ -166,6 +170,7 @@ export function JudgeSummary({
           </div>
           <span className="text-small text-muted">Every fill, the claims and the proof checks.</span>
         </div>
+        <DemandPicker label="Next run" className="mt-5" />
 
         {settled && (
           <dl className="mt-6 grid border-t border-line sm:mt-8 sm:grid-cols-2">
@@ -206,7 +211,13 @@ export function JudgeSummary({
           <Stat
             label="Tokens sold"
             value={tokenStr(r.totalSold, c.decimals)}
-            hint={r.oversubscribed ? "Oversubscribed" : undefined}
+            hint={
+              r.oversubscribed
+                ? "Oversubscribed"
+                : settled
+                  ? `${pctStr(pct(r.totalSold, c.saleSupply))} of the supply`
+                  : undefined
+            }
           />
           <Stat
             label="Time to result"
@@ -218,6 +229,32 @@ export function JudgeSummary({
         <SimulatedNote className="mt-4" />
       </div>
     </section>
+  );
+}
+
+/**
+ * A settled sale demand did not fill: how much sold, and what burns. The burn
+ * is the unsold sale supply plus any pool reserve the pool did not take.
+ */
+function Undersold({ sale, result }: { sale: Sale; result: SaleResult }) {
+  const c = sale.config;
+  const ledger = supplyLedger(sale, result);
+  const sym = c.tokenSymbol;
+  const burned = ledger.burnState === "burned";
+  return (
+    <p className="mt-2 max-w-[64ch] text-small text-muted">
+      Demand took <span className="num text-fg">{tokenFull(result.totalSold, c.decimals)}</span> of the{" "}
+      <span className="num text-fg">{tokenFull(c.saleSupply, c.decimals)}</span> {sym} for sale, so every valid bid
+      filled in full at the floor.
+      {ledger.burn > 0n && (
+        <>
+          {" "}
+          <span className="num text-fg">{tokenFull(ledger.burn, c.decimals)}</span> {sym}{" "}
+          {burned ? "burned at the creator payout" : "burn at the creator payout"}:{" "}
+          {ledger.burnPool > 0n ? "the unsold supply and the spare pool reserve." : "the unsold supply."}
+        </>
+      )}
+    </p>
   );
 }
 
@@ -356,6 +393,13 @@ function SummarySkeleton() {
       <div className="mt-6 flex flex-wrap gap-2">
         <Skeleton className="h-11 w-52 max-sm:w-full" rounded="tile" />
         <Skeleton className="h-11 w-28 max-sm:w-full" rounded="tile" />
+      </div>
+      <div className="mt-5 space-y-2.5">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-[42px] w-56 sm:h-9" rounded="full" />
+        </div>
+        <Skeleton className="h-4 w-96 max-w-full" />
       </div>
       <div className="mt-6 grid border-t border-line sm:mt-8 sm:grid-cols-2">
         {[0, 1].map((i) => (

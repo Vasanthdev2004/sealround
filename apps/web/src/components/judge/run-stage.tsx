@@ -44,6 +44,7 @@ export function RunStage({
                 Demo running
               </Badge>
               <Tag>simulated</Tag>
+              <Tag>{run.demand} demand</Tag>
             </div>
             <Elapsed since={run.startedAt} />
           </div>

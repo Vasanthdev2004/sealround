@@ -76,7 +76,7 @@ import { locksTokens, poolUsdcKept, SEED_STEPS, STAGE_LABEL, stepPhrase } from "
 import { iconError, markIcon } from "../token-icon";
 import { makeBots, makeCrowd, type CrowdBidder } from "./crowd";
 import { bidRejected, BID_REJECT_MESSAGES, FairgroundError } from "./errors";
-import type { BidPayload, FairgroundClient, JudgeProgress } from "./index";
+import type { BidPayload, FairgroundClient, JudgeDemand, JudgeProgress } from "./index";
 import {
   appFailReason,
   bidTermsProblem,
@@ -463,6 +463,9 @@ export class MockClient implements FairgroundClient {
       delete this.s.results[id];
       delete this.s.keys[id];
       delete this.s.reveals[id];
+      // Without this the re-seeded sale finds its creator payout already paid,
+      // skips it, and shows its burn as still owed.
+      if (this.s.paid) delete this.s.paid[id];
       this.clearing.delete(id);
     }
     this.s.rolled = (this.s.rolled ?? []).filter((id) => keep.has(id));
@@ -1703,9 +1706,10 @@ export class MockClient implements FairgroundClient {
 
   // ---------- judge mode ----------
 
-  async runJudgeMode(opts: { onProgress: (p: JudgeProgress) => void; windowSeconds?: number }) {
+  async runJudgeMode(opts: { onProgress: (p: JudgeProgress) => void; windowSeconds?: number; demand?: JudgeDemand }) {
     await this.ready();
     const n = ++this.s.judgeCount;
+    const demand = opts.demand ?? "normal";
     const windowMs = (opts.windowSeconds ?? 25) * 1000;
     const progress = (p: Omit<JudgeProgress, "saleId"> & { saleId?: string | null }) =>
       opts.onProgress({ saleId: null, ...p });
@@ -1716,7 +1720,10 @@ export class MockClient implements FairgroundClient {
     const config = judgeConfig(n, now, windowMs);
     const hue = (n * 47) % 360;
     const sale = await this.insertSale("judge.testnet", config, {
-      description: "A seeded judge-mode sale. Every bidder is fictional.",
+      description:
+        demand === "normal"
+          ? "A seeded judge-mode sale. Every bidder is fictional."
+          : `A seeded judge-mode sale with ${demand} demand. Every bidder is fictional.`,
       hue,
       icon: markIcon(JUDGE_MARK, hue),
     }, now, { id: `judge-${n}`, judge: true });
@@ -1734,7 +1741,7 @@ export class MockClient implements FairgroundClient {
     const at = () => Math.min(Date.now(), config.bidEnd - 1);
 
     progress({ step: "bots", saleId, bidsPlaced: 0, message: "3 sniper bots bid at second 0 with a huge max price." });
-    const bots = makeBots(3, 10, "testnet");
+    const { bots, crowd } = judgeBidders(n, demand);
     let placed = 0;
     for (const b of bots) {
       await this.seedBid(sale, b, at(), "bot", sim);
@@ -1743,7 +1750,6 @@ export class MockClient implements FairgroundClient {
       await delay(250);
     }
 
-    const crowd = makeCrowd(1000 + n, 50, 10);
     const spread = Math.max(4000, windowMs * 0.55);
     const gap = spread / crowd.length;
     progress({ step: "crowd", saleId, bidsPlaced: placed, message: "The bots went first. People trickle in, each bid sealed in their own browser." });
@@ -1791,7 +1797,29 @@ export class MockClient implements FairgroundClient {
       );
     }
 
-    progress({ step: "done", saleId, bidsPlaced: placed, message: "Settled. Bots and people paid the same price." });
+    // Low demand leaves tokens unsold. They burn at the creator payout, which
+    // anyone may trigger; the run triggers it at once so the result shows the burn.
+    const result = this.s.results[saleId];
+    if (demand === "low" && result?.status === "settled" && result.unsold > 0n) {
+      const sym = config.tokenSymbol;
+      const burn = `${fmtTokens(result.unsold, config.decimals)} ${sym}`;
+      progress({ step: "clearing", saleId, bidsPlaced: placed, message: "Settled at the floor. The creator payout burns every token demand did not take." });
+      await delay(900);
+      this.claimProceedsInternal(this.sale(saleId), Date.now());
+      this.commit();
+      progress({ step: "clearing", saleId, bidsPlaced: placed, message: `Creator paid, ${burn} burned: the unsold supply and the spare pool reserve.` });
+      await delay(1600);
+    }
+
+    const burned = demand === "low" && !!this.s.results[saleId]?.proceeds?.unsoldBurned;
+    progress({
+      step: "done",
+      saleId,
+      bidsPlaced: placed,
+      message: burned
+        ? "Settled at the floor. Bots and people paid the same price, and the unsold tokens burned."
+        : "Settled. Bots and people paid the same price.",
+    });
     return saleId;
   }
 
@@ -2053,13 +2081,58 @@ function sealerOutputText(out: SealerClearOutput): string {
   });
 }
 
+/** Whole USDC to the cent. */
+const toCents = (v: number) => Math.round(v * 100) / 100;
+
+/**
+ * Judge mode's bidders: 3 sniper bots and 50 people. A run number gives the
+ * same accounts, arrival order and spread of valuations at every level; the
+ * level changes how much they want. Against the judge sale (100,000 tokens,
+ * floor 0.001 USDC, minimum raise 50 USDC):
+ *
+ * - normal: the crowd as before, 1 to 10 USDC each and bots at 10. About
+ *   three times the supply at the floor, so it clears near 2x the floor.
+ * - low: the bots put in 3 USDC each and the people 47 USDC between them.
+ *   About 56 USDC in all: 56 % of the supply at the floor, so it clears at
+ *   the floor, meets the minimum raise, and the rest burns. A deposit is the
+ *   spend, or more where the person hid their spend in a bigger deposit or
+ *   the spend is below the 1 USDC minimum deposit.
+ * - high: people value the token about twice as much and spend 5 to 10 USDC
+ *   each, so it clears near 4x the floor.
+ */
+export function judgeBidders(n: number, demand: JudgeDemand): { bots: CrowdBidder[]; crowd: CrowdBidder[] } {
+  const crowd = makeCrowd(1000 + n, 50, 10);
+  if (demand === "low") {
+    const scale = 47 / crowd.reduce((sum, b) => sum + b.spend, 0);
+    return {
+      bots: makeBots(3, 3, "testnet"),
+      crowd: crowd.map((b) => {
+        const spend = Math.max(0.05, toCents(b.spend * scale));
+        const hidden = b.deposit > b.spend;
+        return { ...b, spend, deposit: hidden ? Math.max(1, Math.ceil(b.deposit * scale), Math.ceil(spend)) : Math.max(1, spend) };
+      }),
+    };
+  }
+  if (demand === "high") {
+    return {
+      bots: makeBots(3, 10, "testnet"),
+      crowd: crowd.map((b) => {
+        const spend = toCents(5 + b.spend / 2);
+        return { ...b, priceMultiple: toCents(b.priceMultiple * 2 + 1), spend, deposit: Math.min(10, Math.max(b.deposit, spend)) };
+      }),
+    };
+  }
+  return { bots: makeBots(3, 10, "testnet"), crowd };
+}
+
 /**
  * The judge-mode sale. It seeds a launch pool with 20 % of the raise: a sell-out
  * gives the pool 20 % as many tokens as were sold, so its 20,000-token reserve
  * covers the 100,000 for sale. The sale terms that decide the clearing (supply
- * for sale, floor, deposits, window) are the same as before the pool.
+ * for sale, floor, deposits, window) are the same as before the pool, and the
+ * same at every demand level: only the crowd changes.
  */
-function judgeConfig(n: number, now: number, windowMs: number): SaleConfig {
+export function judgeConfig(n: number, now: number, windowMs: number): SaleConfig {
   return {
     tokenName: `Judge Run ${n}`,
     tokenSymbol: `JDG${n}`,

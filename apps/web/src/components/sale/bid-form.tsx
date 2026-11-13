@@ -98,7 +98,8 @@ export function BidForm({
       {/* The relayer refused after the first signature: say why before the wallet asks again. */}
       <PaidFallbackPrompt fallback={fallback} what="the bid" className="mt-5" />
       {already && myBid && <AlreadyBid bid={myBid} commit={commit} />}
-      {already && myBid && sale.status === "open" && (
+      {/* Also right after sending: the seal state stays "done" until the page reloads. */}
+      {(already || seal?.phase === "done") && myBid && sale.status === "open" && (
         <ImIn sale={sale} bid={myBid} className="mt-5 border-t border-line pt-5" />
       )}
       {showInputs && (

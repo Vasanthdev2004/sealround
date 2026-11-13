@@ -108,7 +108,7 @@ import {
   PAID_REASON_MESSAGES,
   relayerRefusalMessage,
 } from "./errors";
-import type { BidPayload, FairgroundClient, JudgeProgress } from "./index";
+import type { BidPayload, FairgroundClient, JudgeDemand, JudgeProgress } from "./index";
 import {
   bidTermsProblem,
   ciphertextProblem,
@@ -1388,7 +1388,11 @@ export class NearClient implements FairgroundClient {
 
   // ---------- not on a real chain ----------
 
-  async runJudgeMode(opts: { onProgress: (p: JudgeProgress) => void; windowSeconds?: number }): Promise<string> {
+  async runJudgeMode(opts: {
+    onProgress: (p: JudgeProgress) => void;
+    windowSeconds?: number;
+    demand?: JudgeDemand;
+  }): Promise<string> {
     void opts;
     throw new FairgroundError("not_supported", "Judge mode runs on the simulated chain only.");
   }

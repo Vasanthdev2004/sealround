@@ -4,7 +4,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/panel";
 import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
-import { priceStr } from "@/lib/format";
+import { priceStr, tokenStr } from "@/lib/format";
 import { useClientQuery, useResult } from "@/lib/hooks";
 import { focusEl, scrollToTop } from "@/lib/scroll";
 import type { Sale } from "@/lib/types";
@@ -145,7 +145,10 @@ function RunAnnouncer({ run }: { run: RunState }) {
     const took = clock((run.endedAt ?? 0) - (run.startedAt ?? 0));
     say = result
       ? result.status === "settled"
-        ? `Run finished in ${took}. Every winner paid ${priceStr(result.clearingPrice)} USDC per token.`
+        ? `Run finished in ${took}. Every winner paid ${priceStr(result.clearingPrice)} USDC per token.` +
+          (!result.oversubscribed && result.unsold > 0n && result.proceeds?.unsoldBurned
+            ? ` ${tokenStr(result.unsold)} unsold tokens burned.`
+            : "")
         : `Run finished in ${took}. The sale did not settle; every bidder can claim their deposit back.`
       : `Run finished in ${took}.`;
   }

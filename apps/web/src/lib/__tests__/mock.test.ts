@@ -4,13 +4,23 @@
  * penalty in both modes, the 1 USDC minimum deposit, sale id rules.
  * Runs in Node, where the mock keeps its state in memory.
  */
-import { bidSetHash, poolPriceMatches } from "@fairground/clearing";
+import { bidSetHash, clear, poolPlan, poolPriceMatches, type Bid } from "@fairground/clearing";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkBidSet, placeOf } from "../bid-inclusion";
 import { planFor } from "../liquidity";
 import { getBidSecret } from "../bid-secrets";
 import { FairgroundError } from "../client/errors";
-import { CONTRACT_ID, MOCK_SECRETS_SCOPE, MockClient, SEALER_CODE_HASH, USDC_TOKEN, validateConfig } from "../client/mock";
+import type { JudgeDemand } from "../client";
+import {
+  CONTRACT_ID,
+  MOCK_SECRETS_SCOPE,
+  MockClient,
+  SEALER_CODE_HASH,
+  USDC_TOKEN,
+  judgeBidders,
+  judgeConfig,
+  validateConfig,
+} from "../client/mock";
 import { MIN_DEPOSIT_MESSAGE, invalidBidPenalty } from "../client/rules";
 import { bidCommitment, fromB64, randomHex, sealBid, sealedBidLen } from "../crypto";
 import type { BidRecord, SaleConfig, SaleMeta } from "../types";
@@ -556,5 +566,120 @@ describe("judge mode", () => {
     expect(pool.tokens).toBeGreaterThan(0n);
     expect(poolPriceMatches(pool.usdc, pool.tokens, result.clearingPrice, sale.config.decimals)).toBe(true);
     expect(result.proceeds?.allocationLocked).toBeUndefined();
+  }, 40_000);
+});
+
+describe("judge mode demand levels", () => {
+  /** What the judge sale clears to with the level's bidders, the way the mock seals them (seedBid). */
+  function judgeOutcome(n: number, demand: JudgeDemand) {
+    const c = judgeConfig(n, 0, 30_000);
+    const { bots, crowd } = judgeBidders(n, demand);
+    const bidders = [...bots, ...crowd];
+    const bids: Bid[] = bidders.map((b) => ({
+      bidder: b.account,
+      deposit: BigInt(Math.round(b.deposit * 1e6)),
+      maxPrice: BigInt(Math.round(Number(c.floorPrice) * b.priceMultiple)),
+      maxSpend: BigInt(Math.round(b.spend * 1e6)),
+    }));
+    const r = clear({ saleSupply: c.saleSupply, floorPrice: c.floorPrice, minRaise: c.minRaise, decimals: c.decimals }, bids);
+    const terms = c.liquidity!;
+    const pool = poolPlan(r.totalRaised, r.clearingPrice, c.decimals, terms.raiseShareBps, terms.poolTokens);
+    // claim_proceeds burns the unsold sale supply and the reserve the pool does not take.
+    const burn = c.saleSupply - r.totalSold + terms.poolTokens - pool.tokens;
+    return { c, bidders, r, burn };
+  }
+
+  const RUNS = Array.from({ length: 40 }, (_, i) => i + 1);
+
+  it("keeps every bid within the sale's deposit rules, with the same accounts at every level", () => {
+    for (const n of RUNS) {
+      const accounts = (d: JudgeDemand) => judgeOutcome(n, d).bidders.map((b) => b.account);
+      expect(accounts("low")).toEqual(accounts("normal"));
+      expect(accounts("high")).toEqual(accounts("normal"));
+      for (const d of ["low", "normal", "high"] as const) {
+        const { bidders, r } = judgeOutcome(n, d);
+        expect(bidders).toHaveLength(53); // 3 bots and 50 people; the copycat comes later
+        for (const b of bidders) {
+          expect(b.deposit).toBeGreaterThanOrEqual(1);
+          expect(b.deposit).toBeLessThanOrEqual(10);
+          expect(b.spend).toBeGreaterThan(0);
+          expect(b.spend).toBeLessThanOrEqual(b.deposit);
+        }
+        expect(r.nInvalid).toBe(0);
+      }
+    }
+  });
+
+  it("low: part of the supply sells at the floor, the minimum raise is met, and the rest burns", () => {
+    for (const n of RUNS) {
+      const { c, r, burn } = judgeOutcome(n, "low");
+      expect(r.status).toBe("settled");
+      expect(r.oversubscribed).toBe(false);
+      expect(r.clearingPrice).toBe(c.floorPrice);
+      expect(r.totalRaised).toBeGreaterThanOrEqual(c.minRaise);
+      const sold = Number((r.totalSold * 1000n) / c.saleSupply) / 1000;
+      expect(sold).toBeGreaterThanOrEqual(0.5);
+      expect(sold).toBeLessThanOrEqual(0.6);
+      expect(burn).toBeGreaterThan(0n);
+      expect(burn).toBeGreaterThan(c.saleSupply - r.totalSold); // plus the spare pool reserve
+    }
+  });
+
+  it("normal: sells out above the floor and burns nothing", () => {
+    for (const n of RUNS) {
+      const { c, r, burn } = judgeOutcome(n, "normal");
+      expect(r.status).toBe("settled");
+      expect(r.oversubscribed).toBe(true);
+      expect(r.totalSold).toBe(c.saleSupply);
+      expect(r.clearingPrice).toBeGreaterThan((c.floorPrice * 3n) / 2n);
+      expect(r.clearingPrice).toBeLessThan(c.floorPrice * 3n);
+      expect(burn).toBe(0n);
+    }
+  });
+
+  it("high: sells out well above the floor, above normal for the same run, and burns nothing", () => {
+    for (const n of RUNS) {
+      const { c, r, burn } = judgeOutcome(n, "high");
+      expect(r.status).toBe("settled");
+      expect(r.oversubscribed).toBe(true);
+      expect(r.totalSold).toBe(c.saleSupply);
+      expect(r.clearingPrice).toBeGreaterThanOrEqual(c.floorPrice * 3n);
+      expect(r.clearingPrice).toBeGreaterThan(judgeOutcome(n, "normal").r.clearingPrice);
+      expect(burn).toBe(0n);
+    }
+  });
+
+  it("a low-demand run pays the creator and burns the unsold tokens before it ends", async () => {
+    const client = new MockClient();
+    await client.ready();
+    const messages: string[] = [];
+    const steps: string[] = [];
+    const saleId = await client.runJudgeMode({
+      windowSeconds: 1,
+      demand: "low",
+      onProgress: (p) => {
+        messages.push(p.message);
+        if (steps.at(-1) !== p.step) steps.push(p.step);
+      },
+    });
+    expect(steps).toEqual(["create", "key", "bots", "crowd", "copycat", "window", "close", "clearing", "done"]);
+    const sale = (await client.getSale(saleId))!;
+    const result = (await client.getResult(saleId))!;
+    const n = Number(saleId.replace("judge-", ""));
+    const expected = judgeOutcome(n, "low");
+    expect(sale.status).toBe("settled");
+    expect(await client.getBids(saleId)).toHaveLength(54);
+    expect(result.clearingPrice).toBe(sale.config.floorPrice);
+    expect(result.totalSold).toBe(expected.r.totalSold);
+    expect(result.unsold).toBe(expected.burn);
+    expect(result.liquidity).toMatchObject({ stage: "seeded" });
+    expect(result.proceeds).toMatchObject({ raisePaid: true, unsoldBurned: true, allocationPaid: true, reserveReturned: true });
+    const paid = (await client.getEvents(saleId)).find((e) => e.detail === "proceeds_claimed")!;
+    expect(paid.account).toBe("judge.testnet");
+    expect(paid.amount).toBe(result.totalRaised - result.liquidity!.usdc);
+    expect(messages.some((m) => m.startsWith("Creator paid,") && m.includes("burned"))).toBe(true);
+    expect(messages.at(-1)).toContain("unsold tokens burned");
+    // Nothing in the run says the sale sold out or the price rose.
+    expect(messages.some((m) => /sold out|price rose|oversubscribed/i.test(m))).toBe(false);
   }, 40_000);
 });

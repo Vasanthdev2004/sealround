@@ -6,7 +6,7 @@
  */
 
 import { useSyncExternalStore } from "react";
-import { getClient, type JudgeStep } from "@/lib/client";
+import { getClient, type JudgeDemand, type JudgeStep } from "@/lib/client";
 
 export const JUDGE_STEPS: JudgeStep[] = [
   "create",
@@ -31,6 +31,8 @@ export type RunState = {
   phase: RunPhase;
   /** Increments on every start; stale callbacks from an older run are ignored. */
   runId: number;
+  /** The demand level this run simulates. */
+  demand: JudgeDemand;
   step: JudgeStep | null;
   message: string;
   saleId: string | null;
@@ -45,6 +47,7 @@ export type RunState = {
 const INITIAL: RunState = {
   phase: "idle",
   runId: 0,
+  demand: "normal",
   step: null,
   message: "",
   saleId: null,
@@ -77,15 +80,55 @@ export function useJudgeRun(): RunState {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-/** Start a run. No-op while one is already running. */
+// ---------- the demand level for the next run ----------
+
+export const JUDGE_DEMANDS: JudgeDemand[] = ["low", "normal", "high"];
+
+/** Remembered per browser, as a convenience only: the page works the same without it. */
+const DEMAND_KEY = "sealround:judge-demand";
+
+let choice: JudgeDemand | null = null;
+
+/** The chosen level, read from storage once. */
+function readChoice(): JudgeDemand {
+  if (choice === null) {
+    choice = "normal";
+    try {
+      const v = window.localStorage.getItem(DEMAND_KEY);
+      if (JUDGE_DEMANDS.includes(v as JudgeDemand)) choice = v as JudgeDemand;
+    } catch {
+      // Storage blocked or unavailable: start from normal.
+    }
+  }
+  return choice;
+}
+
+export function setJudgeDemand(d: JudgeDemand) {
+  choice = d;
+  try {
+    window.localStorage.setItem(DEMAND_KEY, d);
+  } catch {
+    // Not remembered; the choice still holds for this visit.
+  }
+  listeners.forEach((l) => l());
+}
+
+/** The demand level the next run will use. "normal" on the server and during hydration. */
+export function useJudgeDemand(): JudgeDemand {
+  return useSyncExternalStore(subscribe, readChoice, () => "normal");
+}
+
+/** Start a run at the chosen demand level. No-op while one is already running. */
 export function startJudgeRun() {
   if (state.phase === "running") return;
   const runId = state.runId + 1;
+  const demand = readChoice();
   const startedAt = Date.now();
   set({
     ...INITIAL,
     phase: "running",
     runId,
+    demand,
     step: "create",
     message: "Starting.",
     startedAt,
@@ -97,6 +140,7 @@ export function startJudgeRun() {
   getClient()
     .runJudgeMode({
       windowSeconds: JUDGE_WINDOW_SECONDS,
+      demand,
       onProgress: (p) => {
         if (!mine()) return;
         const elapsed = Date.now() - startedAt;

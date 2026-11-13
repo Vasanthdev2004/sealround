@@ -25,26 +25,32 @@ pnpm --filter web dev # http://localhost:3000, mock mode
 
 `http://localhost:3000` is the landing page; the app's sales board is at
 `/sales`. `http://app.localhost:3000` is the app host: the same deployment
-with the sales board at `/`. Every other page (`/sale/<id>`, `/create`,
-`/judge`, `/arena`, `/how`) has the same path on both hosts.
+with the sales board at `/`. Every other page (`/sale/<id>`, `/token/<id>`,
+`/create`, `/judge`, `/arena`, `/how`) has the same path on both hosts.
 
 ## Routes
 
 | Group | Layout | Pages |
 | --- | --- | --- |
 | `src/app/(site)` | `SiteShell`: slim bar, footer | `/`, the landing page (`components/site`) |
-| `src/app/(app)` | `AppShell`: app bar, wallet, page transition | `/sales`, `/sale/[id]`, `/sale/[id]/result`, `/create`, `/judge`, `/arena`, `/how`, `/lab` |
+| `src/app/(app)` | `AppShell`: app bar, wallet, page transition | `/sales`, `/sale/[id]`, `/sale/[id]/result`, `/sale/[id]/kit`, `/token/[id]`, `/create`, `/judge`, `/arena`, `/how`, `/lab` |
 | `src/app/deploy` | its own page, no shell | `/deploy` |
-| `src/app/api` | route handlers | `/api/oneclick/*` (1Click proxy), `/api/deploy/wasm` (dev server only) |
+| `src/app/api` | route handlers | `/api/oneclick/*` (1Click proxy), `/api/og/bid`, `/api/og/win`, `/api/og/countdown` (share card images, see Share cards), `/api/deploy/wasm` (dev server only) |
+
+`/sale/[id]/kit/share-card` is a route handler too: the sale's link preview
+as a PNG for the launch kit's download button.
 
 What each page has:
 
 | Page | What is on it |
 | --- | --- |
-| `/sales` | The sales board |
-| `/sale/[id]` | The rules, countdown and status, the sealed bid form, funding from another chain, where's-my-money and the event log. After close, the Bid set panel: the frozen bid-set hash recomputed in the browser from `get_bids`, and "your bid is #k of N" for any account |
-| `/sale/[id]/result` | The reveal (four steps from the sealed bids to one price, played once per browser, then shown at rest), the fairness timeline (when each bid landed in the window and what each winner paid per token; max prices stay sealed), Share on X, your result and claims, the launch pool panel for a sale with launch liquidity, the Verified panel, and every fill |
-| `/create` | The sale form, the optional launch pool section, Simulate this launch, review and the cost check before signing |
+| `/` | The landing page, including the burn counter "Demand sets the supply.": the average share of supply burned per launch over the newest 20 final sales, failed sales counted apart, and the 5 newest launches linking their token pages (`components/burn`, `lib/burn-total.ts`) |
+| `/sales` | The sales board (token icons; settled rows link their token page) and the fair-launch leaderboard: finished sales ranked by top 10 share, Gini or bots' share (mock only), with the burned share and the winners, refunded sales listed last without a rank (`components/home`) |
+| `/sale/[id]` | The rules, countdown and status (add the reveal to a calendar as an `.ics` file, copy the watch link; at close "Opening N sealed bids in the enclave", then on to the result), the demand panel (deposits against the min raise and a sell-out at the floor, bids over time, the sealed-bid size check), the sealed bid form, after a bid the "I'm in" share block, funding from another chain, where's-my-money and the event log. "Launch kit" in the header for the connected creator while the sale is upcoming or open. After the creator payout, the burn moment shows the amount burned and the supply left, once the views confirm the burn. After close, the Bid set panel: the frozen bid-set hash recomputed in the browser from `get_bids`, and "your bid is #k of N" for any account |
+| `/sale/[id]/result` | The reveal (four steps from the sealed bids to one price, played once per browser, then shown at rest), the fairness timeline (when each bid landed in the window and what each winner paid per token; max prices stay sealed), Share on X, your result and claims (a winner gets "Share your win", the winner card), "Where every token went" (the supply at launch and after, every part, the mint and burn log), the launch pool panel for a sale with launch liquidity (Trade on Rhea once seeded), the Verified panel, every fill, and the fair-launch scorecard against the Bot Arena's simulated launches |
+| `/sale/[id]/kit` | The creator's launch kit, public for anyone: key times in UTC and the viewer's zone, add the reveal to a calendar, the countdown image and the link preview with PNG downloads, three posts for X with their lengths counted the X way, the watch link, a QR code of the sale URL (PNG and SVG, made in the browser with `qrcode-generator`) and what bidders need. `/create` opens it after a sale is created. A settled or failed sale gets "This sale is over" |
+| `/token/[id]` | A token's page after its sale (id = sale id): launch price, pool opening price when seeded, Trade on Rhea, supply now, burned, holders at launch, raise, the burn line, the supply story and how it launched. Not settled, failed and unknown ids get their own states. Tab title "$SYMBOL on Sealround" |
+| `/create` | Meme launch presets (Pure fair launch, Pool first, Community burn) with Undo, the sale form with the token icon picker (generated letters or emoji, or an upload shrunk to fit 2,048 bytes), the optional launch pool section, Simulate this launch, review and the cost check before signing |
 | `/judge` | Judge mode: a seeded sale with 50 simulated bidders and 3 sniper bots, closed, cleared and settled in the browser. Mock mode only |
 | `/arena` | Bot Arena: Sealround, a bonding curve and a first-come sale over the 60 seeded runs, the supply Sealround burned as demand changes, and one run you can repeat in the browser from a seed |
 | `/how` | How a sale works, and its limits |
@@ -116,7 +122,8 @@ and labels every row simulated. The judge-mode sale opens a simulated launch
 pool after it settles.
 
 State is kept in localStorage under `fairground:mock:v2`. "Reset demo data" in
-the sidebar wipes it.
+the page footer wipes it. A store from an older build gets the demo sales it
+lacks (for example Thistle) on its next load.
 
 ## NEAR mode
 
@@ -227,6 +234,8 @@ the command line.
 ### What NEAR mode does not have
 
 - Judge mode and the demo sales: they need the simulated chain.
+- Bidder roles: the chain stores none, so the leaderboard drops the bots'
+  share column and the result's scorecard says "Not on chain" for it.
 - The time a sale settled, and transaction hashes of other people's calls: the
   views do not hold them.
 
@@ -271,13 +280,33 @@ To exercise deposit quotes and status locally without sending funds, run
 
 Every page in the two route groups has an Open Graph card, which X also reads
 (`twitter:card` is `summary_large_image`). Each group has an `opengraph-image.tsx`: the
-landing page, the app, and one sale (`src/app/(app)/sale/[id]/opengraph-image.tsx`,
-which the result page inherits). The cards are drawn in `src/lib/og/`.
+landing page, the app, one sale (`src/app/(app)/sale/[id]/opengraph-image.tsx`,
+which the result page and the launch kit inherit) and one token
+(`src/app/(app)/token/[id]/opengraph-image.tsx`). The cards are drawn in `src/lib/og/`.
 
 - In NEAR mode a sale's card and page title are read on the server from
   `get_sale` and `get_result` (3 s RPC timeout): the token, the phase and,
-  once settled, the one clearing price. In mock mode sales live in the
-  visitor's browser, so a sale gets the generic app card.
+  once settled, the one clearing price. A token's card shows its launch
+  price, supply, burn, holders and raise, and "Trading on Rhea" only for a
+  seeded pool; before settlement or after a failed sale it is the sale's own
+  card. In mock mode sales live in the visitor's browser, so a sale or token
+  page gets the generic app card.
+- Three image routes, each 1200x630, take what they draw from the link in
+  mock mode (labelled "Simulated sale") and read the chain in NEAR mode:
+
+  | Route | Card | Where it is used |
+  | --- | --- | --- |
+  | `/api/og/bid?sale=<id>&bid=<n>` | "I'm in. Sealed bid #n in $TICKER", the reveal time; price and amount "Sealed" | the "I'm in" block after a bid; the sale page serves it as its preview with `?bid=` |
+  | `/api/og/win?sale=<id>&win=<n>` | "No bot paid less. I got N $TICKER at P USDC each.", the winners and the clearing price | "Share your win" on the result page; the result page serves it as its preview with `?win=` |
+  | `/api/og/countdown?sale=<id>` | "Bids open" or "Sealed bids close" at a UTC time, the floor | the launch kit |
+
+  Mock-mode parameters: `name`, `ticker` and `end` (bid); `name`, `ticker`,
+  `got`, `dec`, `price`, `winners`, `bids` (win); `name`, `ticker`, `start`,
+  `end`, `floor` (countdown). On the bid and win cards `by=<account>` shows
+  the account, in NEAR mode only when it is that bid's own bidder. No card
+  carries a max price or a deposit. Bad input, an unknown or unsettled sale, an RPC error or a
+  timeout give the generic app card, never a 500. The tests next to each
+  route cover every fallback.
 - `metadataBase` in the root layout makes the card URLs absolute
   (`src/lib/og/site-url.ts`): `NEXT_PUBLIC_APP_URL`, else the Vercel URL of
   the deployment (the production domain on production), else
@@ -289,7 +318,10 @@ which the result page inherits). The cards are drawn in `src/lib/og/`.
 factual sentence from the result (the clearing price, and when the first and
 last winning bids landed) and the result's URL. No script from X loads. A
 judge-mode sale exists only in the browser that ran it, so its share link
-points at `/judge`.
+points at `/judge`. The token page, the "I'm in" block, "Share your win" and
+the launch kit's posts use the same kind of link; in mock mode their text
+ends "Simulated sale on Sealround." (the token page: "Simulated sealed-bid
+launch on Sealround.").
 
 ## Local sandbox
 
@@ -336,6 +368,13 @@ if (config.mode !== "near") throw new Error("set the contract");
 const client = new NearClient(config.near, { signers: devSigners(config.near), cacheMs: 0 });
 ```
 
+## Dependencies
+
+The direct dependencies are in `package.json` and in the root README,
+section 12. The newest is `qrcode-generator` 2.0.4 (MIT, by Kazuhiko Arase,
+no dependencies of its own, ships its own typings), pinned exactly. It draws
+the launch kit's QR code in the browser (`src/components/kit/qr.ts`).
+
 ## Where things are
 
 | Path | What |
@@ -354,9 +393,16 @@ const client = new NearClient(config.near, { signers: devSigners(config.near), c
 | `src/lib/bid-secrets.ts` | commit-reveal salts kept in the browser |
 | `src/lib/wallet.tsx` | wallet context: demo account, NEAR Connect, dev accounts |
 | `src/lib/oneclick.ts` | 1Click preview and deposit quotes, status tracking, simulated funding, USDC storage registration |
-| `src/lib/og/` | share cards, sale page titles, `metadataBase` |
-| `src/components/result/` | result page: reveal, fairness timeline, Share on X, pool panel, Verified panel, bid inclusion |
-| `src/components/create/` | create form, pool section, launch simulator |
+| `src/lib/og/` | share cards (sale, token), sale and token page titles, `metadataBase` |
+| `src/app/api/og/` | the bid, win and countdown card routes, their link builders and tests |
+| `src/lib/token-icon.ts`, `src/components/ui/token-mark.tsx` | the contract's icon rule (a `data:image/` URL of at most 2,048 bytes) and the icon shown everywhere, with a monogram fallback |
+| `src/lib/burn-total.ts`, `src/components/burn/` | the burn counter's average, the token page's burn line, the burn moment after the creator payout |
+| `src/components/sale/` | sale page: status, demand panel, bids over time, reveal reminder (`.ics`), the clearing moment, bid form |
+| `src/components/result/` | result page: reveal, fairness timeline, Share on X, winner card, supply story and mint and burn log (`supply.ts`), scorecard, Trade on Rhea, pool panel, Verified panel, bid inclusion |
+| `src/components/token/` | the token page |
+| `src/components/kit/` | the launch kit, its post texts (`kit-text.ts`) and QR code (`qr.ts`) |
+| `src/components/home/` | the sales board and the fair-launch leaderboard (`leaderboard.ts`) |
+| `src/components/create/` | create form, presets, icon picker, pool section, launch simulator |
 | `src/components/deploy/` | the `/deploy` page |
 | `src/lib/__tests__/` | vitest suites, including byte parity with the Rust sealer |
 | `scripts/` | `e2e/`, `live-bot/`, `mcp/`, `verify-sale.ts` (see Scripts) |

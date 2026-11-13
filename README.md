@@ -3,7 +3,7 @@
 Sealed-bid, single-price token sales on NEAR. Bids are sealed in the browser and opened only inside an OutLayer TEE (Intel TDX) after the sale closes, and every winner pays the same clearing price, so bots and people pay the same. After settlement the sale can open a Rhea pool at exactly that price, with the LP shares held by the sale contract.
 
 - 90-second video: `<video link>`
-- Hosted demo, judge mode (no wallet, no funds): https://sealround-demo.vercel.app/judge
+- Hosted demo, judge mode (no wallet, no funds): https://sealround-demo.vercel.app/judge (an older build; see [section 2](#2-try-it-in-2-minutes-with-no-funds))
 - Testnet results and transaction links: [section 7](#7-testnet-results)
 - Tracks: Memecoins With Mechanics; also Privacy & Private AI, Unstoppable DeFi, Open Innovation, Agent Economy
 
@@ -25,7 +25,7 @@ Every claim below says which of these it was checked in.
 
 ### Claims and how to check them
 
-"Needs" is what you need beyond a clone: **Browser** (nothing to install), **Node 24** (`pnpm install` first), **Rust** (1.97.1, pinned), **Docker** (the sandbox runs in a container; the scripts are written for a Windows host with PowerShell), **testnet RPC** (read-only access to `rpc.testnet.near.org` and `testnet-api.outlayer.ai`). Every command below was run on 13 Nov 2026 on Windows 11 with Node 24.19.0, with the result shown, unless the row says otherwise.
+"Needs" is what you need beyond a clone: **Browser** (nothing to install), **Node 24** (`pnpm install` first), **Rust** (1.97.1, pinned), **Docker** (the sandbox runs in a container; the scripts are written for a Windows host with PowerShell), **testnet RPC** (read-only access to `rpc.testnet.near.org` and `testnet-api.outlayer.ai`). Every command below was run on 13 Nov 2026 on Windows 11 with Node 24.19.0, with the result shown, unless the row says otherwise. Rows C15 to C23 were checked on 13 Nov 2026 against `pnpm dev` at commit `576047c`, in a browser with no stored demo data. The seeded demo sales (Lantern, Thistle, Driftwood, Ashfall, Kiln, Fair Test, Moth) come out the same in every fresh browser; judge runs and sales you create add to the board, the leaderboard and the burn counter, and "Reset demo data" in the footer starts over.
 
 | # | Claim | How to check: do, then see | Mode | Needs |
 | --- | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ Every claim below says which of these it was checked in.
 | C4 | The contract re-checks the enclave's result and fails the sale on any mismatch. | `cargo test -p fairground --locked every_check_can_fail_the_sale` passes: each named check fails the sale on its own. On testnet, `get_result` for `smoke-11120830` shows `"failed_checks":[]` (commands below). | Unit; testnet | Rust; testnet RPC |
 | C5 | No admin key: a sale's rules are fixed at `create_sale`, and a deployed contract account has no access key. | Read [contracts/DESIGN.md](contracts/DESIGN.md) "Safety rules" and `contracts/fairground/src/lib.rs`: no owner, no admin, no upgrade method. On testnet, `keys <contract>` (below) must print `"keys":[]`. For the evidence contract: `<link: access key list of sealround.itzbeast.testnet after lock>`. The smoke-sale contract `fairground.itzbeast.testnet` still has its deployer's full-access key: it was never locked (section 7). | Testnet | testnet RPC |
 | C6 | A failed sale refunds everyone. | Judge mode: `/sale/driftwood/result` (missed its minimum raise, everyone refunded), `/sale/ashfall` (the enclave never answered; past the settle timeout, "Switch this sale to refunds" lets anyone trigger full refunds). Sandbox: scenario 20 "refund mode: nobody closes the sale, everyone gets the whole deposit back" and scenario 13 (the enclave refuses, `retry_setup` and a second `close_sale` recover). | Mock; sandbox | Browser; Docker |
-| C7 | Unsold supply is burned. | `view smoke-11120830.fairground.itzbeast.testnet ft_total_supply '{}'` (below) prints `"900000000000000000000"`: 1,000 tokens were minted once, 100 of the 600 for sale went unsold and were burned at `claim_proceeds`. In judge mode, `/create` "Simulate this launch" has a "Burned" row and `/arena` has "Sealround: supply burned as demand changes". | Testnet; mock | testnet RPC; Browser |
+| C7 | Unsold supply is burned. | `view smoke-11120830.fairground.itzbeast.testnet ft_total_supply '{}'` (below) prints `"900000000000000000000"`: 1,000 tokens were minted once, 100 of the 600 for sale went unsold and were burned at `claim_proceeds`. In judge mode, `/sale/thistle/result` shows 292,200 THSL burned (C15), a `/judge` run at **Low** demand burns about 52,800 of its tokens at the creator payout, `/create` "Simulate this launch" has a "Burned" row and `/arena` has "Sealround: supply burned as demand changes". | Testnet; mock | testnet RPC; Browser |
 | C8 | The launch pool opens on Rhea at exactly the clearing price, and the LP shares stay with the keyless contract. | `powershell -File scripts\test-contracts.ps1` runs 9 liquidity integration tests against Rhea's own wasm (v1.9.19); 26 integration tests passed on 12 Nov 2026 (not rerun on 13 Nov). Judge mode: the result page's **Launch pool** panel shows "Pool price equals the clearing price" Passed, labelled simulated. Testnet: `<link: evidence sale pool, section 7>`. | Sandbox; mock; testnet pending | Docker and PowerShell; Browser |
 | C9 | Bidders need no NEAR: the relayer pays the gas. | `pnpm --filter web e2e:sandbox`; scenarios 4 and 10 print "alice.test.near's NEAR balance moved by exactly 0" (and the same for every other bidder) for every bid, scenarios 8 and 12 for every claim. `cd apps/relayer && pnpm test`: 411 passed, 10 sandbox tests skipped. | Sandbox; unit | Docker; Node 24 |
 | C10 | Anyone can verify a sale without trusting the app or us. | Same command as C3. It also recomputes the bid set: "Bid set: [PASS] 1 of 1 bids listed; recomputed 4019e54c… = frozen 4019e54c…". In NEAR mode the result page's **Verified** panel runs the same code in the browser. In judge mode it shows "11 of 11 checks passed" against an unsigned, simulated attestation, labelled simulated. | Testnet; mock | Node 24, testnet RPC; Browser |
@@ -43,6 +43,15 @@ Every claim below says which of these it was checked in.
 | C12 | An AI agent can bid through MCP, within a budget the user set, without seeing the key. | `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts --offline`: 3/3 scenarios, 24/24 checks (handshake, the seven tools, refusals before any network call). Without `--offline`: 13/13 scenarios, 90/90 checks, including a relayed bid, a gasless claim and "no key in any tool answer or server log". | Sandbox | Node 24; Docker for the full test |
 | C13 | The Bot Arena numbers are reproducible. | `pnpm arena` prints the table in section 6 and rewrites `apps/web/src/data/arena-results.json`; `git status` then shows no change to that file. | Model | Node 24 |
 | C14 | The TypeScript and Rust clearing agree. | `pnpm --filter @fairground/clearing test` (1,032 passed) and `cargo test -p fairground-clearing --locked` both run the 389 shared clearing vectors in `crates/clearing/tests/vectors.json`. | Unit | Node 24; Rust |
+| C15 | Demand sets the final supply: tokens nobody bought are burned, and every mint and burn is logged. | Open `/sale/thistle/result` (a seeded sale that drew too little demand). See "107,800 of 400,000 THSL sold" and "27%", and the reveal ending "292.2K THSL burned". Under **Where every token went**: "Supply at launch 1,000,000", "Supply after the sale 707,800 THSL, 29% less", and a table (sold to winners 107,800, creator allocation 100,000, LP reserve 500,000, burned 292,200) that adds up to 1,000,000; the page says the LP reserve row exists only on the simulated chain. Under **Mint and burn log**: "Minted 1,000,000 THSL" at sale creation and "Burned 292,200 THSL" by the creator payout (`claim_proceeds`), each with its transaction, then "Token supply now: 707,800 THSL". A sold-out sale burns nothing: `/sale/lantern/result`. | Mock | Browser |
+| C16 | Each token gets its own page after the sale. | Open `/token/thistle`, or click **Token page** in a settled result's header or on a settled row of `/sales`. See the tab title "$THSL on Sealround", launch price "0.001 USDC per THSL", "Supply now 707,800", "Burned at launch 292,200, 29% of the launch supply", "Holders at launch 19", "Raised 107.8 USDC", the line "This launch burned 29% of its supply because demand did not take it.", the supply story from C15, and "How it launched: 19 bids, one price." `/token/driftwood` says "No DRFT to trade" (the sale failed and refunds every valid bid); `/token/moth` says "$MOTH launches when sale moth settles". | Mock | Browser |
+| C17 | The landing page shows how much supply demand burned across launches. | Open `/` and scroll to "Demand sets the supply.". In a fresh browser: "15%" "of each launch's supply burned because demand did not take it, on average across 2 launches"; Launches 2, Burned 1, Sold out 1; a note that 1 sale missed its minimum raise and is counted apart; newest launches "Thistle $THSL 29% burned" and "Lantern $LNTN 0% sold out", each linking its token page. Every judge run or sale you settle adds a launch and moves the average. | Mock | Browser |
+| C18 | Finished sales are ranked by how widely their tokens spread. | Open `/sales`, scroll to **Fair-launch leaderboard**. In a fresh browser, by Top 10 share: 1 Lantern (top 10 share 39.8%, Gini 0.29, bots' share 12.5%, burned 0%, 41 of 49 winners, 0.0016 USDC), 2 Thistle (72.5%, 0.25, 9.3%, 29%, 19 of 19, 0.001 USDC), then Driftwood without a rank: "Refunded. Missed its minimum raise." **Rank by** Gini puts Thistle first; **Bots' share** is the third option (mock only: a real contract stores no roles). | Mock | Browser |
+| C19 | The result page compares the sale with the Arena's launches and hands winners off to trading. | On `/sale/thistle/result`, **Fair-launch scorecard** (after "Who got the tokens"): this sale, then the Arena's averages for Sealround, bonding curve and first come. Bots' share of tokens sold 9.3% (15.7%, 34.5%, 20.9%); price people paid over bots 1.00× (1.00×, 2.61×, 1.00×); bot profit 0 USDC (0, 1,269, 177); Gini 0.25 (0.50, 0.52, 0.50). Thistle and Lantern have no pool and say "No Sealround pool". After a `/judge` run, its full result's **Launch pool** panel ends with **Trade on Rhea** and "Simulated pool: nothing trades on it, so this opens Rhea's home page." | Mock | Browser |
+| C20 | A sale page shows live demand and the reveal, with no price visible. | Open `/sale/kiln` (window ended, not closed). **Demand at the close**: "217.36 USDC from 33 sealed bids", the 50 USDC min raise "Covered", "Covered 1.81×" and "the clearing price cannot go above 0.001811 USDC" (a bound from the public deposits, not a forecast); **Bids over time** with **Show as a table**; **What the chain sees**: "228 bytes + the account name" and "33 of 33" bids at exactly that size. Click **Close sale** (no wallet needed): the status panel says "Opening 33 sealed bids in the enclave" with three steps, then moves to `/sale/kiln/result` within seconds (0.00149 USDC, all 29 winners, 120,000 of 120,000 KILN sold). On the open sale `/sale/fairt`: the countdown, **Add the reveal to your calendar** (an `.ics` file made in the browser), **Copy watch link** and **Demand so far**. | Mock | Browser |
+| C21 | A creator can start from a meme launch preset and give the token an icon. | Open `/create`. **Start from a preset**: **Pure fair launch** fills 900,000 for sale, floor 0.001 USDC, min raise 100 USDC, deposits 2 to 25 USDC and a 5-minute window; **Pool first** adds a launch pool with 20 % of the raise; **Community burn** sets floor 0.002 USDC and min raise 900 USDC. Name, symbol, icon and description stay as typed; editing a number shows "Custom"; **Undo** restores the values from before the first preset. **Icon**: **Generate** (up to 3 letters or one emoji), **Upload** (shrunk until it fits the contract's 2,048-byte limit) or **None**. Seeded sales show their marks on `/sales` and in the sale and result headers. | Mock | Browser |
+| C22 | After `/create`, the creator gets a launch kit. | On `/create` pick a preset, type a name and symbol, click **Review**, **Connect to create** (the demo wallet), then **Create sale and lock the rules**: the app lands on `/sale/<id>/kit`, "Your launch kit". Or open `/sale/moth/kit` directly (it is public). See bids open, close and reveal times in UTC and in your time zone, **Add the reveal to a calendar**, a countdown image and a link preview with **Download PNG**, three posts for X, each with its length counted the X way ("N of 280") and ending "Simulated sale on Sealround." plus the sale link, a watch link, a QR code (**Download PNG**, **Download SVG**) and "What bidders need". | Mock | Browser |
+| C23 | Share cards: "I'm in" after a bid, "No bot paid less" after a win, a countdown for the creator. None shows a max price or a deposit. | With `pnpm dev` running: `curl -s -o bid.png "http://localhost:3000/api/og/bid?sale=fairt&bid=29&name=Fair+Test&ticker=FAIRT"`, `curl -s -o win.png "http://localhost:3000/api/og/win?sale=thistle&win=2&name=Thistle&ticker=THSL&got=3280000000000000000000&dec=18&price=1000&winners=19&bids=19"` and `curl -s -o countdown.png "http://localhost:3000/api/og/countdown?sale=moth&name=Moth&ticker=MOTH&start=1798761600000&end=1798783200000&floor=1500"` each give a 1200x630 PNG: "I'm in. Sealed bid #29 in $FAIRT"; "No bot paid less. I got 3,280 $THSL at 0.001 USDC each."; "Bids open 00:00 UTC Fri, 1 Jan 2027". Each says "Simulated sale". A bad or missing parameter gives the generic app card, never an error. `curl -s "http://localhost:3000/sale/fairt?bid=29&name=Fair+Test&ticker=FAIRT" \| grep og:image` points at `/api/og/bid`. In the app: bid on `/sale/fairt` (Connect first): **Show you're in** appears under the bid; on the result of a `/judge` run in which your own bid won: **Share your win**. | Mock | Browser, curl |
 
 Read-only testnet helpers used above (bash; Node 24 has `fetch`):
 
@@ -62,7 +71,8 @@ keys fairground.itzbeast.testnet                                              # 
 | A mechanic in an NEP-141 contract | Each sale deploys its own NEP-141 token (`contracts/token`) to `<sale_id>.<contract>`, mints the fixed supply once to the sale contract and burns what does not sell. The token has no mint method and no owner, and emits NEP-297 `ft_mint` and `ft_burn` events. The auction itself is `contracts/fairground`. |
 | Parameters fixed at launch, no admin key | C5 |
 | Sybil limits written plainly | [Section 11](#11-sybil-limits) |
-| A progress page with a log of every mint and burn | `/sale/<id>` and `/sale/<id>/result`: the sale's on-chain event log ("History"): creation with the fixed-supply token, bids, close, settlement, every claim, the creator payout with the burn, and the launch pool's events. The token's own `ft_mint` and `ft_burn` events are on the explorer. |
+| Supply that reacts to the community | The sealed bids set the clearing price, and every token they did not take burns at the creator payout, so demand sets the final supply. Seeded sale Thistle: 107,800 of 400,000 sold, 292,200 burned, supply 1,000,000 to 707,800 (`/sale/thistle/result` "Where every token went", C15; `/token/thistle`, C16). The landing page's "Demand sets the supply." averages the burn across launches (C17); `/sales` ranks finished sales with their burned share (C18). |
+| A progress page with a log of every mint and burn | Progress: `/sale/<id>` shows the countdown, deposits against the minimum raise, bids over time and the sealed-bid size check while bids are open, then "Opening N sealed bids in the enclave" at close (C20). Mint and burn log: `/sale/<id>/result` and `/token/<id>` list the one mint at sale creation and the burn at the creator payout with their transactions and the supply now (C15, C16). The sale's on-chain event log ("History") has creation, bids, close, settlement, every claim, the creator payout with the burn and the launch pool's events. The token's own `ft_mint` and `ft_burn` events are on the explorer. |
 | A simulation of community behaviour before choosing parameters | C11 and the Bot Arena ([section 6](#6-bot-arena-results)) |
 
 ## Contents
@@ -88,7 +98,7 @@ Also: [Repository layout](#repository-layout), [Deploying](#deploying).
 
 Judge mode runs a whole sale in your browser: 50 fictional people, 3 sniper bots and 1 copycat bid, the sale closes, the enclave clears it, the launch pool is seeded, and you get the result. The chain, the accounts, the enclave, its attestation, the relayer and the pool are simulated; the bid encryption and the clearing math are the real code (see [Three ways to run it](#three-ways-to-run-it)).
 
-**Hosted demo.** As of 13 Nov 2026, https://sealround-demo.vercel.app serves a build from before commit `e59239c`. It has judge mode, but not the launch pool, the launch simulator, the real attestation checks, the fairness timeline or the share cards. `<owner: delete this paragraph after redeploying the demo>`. Locally, everything below works:
+**Hosted demo.** As of 13 Nov 2026, https://sealround-demo.vercel.app serves a build from before commit `e59239c`, although `main` is at `576047c`. It has judge mode, but nothing added in `e59239c`, `4bd6e5a` or `576047c`: no launch pool, launch simulator, real attestation checks, fairness timeline, share cards, token icons, presets, demand meter, supply story, scorecard, token pages, leaderboard, burn counter or launch kit (`/token/thistle` and `/sale/moth/kit` answer 404 there). Claims C15 to C23 need a local run until the owner redeploys. `<owner: delete this paragraph after redeploying the demo>`. Locally, everything below works:
 
 ```sh
 pnpm install     # about 1 minute on a fresh clone
@@ -100,6 +110,7 @@ Requirements: Node 24 and pnpm 12.3.4 (pinned in `package.json`; `corepack enabl
 | Do | See |
 | --- | --- |
 | Open `/judge` | "Judge mode", a **Run demo** button ("About 35 seconds. No wallet, no funds.") and "The run in nine steps" |
+| Optional: under **Demand**, pick **Low**, **Normal** (the default) or **High** before **Run demo** | The same sale with a smaller or larger crowd. **Low**: it clears at the floor (0.001 USDC), about 56 % of the 100,000 for sale sells, and the run pays the creator, so about 52,800 tokens burn. The summary then reads, for the first run in a fresh browser, "Demand took 56,010 of the 100,000 JDG1 for sale, so every valid bid filled in full at the floor. 52,788 JDG1 burned at the creator payout". **High**: it sells out at roughly 3.5x to 4.1x the floor. The choice is remembered in this browser. |
 | Click **Run demo** | A live timeline: Create the sale, Enclave makes the sale key, 3 sniper bots bid at second 0, 50 people bid over the window, A copycat replays a sealed bid, The bid window runs out, Anyone closes the sale, Enclave clears the sale, Result. Bids stream in as ciphertext only. |
 | Wait about 35 seconds | "Every winner paid one clearing price" with the price in USDC per token; **Bots paid** and **People paid** side by side at the same price; "Bots and people paid exactly the clearing price." and "The copycat's bid was void: 0 tokens, ... USDC back, ... USDC kept as the 1 % penalty."; a **Time to result** stat under the 2:00 goal (0:34 on 13 Nov 2026 with the dev server) |
 | Click **Open the full result** | `/sale/judge-<n>/result` (`judge-1` in a fresh browser), described in the next table |
@@ -109,31 +120,38 @@ The result page, top to bottom (all present in judge mode, labelled simulated wh
 
 | Part | What it shows |
 | --- | --- |
-| Header | The clearing price, the multiple of the floor, "All N winners paid this price", **Share on X** (a plain link to X's post intent with one factual sentence and the result link; no script from X loads) |
+| Header | The token's icon, **Token page** (C16), the clearing price, the multiple of the floor, "All N winners paid this price", **Share on X** (a plain link to X's post intent with one factual sentence and the result link; no script from X loads) |
+| "Your result" | The connected account's fill and claim. A winner also gets **Share your win**, the winner card (C23) |
 | "From sealed bids to one price" | The reveal: sealed bids, opened in the enclave (valid and void), one price, sold out or burned. It plays once per browser, then shows its final state. |
 | "Early or late, one price" | The fairness timeline: every bid placed by when it landed in the window. Winners sit on the clearing-price line, the first bot and the last person among them. Max prices are never shown. |
 | "Bot or person, same price" | What bots and people each paid per token |
-| **Launch pool** | Stage, pool id, amounts, pool price next to the clearing price, who holds the LP shares, and the **Seed** or **Abandon** buttons anyone can press |
+| "Where every token went" | Supply at launch and after the sale, a table of every part that adds up to the total supply, and the mint and burn log (C15) |
+| **Launch pool** | Stage, pool id, amounts, pool price next to the clearing price, who holds the LP shares, the **Seed** or **Abandon** buttons anyone can press, and **Trade on Rhea** once seeded (C19) |
 | **Verified** | The attestation checks ([section 5](#verify-a-sale-yourself)), the recomputed bid set, "Check any account" (your bid is #k of N), the contract's 14 checks |
-| "Where's my money", fills, "Who got the tokens", History | Every bid's deposit, tokens, spent, penalty and refund; the holder spread; the on-chain event log |
+| "Where's my money", fills, "Who got the tokens", History | Every bid's deposit, tokens, spent, penalty and refund; the holder spread and the fair-launch scorecard (C19); the on-chain event log |
 
 Other pages:
 
 | Page | What it shows |
 | --- | --- |
-| `/` | Landing page: the comparison with bonding curves, first-come sales and public auctions |
-| `/sales` | The sales board |
+| `/` | Landing page: the comparison with bonding curves, first-come sales and public auctions, and the burn counter "Demand sets the supply." (C17) |
+| `/sales` | The sales board (settled rows link their token page) and the fair-launch leaderboard (C18) |
 | `/how` | The clearing rule, a worked example, what is public and what is sealed, trust assumptions, failure cases, honest limits |
 | `/arena` | Bot Arena charts, all read from the output of `pnpm arena` ([section 6](#6-bot-arena-results)) |
-| `/sale/lantern/result` | A settled, oversubscribed sale with sniper bots and a copycat whose bid was voided |
+| `/sale/lantern/result` | A settled, oversubscribed sale with sniper bots and a copycat whose bid was voided; sold out, so nothing burns |
+| `/sale/thistle/result` | A settled, undersubscribed sale: 27 % sold at the floor, 292,200 THSL burned (C15) |
 | `/sale/driftwood/result` | A sale that missed its minimum raise: everyone refunded |
 | `/sale/ashfall` | A sale whose enclave never answered: refund mode after the settle timeout |
-| `/sale/fairt` | An open sale (the spec's reference parameters) with **Fund from any chain**, live 1Click dry quotes and simulated swaps |
-| `/create` | **Launch a sale**: the parameters, **Bid privacy** (enclave by default, or commit-reveal), the optional **Launch pool**, **Simulate this launch** ([section 6](#simulate-your-own-launch)), then **Review the rules** ("Nothing can be changed once the sale is created.") with the cost, and **Create sale and lock the rules** |
+| `/sale/kiln` | A sale whose window has ended: **Close sale** (no wallet) shows the enclave opening the bids, then the result (C20) |
+| `/sale/fairt` | An open sale (the spec's reference parameters) with the live demand meter and countdown (C20), **Fund from any chain**, live 1Click dry quotes and simulated swaps |
+| `/sale/moth` | An upcoming sale; its launch kit is `/sale/moth/kit` (C22) |
+| `/token/<id>` | A token's page after its sale: launch price, supply now, burned, holders, raise, trading, the supply story (C16) |
+| `/sale/<id>/kit` | The creator's launch kit: times, countdown image, posts for X, QR code (C22) |
+| `/create` | **Launch a sale**: **Start from a preset** (C21), the token with its icon, the parameters, **Bid privacy** (enclave by default, or commit-reveal), the optional **Launch pool**, **Simulate this launch** ([section 6](#simulate-your-own-launch)), then **Review the rules** ("Nothing can be changed once the sale is created.") with the cost, and **Create sale and lock the rules**, which opens the launch kit |
 
 The demo state lives in your browser's localStorage. "Reset demo data" in the page footer wipes it.
 
-**Share cards.** Every page has an Open Graph and X card (`apps/web/src/lib/og/`). In NEAR mode a sale's card is drawn on the server from the contract's views (the clearing price once settled). In mock mode the server cannot see sales that live in your browser, so a sale page gets the generic card. Check: `curl -s http://localhost:3000/sale/lantern/result | grep og:image` prints an `opengraph-image` URL that returns a PNG.
+**Share cards.** Every page has an Open Graph and X card (`apps/web/src/lib/og/`). In NEAR mode a sale's and a token's card are drawn on the server from the contract's views (the clearing price once settled; for a token, its launch price, supply, burn, holders and raise). In mock mode the server cannot see sales that live in your browser, so a sale or token page gets the generic card. Check: `curl -s http://localhost:3000/sale/lantern/result | grep og:image` prints an `opengraph-image` URL that returns a PNG. Three image routes take what they draw from the link in mock mode and from the chain in NEAR mode: `/api/og/bid` ("I'm in", served as the sale page's preview with `?bid=`), `/api/og/win` ("No bot paid less", the result page's preview with `?win=`) and `/api/og/countdown` (the launch kit's countdown). C23 has the commands.
 
 ## 3. How the auction works
 
@@ -426,7 +444,7 @@ pnpm build                # = pnpm --filter web build
 pnpm --filter web start   # http://localhost:3000
 ```
 
-Expected: `✓ Compiled successfully`, then a route table with the pages in [section 2](#2-try-it-in-2-minutes-with-no-funds), their `opengraph-image` routes, and `/api/oneclick/{config,quote,status,submit,swap,tokens}`. `/deploy` (the owner's testnet deploy page) answers 404 in a production build. The optional server-side `ONECLICK_JWT` authenticates the 1Click requests. Dry quotes work without it.
+Expected: `✓ Compiled successfully`, then a route table with the pages in [section 2](#2-try-it-in-2-minutes-with-no-funds) (including `/token/[id]` and `/sale/[id]/kit`), their `opengraph-image` routes, `/sale/[id]/kit/share-card`, `/api/og/{bid,win,countdown}` and `/api/oneclick/{config,quote,status,submit,swap,tokens}`. `/deploy` (the owner's testnet deploy page) answers 404 in a production build. The optional server-side `ONECLICK_JWT` authenticates the 1Click requests. Dry quotes work without it.
 
 ### Full local stack, end to end
 
@@ -453,22 +471,22 @@ pnpm check
 
 `pnpm check` (`scripts/check.mjs`) runs the Rust workspace unit tests, the enclave job's native tests, the Vitest suites and TypeScript of `clearing`, `relayer-client`, `relayer` and `arena`, then the web tests, web TypeScript and web ESLint. It prints a pass/fail summary and ends with `13/13 passed`. It passed on Linux x86_64 (12 Nov 2026, Node 24.22.3, from a clean archive of the commit before `e59239c` plus `scripts/check.mjs`) and on Windows 11 (13 Nov 2026, commit `e59239c`).
 
-Results on 13 Nov 2026, Windows 11, commit `e59239c`:
+Results on 13 Nov 2026, Windows 11. The last column names the commit each run was on. From `e59239c` to `576047c` only the web app (with its scripts and tests), the `enclave/deploy` PowerShell scripts, the docs and the lockfile changed; no contract, crate, relayer or package code.
 
-| Suite | Command (from the repo root unless noted) | Result |
-| --- | --- | --- |
-| Everything without Docker | `pnpm check` | 13/13 passed |
-| Rust unit (contract, clearing, sealer, token, test USDC) | `cargo test --workspace --locked` | 201 passed, 1 ignored |
-| Enclave job, native | in `enclave/`: `cargo test --locked -p fairground-sealer-job` | 20 passed |
-| Clearing TS | `pnpm --filter @fairground/clearing test` | 1,032 passed |
-| Arena | `pnpm --filter @fairground/arena test` | 27 passed |
-| Relayer | in `apps/relayer`: `pnpm test` | 411 passed, 10 sandbox tests skipped |
-| Relayer client | in `packages/relayer-client`: `pnpm test` | 269 passed, 8 sandbox tests skipped |
-| Web | in `apps/web`: `npx vitest run` | 232 passed |
-| End to end (Docker) | `pnpm --filter web e2e:sandbox` | 21/21 scenarios, 483/483 checks, 152 s |
-| MCP server (Docker) | `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts` | 13/13 scenarios, 90/90 checks, 44 s |
-| Live bot (Docker) | `pnpm --filter web exec tsx scripts/live-bot/sandbox-test.ts` | 8/8 scenarios, 69/69 checks, 109 s |
-| Contracts, full: build, unit, sandbox integration (Docker, PowerShell) | `powershell -File scripts\test-contracts.ps1` | 26 integration tests passed on 12 Nov 2026, 9 of them launch liquidity against Rhea's wasm; not rerun on 13 Nov |
+| Suite | Command (from the repo root unless noted) | Result | Commit |
+| --- | --- | --- | --- |
+| Everything without Docker | `pnpm check` | 13/13 passed | `e59239c` |
+| Rust unit (contract, clearing, sealer, token, test USDC) | `cargo test --workspace --locked` | 201 passed, 1 ignored | `e59239c` |
+| Enclave job, native | in `enclave/`: `cargo test --locked -p fairground-sealer-job` | 20 passed | `e59239c` |
+| Clearing TS | `pnpm --filter @fairground/clearing test` | 1,032 passed | `576047c` |
+| Arena | `pnpm --filter @fairground/arena test` | 27 passed | `576047c` |
+| Relayer | in `apps/relayer`: `pnpm test` | 411 passed, 10 sandbox tests skipped | `e59239c` |
+| Relayer client | in `packages/relayer-client`: `pnpm test` | 269 passed, 8 sandbox tests skipped | `e59239c` |
+| Web | in `apps/web`: `npx vitest run` | 500 passed in 33 files | `576047c` |
+| End to end (Docker) | `pnpm --filter web e2e:sandbox` | 21/21 scenarios, 484/484 checks | `576047c` |
+| MCP server (Docker) | `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts` | 13/13 scenarios, 90/90 checks, 44 s | `e59239c` |
+| Live bot (Docker) | `pnpm --filter web exec tsx scripts/live-bot/sandbox-test.ts` | 8/8 scenarios, 69/69 checks, 109 s | `e59239c` |
+| Contracts, full: build, unit, sandbox integration (Docker, PowerShell) | `powershell -File scripts\test-contracts.ps1` | 26 integration tests passed, 9 of them launch liquidity against Rhea's wasm | 12 Nov 2026, contract unchanged since; not rerun on 13 Nov |
 
 Other checks: `cargo clippy --workspace --all-targets --locked -- -D warnings`; `powershell -File scripts\run-enclave.ps1 -Test`; `powershell -File scripts\build-enclave.ps1 -Verify` (Docker, prints `verify: MATCH`); `pnpm typecheck` in `apps/relayer` and `packages/relayer-client`; `pnpm test:sandbox` in `apps/relayer`.
 
@@ -539,6 +557,7 @@ Claims: each part of a claim (tokens, refund) is marked paid before the transfer
 | `motion` | Animation |
 | `lucide-react` | Icons |
 | `clsx` | Classnames |
+| `qrcode-generator` 2.0.4 (MIT) | The launch kit's QR code, made in the browser |
 | `tailwindcss` 4, `@tailwindcss/turbopack` | Styling |
 | `@modelcontextprotocol/sdk` 1.32.2, `zod` 4.6.7 | MCP server (development dependencies) |
 | `typescript`, `eslint`, `eslint-config-next`, `vitest`, `tsx` | Tooling |

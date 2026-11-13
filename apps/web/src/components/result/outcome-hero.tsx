@@ -108,8 +108,9 @@ function Settled({ sale, result, fills, aside, reveal }: Props) {
         { label: "Raised", value: usdcStr(result.totalRaised), unit: "USDC" },
         {
           label: burned ? "Burned" : "To burn",
-          value: tokenStr(result.unsold, c.decimals),
-          unit: c.tokenSymbol,
+          // A sold-out sale has nothing to burn: say so rather than "Burned 0".
+          value: burn.burnState === "none" ? "None" : tokenStr(result.unsold, c.decimals),
+          unit: burn.burnState === "none" ? "sold out" : c.tokenSymbol,
           title: `${
             burn.burnPool > 0n
               ? `${tokenFull(burn.burnUnsold, c.decimals)} unsold and ${tokenFull(burn.burnPool, c.decimals)} ${poolLeftover(result.liquidity)}. `

@@ -208,7 +208,9 @@ export function failText(result: SaleResult, sale: Sale): { title: string; body:
 export const STATUS_BADGE: Record<FillStatus, { label: string; tone: Tone; title: string }> = {
   filled: { label: "Filled", tone: "ok", title: "Got tokens and spent the whole deposit." },
   partial: {
-    label: "Partly filled",
+    // Not "Partly filled": on an undersold sale every bid fills in full, and the
+    // USDC back is only the deposit above the bid's max spend.
+    label: "Tokens + refund",
     // Green like Filled: it got tokens. Blue stays for live state, the price and the main action.
     tone: "ok",
     title:
