@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
-import { THEME_BOOTSTRAP } from "@/components/shell/theme-preference";
+import { ThemeScript } from "@/components/shell/theme-script";
 import { siteUrl } from "@/lib/og/site-url";
 import { WalletProvider } from "@/lib/wallet";
 import "./globals.css";
@@ -34,7 +34,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+        <ThemeScript />
       </head>
       <body>
         <WalletProvider>
