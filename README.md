@@ -333,7 +333,7 @@ By mode: on testnet everything above is real (16 of 16 for `smoke-11120830`, sec
 | `enclave/res/fairground_sealer.wasm` (the OutLayer job) | `f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb` | `powershell -File scripts\build-enclave.ps1 -Verify` rebuilds it in Docker and prints `verify: MATCH`. The single source of truth is `enclave/res/fairground_sealer.wasm.sha256` |
 | `contracts/res/fairground_token.wasm` | `0b1673bf822def860a637059ff55e839cc47f8c1dacee46b284080bbe7450047` | Embedded in `fairground.wasm` |
 | `contracts/res/outlayer_contract.wasm` (third party, tests only) | `74ab074a27ccddd9b6f400f3f8453c1039419acba556ba77dfb288759b3dbd0f` | [contracts/res/NOTICE.md](contracts/res/NOTICE.md) |
-| `contracts/tests/res/ref_exchange.wasm` (Rhea v1.9.19, third party, tests only) | `8918c505017ceb57646bdd863c34e4fe56e2edc7756963d6f4a1f38d6f9c34d2` | [contracts/tests/res/NOTICE.md](contracts/tests/res/NOTICE.md) |
+| `contracts/tests/res/ref_exchange.wasm` (Rhea v1.9.19, third party, tests only, not in git) | `8918c505017ceb57646bdd863c34e4fe56e2edc7756963d6f4a1f38d6f9c34d2` | `node scripts/fetch-rhea-wasm.mjs` reads it from `ref-finance-101.testnet` and keeps it only if this hash matches; [contracts/tests/res/NOTICE.md](contracts/tests/res/NOTICE.md) |
 
 Measured costs: a 500-bid clear takes 3.14e9 wasm instructions and about 0.2 s on a laptop, against OutLayer's 60 s limit ([enclave/PERF.md](enclave/PERF.md)); closing a 500-bid TEE sale burns 132 TGas and fits one transaction; seeding a launch pool in one call burns 54.5 TGas ([contracts/GAS.md](contracts/GAS.md)).
 
@@ -611,7 +611,9 @@ The code and documentation in this repository were written with AI coding agents
 
 ### Baseline
 
-The repository starts at commit `781f75b` (9 Nov 2026). There is no code from before 19 Oct 2026 in this repo, so no baseline diff applies. *(Owner to confirm.)*
+Every commit in this repository was made during the hackathon, which opened with the announcement on 19 Oct 2026. The first commit is `781f75b` (9 Nov 2026), and no code from before 19 Oct 2026 was copied in, so there is no pre-hackathon baseline to separate and no baseline diff applies: the whole history is hackathon work.
+
+Commit `ee5c419` (11 Nov 2026) has "Baseline" in its title only because it was the first commit of the combined contracts, enclave, relayer and web app, which the later commits build on. It is hackathon work, not pre-existing code.
 
 ## 13. Roadmap (not built)
 
@@ -639,8 +641,8 @@ Built since the first roadmap: the launch pool at the clearing price ([section 3
 
 MIT, see [LICENSE](LICENSE). Two third-party wasm files are used only by the sandbox tests and are never deployed by this project:
 
-- `contracts/res/outlayer_contract.wasm` (OutLayer's contract) is Apache-2.0; see [contracts/res/NOTICE.md](contracts/res/NOTICE.md) and `contracts/res/LICENSE-APACHE-2.0`.
-- `contracts/tests/res/ref_exchange.wasm` (Rhea's exchange, v1.9.19, read from `ref-finance-101.testnet`): its licence is not confirmed yet; see [contracts/tests/res/NOTICE.md](contracts/tests/res/NOTICE.md).
+- `contracts/res/outlayer_contract.wasm` (OutLayer's contract) is Apache-2.0 and is in the repository; see [contracts/res/NOTICE.md](contracts/res/NOTICE.md) and `contracts/res/LICENSE-APACHE-2.0`.
+- `contracts/tests/res/ref_exchange.wasm` (Rhea's exchange, v1.9.19) is not in the repository, because its licence is not confirmed. `scripts/fetch-rhea-wasm.mjs` reads it from `ref-finance-101.testnet` and checks its pinned sha256; `scripts/test-contracts.ps1` runs it before the integration tests. See [contracts/tests/res/NOTICE.md](contracts/tests/res/NOTICE.md).
 
 ## Repository layout
 

@@ -7,12 +7,15 @@ integration tests. Exits non-zero if anything fails.
 1. scripts\build-contracts.ps1: token, mock-ft, fairground into contracts\res.
 2. cargo test --workspace --no-fail-fast: the unit tests of every crate and
    contract (all of them run even if one fails).
-3. scripts\sandbox.ps1: makes sure the sandbox node is up (Docker). A running
+3. scripts\fetch-rhea-wasm.mjs: the Rhea exchange wasm the launch-pool tests
+   deploy (not in git; read from testnet and checked against its pinned
+   sha256, skipped when the file is already there).
+4. scripts\sandbox.ps1: makes sure the sandbox node is up (Docker). A running
    node is reused; a stopped one is replaced by a fresh chain (a restarted
    chain's clock would stall the tests).
-4. The integration tests in contracts\tests (their own Cargo workspace), run
+5. The integration tests in contracts\tests (their own Cargo workspace), run
    natively against the node, one test at a time.
-5. With -Gas, the gas calibration too (100, 300 and 500 worst-case TEE bids,
+6. With -Gas, the gas calibration too (100, 300 and 500 worst-case TEE bids,
    and 500 commit-reveal bids twice: a usual book and the longest price
    search; about 12 minutes). Its numbers are what
    contracts\GAS.md records.
@@ -123,6 +126,15 @@ try {
         $c = Get-TestCounts $r.Lines
         $summary.Add("unit tests: $($c.Passed) passed, $($c.Failed) failed, $($c.Ignored) ignored (exit $($r.ExitCode))")
         if ($r.ExitCode -ne 0 -or $c.Failed -gt 0) { $failed = $true }
+    }
+
+    # The Rhea exchange wasm is not in git (licence not confirmed); fetch it
+    # from testnet and check it against the pinned sha256.
+    Write-Stage 'Rhea exchange wasm (contracts\tests\res, fetched)'
+    $r = Invoke-Native 'node' @((Join-Path $PSScriptRoot 'fetch-rhea-wasm.mjs'))
+    if ($r.ExitCode -ne 0) {
+        $summary.Add('Rhea exchange wasm: FAILED')
+        throw 'could not fetch the Rhea exchange wasm'
     }
 
     Write-Stage 'sandbox'

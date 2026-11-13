@@ -434,7 +434,9 @@ async fn deploy(parent: &Account, name: &str, near: u128, wasm: &str) -> Result<
 async fn deploy_dex(parent: &Account) -> Result<Contract> {
     let wasm = "ref_exchange.wasm";
     let code = std::fs::read(test_res(wasm))
-        .with_context(|| format!("reading contracts/tests/res/{wasm}"))?;
+        .with_context(|| {
+            format!("reading contracts/tests/res/{wasm} (not in git; run `node scripts/fetch-rhea-wasm.mjs`)")
+        })?;
     let account = subaccount(parent, "dex", 20 * NEAR).await?;
     let dex = account.deploy(&code).await?.into_result()?;
     dex.call("new")

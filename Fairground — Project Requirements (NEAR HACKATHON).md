@@ -2,6 +2,13 @@
 
 Nov 9, 2026 · @Vasanth
 
+> **Status, 13 Nov 2026.** This is the plan written on 9 Nov, before most of
+> the build. Its lists are the plan, not a progress record. What was built,
+> and how to check each claim, is in the [README](README.md) ("Claims and how
+> to check them"). Planned items that were not built are listed in README
+> section 13 ("Roadmap (not built)"), and the testnet evidence and the mainnet
+> pilot status are in README section 7.
+
 ## Summary
 
 Sealround is a sealed-bid, single-price sale protocol on NEAR. Bids stay hidden inside a TEE until the sale closes, everyone pays one clearing price, and buyers can pay from any chain. One line: **bots and you pay the same price.**
@@ -61,25 +68,25 @@ P0 is the whole submission: if it works end to end, we are competitive. P1 is ad
 
 **P0: must ship by Saturday**
 
-- [ ] Sale contract on testnet: create, bid, close, settle, claim, refund, timeout refund
-- [ ] Token factory: fixed supply, no mint, no admin key
-- [ ] Sealed bids in the OutLayer TEE, or the commit-reveal fallback if the Tuesday gate fails
-- [ ] Clearing logic in the enclave, with contract-side checks of the result
-- [ ] Fund from any chain via 1Click (dry quotes always, real quotes on mainnet)
-- [ ] Gas relayer for bid and claim transactions
-- [ ] Web app: create page, sale page, result page, Verified panel, where's-my-money panel
-- [ ] Bot Arena: simulator plus a live sniper bot on testnet
-- [ ] Judge mode: a seeded testnet sale anyone can run with no funds
-- [ ] One capped mainnet pilot with real bidders
-- [ ] README, demo video, X post, submission
+- Sale contract on testnet: create, bid, close, settle, claim, refund, timeout refund
+- Token factory: fixed supply, no mint, no admin key
+- Sealed bids in the OutLayer TEE, or the commit-reveal fallback if the Tuesday gate fails
+- Clearing logic in the enclave, with contract-side checks of the result
+- Fund from any chain via 1Click (dry quotes always, real quotes on mainnet)
+- Gas relayer for bid and claim transactions
+- Web app: create page, sale page, result page, Verified panel, where's-my-money panel
+- Bot Arena: simulator plus a live sniper bot on testnet
+- Judge mode: a seeded testnet sale anyone can run with no funds
+- One capped mainnet pilot with real bidders
+- README, demo video, X post, submission
 
 **P1: stretch, only after the Wednesday gate**
 
-- [ ] Confidential funding: 1Click `confidentiality`, so origin wallets cannot be linked to bid accounts
-- [ ] Delivery to Base via chain signatures (openlaunch fair mode, NEAR as the logic layer)
-- [ ] Per-bid inclusion proofs, so each bidder can verify their bid was counted
-- [ ] Optional anonymized demand-curve reveal after settlement
-- [ ] TypeScript SDK package with one integration example
+- Confidential funding: 1Click `confidentiality`, so origin wallets cannot be linked to bid accounts
+- Delivery to Base via chain signatures (openlaunch fair mode, NEAR as the logic layer)
+- Per-bid inclusion proofs, so each bidder can verify their bid was counted
+- Optional anonymized demand-curve reveal after settlement
+- TypeScript SDK package with one integration example
 
 **P2: roadmap only**
 
@@ -315,14 +322,14 @@ The privacy brief centres on NEAR AI Cloud. Sealround uses OutLayer's TEE instea
 
 **Rules for every entry** ([HACKATHON.md](https://nearhackathon.com/HACKATHON.md)):
 
-- [ ] Repo public by 14 Nov, 23:59 UTC, with a LICENSE file (MIT)
-- [ ] README with "do X → see Y" steps, every library listed, AI-written parts disclosed
-- [ ] Code from before 19 Oct (openlaunch) separated by branch or tags, with a diff link
-- [ ] No secrets anywhere in git history
-- [ ] Hosted demo up through 18 Nov, ideally 25 Nov
-- [ ] Demo post on X tagging @NEARProtocol and #NEARHackathon, with video
-- [ ] Mainnet NEAR account ready for the prize payout
-- [ ] Exactly one submission; mistakes go through the request-changes page
+- Repo public by 14 Nov, 23:59 UTC, with a LICENSE file (MIT)
+- README with "do X → see Y" steps, every library listed, AI-written parts disclosed
+- Code from before 19 Oct (openlaunch) separated by branch or tags, with a diff link
+- No secrets anywhere in git history
+- Hosted demo up through 18 Nov, ideally 25 Nov
+- Demo post on X tagging @NEARProtocol and #NEARHackathon, with video
+- Mainnet NEAR account ready for the prize payout
+- Exactly one submission; mistakes go through the request-changes page
 
 ## Team split and 5-day plan
 
@@ -340,40 +347,40 @@ If a gate fails, cut scope to P0 rather than slipping the next day; the checklis
 
 **Mon 9 Nov (rest of today)**
 
-- [ ] B: OutLayer hello-world on testnet: contract calls OutLayer, OutLayer resumes the contract
-- [ ] B: confirm per-sale key derivation from an OutLayer secret; get a 1Click API key; run one dry quote
-- [ ] A: repo, contract skeleton, `create_sale` with the token factory
-- [ ] C: Next.js scaffold with wallet login; simulator skeleton; tell the openlaunch community a pilot is coming Friday
+- B: OutLayer hello-world on testnet: contract calls OutLayer, OutLayer resumes the contract
+- B: confirm per-sale key derivation from an OutLayer secret; get a 1Click API key; run one dry quote
+- A: repo, contract skeleton, `create_sale` with the token factory
+- C: Next.js scaffold with wallet login; simulator skeleton; tell the openlaunch community a pilot is coming Friday
 
 **Tue 10 Nov: gate at 12:00 UTC: TEE path works on a toy input, or switch to commit-reveal**
 
-- [ ] A: bids through `ft_on_transfer`, `close_sale`, result checks, claims, refunds, unit tests
-- [ ] B: sealer decrypts, clears and outputs; TypeScript and Rust clearing agree on 1,000 random bid sets
-- [ ] C: sale page with in-browser encryption; first simulator numbers
+- A: bids through `ft_on_transfer`, `close_sale`, result checks, claims, refunds, unit tests
+- B: sealer decrypts, clears and outputs; TypeScript and Rust clearing agree on 1,000 random bid sets
+- C: sale page with in-browser encryption; first simulator numbers
 
 **Wed 11 Nov: gate at end of day: create, bid, clear and claim all work on testnet**
 
-- [ ] A: near-workspaces tests for every edge case; timeout refund; testnet deploy
-- [ ] B: funding flow with dry quotes and every status; relayer live
-- [ ] C: result page, Verified panel, where's-my-money panel, judge mode
+- A: near-workspaces tests for every edge case; timeout refund; testnet deploy
+- B: funding flow with dry quotes and every status; relayer live
+- C: result page, Verified panel, where's-my-money panel, judge mode
 
 **Thu 12 Nov**
 
-- [ ] A: mainnet deploy with pilot caps; P1 Base delivery if Wednesday's gate passed
-- [ ] B: one real 1Click funding on mainnet; P1 confidential funding
-- [ ] C: final Bot Arena charts; live bot script; announce the pilot time
+- A: mainnet deploy with pilot caps; P1 Base delivery if Wednesday's gate passed
+- B: one real 1Click funding on mainnet; P1 confidential funding
+- C: final Bot Arena charts; live bot script; announce the pilot time
 
 **Fri 13 Nov: feature freeze at 18:00 UTC**
 
-- [ ] All: run the pilot and collect its numbers
-- [ ] C: README tested from a fresh clone; hosted demo up
-- [ ] A and B: fix only bugs found in the pilot
+- All: run the pilot and collect its numbers
+- C: README tested from a fresh clone; hosted demo up
+- A and B: fix only bugs found in the pilot
 
 **Sat 14 Nov: submit by 18:00 UTC (23:30 IST)**
 
-- [ ] Record the video; publish the X post
-- [ ] Make the repo public; check LICENSE and git history for secrets
-- [ ] Submit once at nearhackathon.com/#apply
+- Record the video; publish the X post
+- Make the repo public; check LICENSE and git history for secrets
+- Submit once at nearhackathon.com/#apply
 
 ## Risks and day-1 unknowns
 
@@ -393,12 +400,12 @@ The biggest risk is the OutLayer integration; every other risk has a cheap fallb
 
 **Unknowns to verify on day 1**
 
-- [ ] OutLayer: secrets, key derivation inside the job, yield/resume round trip, input size limit, cost per run
-- [ ] OutLayer attestation: what the app can fetch and verify in the browser, with a nonce
-- [ ] 1Click: delivery to a fresh NEAR account; USDC token id on NEAR; quote time for SOL and Base USDC
-- [ ] Meta transactions: relaying `ft_transfer_call` with its 1 yoctoNEAR attached deposit
-- [ ] Token factory: deploy cost per sale (storage), or a shared global contract to cut it
-- [ ] Chain signatures on testnet: derive an EVM address and sign one Base Sepolia transfer
+- OutLayer: secrets, key derivation inside the job, yield/resume round trip, input size limit, cost per run
+- OutLayer attestation: what the app can fetch and verify in the browser, with a nonce
+- 1Click: delivery to a fresh NEAR account; USDC token id on NEAR; quote time for SOL and Base USDC
+- Meta transactions: relaying `ft_transfer_call` with its 1 yoctoNEAR attached deposit
+- Token factory: deploy cost per sale (storage), or a shared global contract to cut it
+- Chain signatures on testnet: derive an EVM address and sign one Base Sepolia transfer
 
 ## Submission package
 
@@ -455,27 +462,27 @@ What would you launch with it?
 
 **Submission form fields**
 
-- [ ] Project name and team lead's name
-- [ ] Contact email
-- [ ] Team size: `2 - 4`
-- [ ] Tracks: `memecoins`, `defi`, `privacy`, `open`
-- [ ] Mainnet NEAR account for the payout
-- [ ] Public repo link and public demo post link
-- [ ] Description, 20 to 2,000 characters: the problem, what we built, how NEAR fits
-- [ ] Consent to the contact notice
+- Project name and team lead's name
+- Contact email
+- Team size: `2 - 4`
+- Tracks: `memecoins`, `defi`, `privacy`, `open`
+- Mainnet NEAR account for the payout
+- Public repo link and public demo post link
+- Description, 20 to 2,000 characters: the problem, what we built, how NEAR fits
+- Consent to the contact notice
 
 ## Definition of done and success metrics
 
 Sealround is done when a judge with no funds can run a sale end to end from the README, and the pilot has real numbers behind it.
 
-- [ ] A fresh clone plus the README commands reproduces judge mode with no errors
-- [ ] A testnet sale goes create → bids → close → clear → claim, with tokens and refunds correct to the smallest unit
-- [ ] Every Verified panel check passes on the judge-mode sale
-- [ ] The live sniper bot pays exactly the clearing price, and the copycat attack is rejected
-- [ ] Timeout refund works: no path leaves funds stuck
-- [ ] Bot Arena charts rebuild from one command
-- [ ] The pilot ran, or the documented fallback did
-- [ ] Repo public, video posted, submission sent by Sat 18:00 UTC
+- A fresh clone plus the README commands reproduces judge mode with no errors
+- A testnet sale goes create → bids → close → clear → claim, with tokens and refunds correct to the smallest unit
+- Every Verified panel check passes on the judge-mode sale
+- The live sniper bot pays exactly the clearing price, and the copycat attack is rejected
+- Timeout refund works: no path leaves funds stuck
+- Bot Arena charts rebuild from one command
+- The pilot ran, or the documented fallback did
+- Repo public, video posted, submission sent by Sat 18:00 UTC
 
 | Metric | Target | Source |
 | --- | --- | --- |

@@ -11,3 +11,8 @@ target/
 .sandbox-bin/
 .sandbox-home/
 .DS_Store
+
+# Third-party wasm with an unconfirmed licence: fetched by scripts/fetch-rhea-wasm.mjs
+contracts/tests/res/ref_exchange.wasm
+# Owner's submission working notes (video plan, posts, form answers)
+SUBMISSION.md
