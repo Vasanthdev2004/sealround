@@ -78,6 +78,58 @@ describe("parseConfig", () => {
   });
 });
 
+describe("RPC endpoints", () => {
+  it("add the network's built-in fallbacks after the first endpoint", () => {
+    expect(near({ NEXT_PUBLIC_FAIRGROUND_CONTRACT: "fairground.testnet" }).rpcUrls).toEqual([
+      "https://rpc.testnet.fastnear.com",
+      "https://near-testnet.drpc.org",
+      "https://test.rpc.fastnear.com",
+    ]);
+    expect(near({ ...base, NEXT_PUBLIC_NEAR_NETWORK: "mainnet" }).rpcUrls).toEqual([
+      "https://rpc.mainnet.fastnear.com",
+      "https://near.drpc.org",
+    ]);
+    // A sandbox has no public fallback.
+    expect(near({ ...base, NEXT_PUBLIC_NEAR_NETWORK: "sandbox" }).rpcUrls).toEqual(["http://127.0.0.1:3030"]);
+  });
+
+  it("put NEXT_PUBLIC_NEAR_RPC_URL first, then NEXT_PUBLIC_NEAR_RPC_FALLBACKS, each once", () => {
+    const c = near({
+      ...base,
+      NEXT_PUBLIC_NEAR_RPC_URL: "https://paid.example/key",
+      NEXT_PUBLIC_NEAR_RPC_FALLBACKS: " https://one.example, https://two.example\nhttps://near-testnet.drpc.org/ ,https://one.example",
+    });
+    expect(c.rpcUrl).toBe("https://paid.example/key");
+    expect(c.rpcUrls).toEqual([
+      "https://paid.example/key",
+      "https://one.example",
+      "https://two.example",
+      "https://near-testnet.drpc.org/",
+      "https://rpc.testnet.fastnear.com",
+      "https://test.rpc.fastnear.com",
+    ]);
+  });
+
+  it('leave out the built-in fallbacks when NEXT_PUBLIC_NEAR_RPC_FALLBACKS is "none"', () => {
+    const c = near({ ...base, NEXT_PUBLIC_NEAR_RPC_URL: "https://paid.example/key", NEXT_PUBLIC_NEAR_RPC_FALLBACKS: "None" });
+    expect(c.rpcUrls).toEqual(["https://paid.example/key"]);
+  });
+
+  it("refuse the deprecated rpc.*.near.org endpoints and anything that is not an http(s) URL", () => {
+    const bad: [PublicEnv, RegExp][] = [
+      [{ ...base, NEXT_PUBLIC_NEAR_RPC_URL: "https://rpc.testnet.near.org" }, /NEXT_PUBLIC_NEAR_RPC_URL: rpc\.testnet\.near\.org is deprecated/],
+      [{ ...base, NEXT_PUBLIC_NEAR_NETWORK: "mainnet", NEXT_PUBLIC_NEAR_RPC_URL: "https://rpc.mainnet.near.org/" }, /rpc\.mainnet\.fastnear\.com/],
+      [{ ...base, NEXT_PUBLIC_NEAR_RPC_FALLBACKS: "https://archival-rpc.testnet.near.org" }, /NEXT_PUBLIC_NEAR_RPC_FALLBACKS: archival-rpc/],
+      [{ ...base, NEXT_PUBLIC_NEAR_RPC_FALLBACKS: "https://ok.example, rpc.example" }, /NEXT_PUBLIC_NEAR_RPC_FALLBACKS: rpc\.example is not/],
+      [{ ...base, NEXT_PUBLIC_NEAR_RPC_FALLBACKS: "ws://node.example" }, /NEXT_PUBLIC_NEAR_RPC_FALLBACKS/],
+    ];
+    for (const [env, pattern] of bad) {
+      expect(() => parseConfig(env)).toThrow(ConfigError);
+      expect(() => parseConfig(env)).toThrow(pattern);
+    }
+  });
+});
+
 describe("dev accounts", () => {
   it("parses entries separated by commas, semicolons or whitespace", () => {
     expect(parseDevAccounts(undefined)).toEqual([]);
@@ -142,6 +194,9 @@ describe("dev accounts", () => {
     expect(withDev({ NEXT_PUBLIC_NEAR_NETWORK: "testnet", NEXT_PUBLIC_NEAR_RPC_URL: "http://127.0.0.1:3030" })).toEqual([]);
     expect(withDev({ NEXT_PUBLIC_NEAR_NETWORK: "sandbox", NEXT_PUBLIC_NEAR_RPC_URL: "https://sandbox.example" })).toEqual([]);
     expect(withDev({ NEXT_PUBLIC_NEAR_NETWORK: "sandbox" })).toHaveLength(2); // default RPC 127.0.0.1:3030
+    // A local sandbox whose reads may also go to a remote node.
+    expect(withDev({ NEXT_PUBLIC_NEAR_NETWORK: "sandbox", NEXT_PUBLIC_NEAR_RPC_FALLBACKS: "https://sandbox.example" })).toEqual([]);
+    expect(withDev({ NEXT_PUBLIC_NEAR_NETWORK: "sandbox", NEXT_PUBLIC_NEAR_RPC_FALLBACKS: "http://localhost:3031" })).toHaveLength(2);
   });
 });
 

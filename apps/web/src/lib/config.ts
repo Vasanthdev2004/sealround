@@ -5,7 +5,9 @@
  *   page runs on the simulated chain in this browser (client/mock.ts) with a
  *   simulated wallet. Nothing below is used.
  * - NEAR mode: NEXT_PUBLIC_FAIRGROUND_CONTRACT names a deployed Fairground
- *   contract. Views go to NEXT_PUBLIC_NEAR_RPC_URL, gasless calls to
+ *   contract. Views go to NEXT_PUBLIC_NEAR_RPC_URL first, then to the
+ *   endpoints in NEXT_PUBLIC_NEAR_RPC_FALLBACKS and the network's built-in
+ *   ones (near/rpc.ts spreads reads over them), gasless calls to
  *   NEXT_PUBLIC_RELAYER_URL, and the wallet is NEAR Connect (or, on a local
  *   sandbox only, the dev accounts in NEXT_PUBLIC_DEV_ACCOUNTS).
  *
@@ -21,7 +23,14 @@ export type DevAccount = { accountId: string; secretKey: string };
 
 export type NearConfig = {
   network: NearNetwork;
+  /** The first RPC endpoint: NEXT_PUBLIC_NEAR_RPC_URL, or the network's default. Wallet and dev-key calls use only this one. */
   rpcUrl: string;
+  /**
+   * Every endpoint reads may use, rpcUrl first, then NEXT_PUBLIC_NEAR_RPC_FALLBACKS,
+   * then the network's built-in fallbacks, without repeats. parseConfig always
+   * fills it; a config built by hand may leave it out (rpcUrl alone is used).
+   */
+  rpcUrls?: string[];
   /** The Fairground contract account. */
   contractId: string;
   /** USDC (NEP-141) used for balances, the faucet and storage registration. */
@@ -46,6 +55,7 @@ export type PublicEnv = {
   NEXT_PUBLIC_FAIRGROUND_CONTRACT?: string;
   NEXT_PUBLIC_NEAR_NETWORK?: string;
   NEXT_PUBLIC_NEAR_RPC_URL?: string;
+  NEXT_PUBLIC_NEAR_RPC_FALLBACKS?: string;
   NEXT_PUBLIC_USDC_CONTRACT?: string;
   NEXT_PUBLIC_RELAYER_URL?: string;
   NEXT_PUBLIC_DEV_ACCOUNTS?: string;
@@ -62,6 +72,64 @@ const DEFAULT_RPC: Record<NearNetwork, string> = {
   testnet: "https://rpc.testnet.fastnear.com",
   sandbox: "http://127.0.0.1:3030",
 };
+
+/**
+ * Public endpoints reads fall back to, per network. Each was checked on
+ * 2026-11-14 to answer a view call and to send CORS headers to a browser
+ * origin (a preflight and the POST itself). Left out: neart.lava.build and
+ * near.lava.build (410 Gone, "This endpoint has been discontinued").
+ */
+const DEFAULT_FALLBACKS: Record<NearNetwork, readonly string[]> = {
+  mainnet: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"],
+  testnet: ["https://rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://test.rpc.fastnear.com"],
+  sandbox: [],
+};
+
+/**
+ * The old rpc.*.near.org endpoints answer 429 "THIS ENDPOINT IS DEPRECATED" to
+ * every call, so a config that names one is refused rather than left to fail
+ * on every page.
+ */
+const DEPRECATED_RPC = /^(archival-)?rpc\.(mainnet|testnet)\.near\.org$/;
+
+/** Checks one RPC URL from `variable` and returns it in its written form. */
+function rpcEndpoint(raw: string, variable: string, network: NearNetwork): string {
+  const notUrl = () => new ConfigError(`${variable}: ${raw.slice(0, 80)} is not an http(s) URL`);
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw notUrl();
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw notUrl();
+  if (DEPRECATED_RPC.test(u.hostname)) {
+    throw new ConfigError(
+      `${variable}: ${u.hostname} is deprecated and refuses every call; use ${DEFAULT_RPC[network === "mainnet" ? "mainnet" : "testnet"]} or leave it unset`,
+    );
+  }
+  return raw;
+}
+
+/**
+ * rpcUrl, then NEXT_PUBLIC_NEAR_RPC_FALLBACKS (commas or whitespace between
+ * URLs), then the network's built-in fallbacks, each once. "none" as the
+ * whole value leaves out the built-in ones, for a node that should take every
+ * read (a paid endpoint, say).
+ */
+function rpcEndpointList(rpcUrl: string, fallbacksRaw: string | undefined, network: NearNetwork): string[] {
+  const raw = clean(fallbacksRaw);
+  const none = raw?.toLowerCase() === "none";
+  const listed =
+    raw && !none
+      ? raw
+          .split(/[\s,]+/)
+          .filter(Boolean)
+          .map((u) => rpcEndpoint(u, "NEXT_PUBLIC_NEAR_RPC_FALLBACKS", network))
+      : [];
+  const all = [rpcUrl, ...listed, ...(none ? [] : DEFAULT_FALLBACKS[network])];
+  const key = (u: string) => u.replace(/\/+$/, "").toLowerCase();
+  return all.filter((u, i) => all.findIndex((v) => key(v) === key(u)) === i);
+}
 
 /** Circle's native USDC on mainnet, and the open test USDC on testnet. A sandbox has no default. */
 const DEFAULT_USDC: Record<NearNetwork, string | null> = {
@@ -143,13 +211,8 @@ export function parseConfig(env: PublicEnv): AppConfig {
   }
   const network: NearNetwork = networkRaw;
 
-  const rpcUrl = clean(env.NEXT_PUBLIC_NEAR_RPC_URL) ?? DEFAULT_RPC[network];
-  try {
-    const u = new URL(rpcUrl);
-    if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol");
-  } catch {
-    throw new ConfigError("NEXT_PUBLIC_NEAR_RPC_URL must be an http(s) URL");
-  }
+  const rpcUrl = rpcEndpoint(clean(env.NEXT_PUBLIC_NEAR_RPC_URL) ?? DEFAULT_RPC[network], "NEXT_PUBLIC_NEAR_RPC_URL", network);
+  const rpcUrls = rpcEndpointList(rpcUrl, env.NEXT_PUBLIC_NEAR_RPC_FALLBACKS, network);
 
   const usdcContract = clean(env.NEXT_PUBLIC_USDC_CONTRACT) ?? DEFAULT_USDC[network];
   if (!usdcContract || !ACCOUNT_ID.test(usdcContract)) {
@@ -166,15 +229,17 @@ export function parseConfig(env: PublicEnv): AppConfig {
     throw new ConfigError("NEXT_PUBLIC_SEALER_CODE_HASH must be 64 hex characters");
   }
 
-  // Parsed for its errors either way, kept only where a dev signer is allowed.
+  // Parsed for its errors either way, kept only where a dev signer is allowed:
+  // a local sandbox, and no read sent anywhere else.
   const devAccounts = parseDevAccounts(env.NEXT_PUBLIC_DEV_ACCOUNTS);
-  const allowed = devSignerAllowed({ network, rpcUrl });
+  const allowed = rpcUrls.every((url) => devSignerAllowed({ network, rpcUrl: url }));
 
   return {
     mode: "near",
     near: {
       network,
       rpcUrl,
+      rpcUrls,
       contractId,
       usdcContract,
       relayerUrl,
@@ -193,6 +258,7 @@ export function appConfig(): AppConfig {
     NEXT_PUBLIC_FAIRGROUND_CONTRACT: process.env.NEXT_PUBLIC_FAIRGROUND_CONTRACT,
     NEXT_PUBLIC_NEAR_NETWORK: process.env.NEXT_PUBLIC_NEAR_NETWORK,
     NEXT_PUBLIC_NEAR_RPC_URL: process.env.NEXT_PUBLIC_NEAR_RPC_URL,
+    NEXT_PUBLIC_NEAR_RPC_FALLBACKS: process.env.NEXT_PUBLIC_NEAR_RPC_FALLBACKS,
     NEXT_PUBLIC_USDC_CONTRACT: process.env.NEXT_PUBLIC_USDC_CONTRACT,
     NEXT_PUBLIC_RELAYER_URL: process.env.NEXT_PUBLIC_RELAYER_URL,
     NEXT_PUBLIC_DEV_ACCOUNTS: process.env.NEXT_PUBLIC_DEV_ACCOUNTS,

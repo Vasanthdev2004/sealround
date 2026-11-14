@@ -10,7 +10,10 @@ import type { Sale } from "@/lib/types";
 const SUPPLY_POLL_MS = 60_000;
 
 let rpc: NearRpc | null = null;
-const tokenRpc = (): NearRpc => (rpc ??= createRpc(nearConfig().rpcUrl));
+const tokenRpc = (): NearRpc => {
+  const c = nearConfig();
+  return (rpc ??= createRpc(c.rpcUrls ?? c.rpcUrl));
+};
 
 /**
  * The sale token's total supply now, read from the token contract

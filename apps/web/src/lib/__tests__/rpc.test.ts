@@ -1,7 +1,7 @@
 /** The JSON-RPC reader (near/rpc.ts) against canned node answers, in the shapes real nodes send. */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FairgroundError } from "../client/errors";
-import { createRpc, panicText } from "../near/rpc";
+import { createRpc, panicText, resetRpcHealth, rpcEndpoints } from "../near/rpc";
 
 type Call = { method: string; params: Record<string, unknown> };
 
@@ -188,6 +188,147 @@ describe("a busy or unreachable node", () => {
     await rpc.view("c.near", "m");
     // 20 ms, then 60 ms, each with up to half again: at least 80 ms in all.
     expect(Date.now() - t0).toBeGreaterThanOrEqual(75);
+  });
+});
+
+describe("several endpoints", () => {
+  beforeEach(() => resetRpcHealth());
+
+  type Step = (id: number) => Response;
+  const ok: Step = (id) => new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { result: bytes("7"), logs: [] } }));
+  const limited: Step = () => new Response("Too Many Requests", { status: 429 });
+  const gone: Step = () => new Response("This endpoint has been discontinued.", { status: 410 });
+
+  /** A fetch per endpoint: each plays its steps in order (the last one repeats) and logs which endpoint was called. */
+  function endpoints(plan: Record<string, Step[] | "network" | "timeout">) {
+    const log: string[] = [];
+    const n: Record<string, number> = {};
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      const u = String(url);
+      log.push(u);
+      const steps = plan[u];
+      if (steps === "network") throw new TypeError("Failed to fetch");
+      if (steps === "timeout") throw new DOMException("The operation timed out.", "TimeoutError");
+      const i = (n[u] = (n[u] ?? -1) + 1);
+      return steps[Math.min(i, steps.length - 1)]((JSON.parse(String(init?.body)) as { id: number }).id);
+    }) as typeof fetch;
+    return { fetchImpl, log, hits: (u: string) => log.filter((x) => x === u).length };
+  }
+
+  it("moves to the next endpoint at once when one is busy or unreachable, before any wait", async () => {
+    for (const first of [[limited], "network"] as (Step[] | "network")[]) {
+      resetRpcHealth();
+      const e = endpoints({ "https://a": first, "https://b": [ok] });
+      const rpc = createRpc(["https://a", "https://b"], { fetch: e.fetchImpl, retryDelayMs: 60_000 });
+      const t0 = Date.now();
+      expect(await rpc.view("c.near", "m")).toBe("7");
+      expect(Date.now() - t0).toBeLessThan(1_000);
+      expect(e.log).toEqual(["https://a", "https://b"]);
+    }
+  });
+
+  it("lets a busy endpoint rest, so the next read starts on another one", async () => {
+    const e = endpoints({ "https://a": [limited, ok], "https://b": [ok] });
+    const rpc = createRpc(["https://a", "https://b"], { fetch: e.fetchImpl, retryDelayMs: 0 });
+    await rpc.view("c.near", "m");
+    await rpc.view("c.near", "m");
+    expect(e.log).toEqual(["https://a", "https://b", "https://b"]);
+  });
+
+  it("spreads a page's burst of reads over the endpoints instead of sending them all to the first", async () => {
+    const urls = ["https://a", "https://b", "https://c"];
+    const e = endpoints({ "https://a": [ok], "https://b": [ok], "https://c": [ok] });
+    const rpc = createRpc(urls, { fetch: e.fetchImpl });
+    await Promise.all(Array.from({ length: 60 }, () => rpc.view("c.near", "m")));
+    expect(e.log).toHaveLength(60);
+    for (const u of urls) {
+      expect(e.hits(u), u).toBeGreaterThanOrEqual(15);
+      expect(e.hits(u), u).toBeLessThanOrEqual(25);
+    }
+    // A quiet page stays on the first endpoint.
+    resetRpcHealth();
+    const quiet = endpoints({ "https://a": [ok], "https://b": [ok] });
+    const q = createRpc(["https://a", "https://b"], { fetch: quiet.fetchImpl });
+    for (let i = 0; i < 5; i++) await q.view("c.near", "m");
+    expect(quiet.hits("https://a")).toBe(5);
+  });
+
+  it("goes round again, after a wait, only once every endpoint was busy", async () => {
+    const e = endpoints({ "https://a": [limited, ok], "https://b": [limited] });
+    const rpc = createRpc(["https://a", "https://b"], { fetch: e.fetchImpl, retryDelayMs: 20 });
+    const t0 = Date.now();
+    expect(await rpc.view("c.near", "m")).toBe("7");
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(18);
+    expect(e.log).toEqual(["https://a", "https://b", "https://a"]);
+
+    resetRpcHealth();
+    const down = endpoints({ "https://a": "network", "https://b": [limited] });
+    const r = createRpc(["https://a", "https://b"], { fetch: down.fetchImpl, retryDelayMs: 0, retries: 2 });
+    expect((await failure(r.view("c.near", "m"))).message).toMatch(/Could not reach the NEAR RPC node/);
+    expect(down.log).toHaveLength(6); // two endpoints, three rounds
+  });
+
+  it("skips an endpoint that answers with another error, without going round again", async () => {
+    const e = endpoints({ "https://gone": [gone], "https://b": [ok] });
+    expect(await createRpc(["https://gone", "https://b"], { fetch: e.fetchImpl }).view("c.near", "m")).toBe("7");
+
+    resetRpcHealth();
+    const both = endpoints({ "https://gone": [gone], "https://b": [() => new Response("not json")] });
+    await failure(createRpc(["https://gone", "https://b"], { fetch: both.fetchImpl, retryDelayMs: 0 }).view("c.near", "m"));
+    expect(both.log).toEqual(["https://gone", "https://b"]);
+  });
+
+  it("does not move on after a timeout or the contract's own refusal", async () => {
+    const slow = endpoints({ "https://a": "timeout", "https://b": [ok] });
+    await failure(createRpc(["https://a", "https://b"], { fetch: slow.fetchImpl }).view("c.near", "m"));
+    expect(slow.log).toEqual(["https://a"]);
+
+    resetRpcHealth();
+    const refused = endpoints({
+      "https://a": [(id) => new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { error: 'GuestPanic { panic_msg: "unknown sale" }' } }))],
+      "https://b": [ok],
+    });
+    expect((await failure(createRpc(["https://a", "https://b"], { fetch: refused.fetchImpl }).view("c.near", "m"))).message).toBe(
+      "unknown sale",
+    );
+    expect(refused.log).toEqual(["https://a"]);
+  });
+
+  it("treats a rate limit sent as a JSON-RPC error with status 200 as busy", async () => {
+    const e = endpoints({
+      "https://a": [(id) => new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32005, message: "Rate limit exceeded" } }))],
+      "https://b": [ok],
+    });
+    expect(await createRpc(["https://a", "https://b"], { fetch: e.fetchImpl }).view("c.near", "m")).toBe("7");
+    expect(e.log).toEqual(["https://a", "https://b"]);
+  });
+});
+
+describe("which endpoints a reader uses", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("uses a list as given and a stray URL alone", () => {
+    expect(rpcEndpoints(["https://a", "https://b", "https://a"])).toEqual(["https://a", "https://b"]);
+    expect(rpcEndpoints("http://127.0.0.1:3030")).toEqual(["http://127.0.0.1:3030"]);
+  });
+
+  it("reads the configured URL as the configured list, in NEAR mode", async () => {
+    vi.stubEnv("NEXT_PUBLIC_FAIRGROUND_CONTRACT", "sealround.itzbeast.testnet");
+    vi.stubEnv("NEXT_PUBLIC_NEAR_NETWORK", "testnet");
+    vi.stubEnv("NEXT_PUBLIC_NEAR_RPC_URL", "https://rpc.testnet.fastnear.com");
+    vi.stubEnv("NEXT_PUBLIC_NEAR_RPC_FALLBACKS", "https://my-node.example");
+    vi.resetModules();
+    const fresh = await import("../near/rpc");
+    expect(fresh.rpcEndpoints("https://rpc.testnet.fastnear.com")).toEqual([
+      "https://rpc.testnet.fastnear.com",
+      "https://my-node.example",
+      "https://near-testnet.drpc.org",
+      "https://test.rpc.fastnear.com",
+    ]);
+    expect(fresh.rpcEndpoints("https://other.example")).toEqual(["https://other.example"]);
   });
 });
 
