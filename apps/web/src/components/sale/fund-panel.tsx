@@ -7,6 +7,7 @@ import { ActionError, PaidFallbackPrompt, RELAYER_CANNOT, usePaidFallback } from
 import { Tag } from "@/components/ui/badge";
 import { Countdown } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
+import { ChainLogo } from "@/components/ui/chain-logo";
 import { Field, Segmented } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,7 +47,15 @@ const QUICK: Record<OriginId, string[]> = {
   "btc-btc": ["0.0002", "0.0005", "0.001"],
 };
 
-const CHAINS = ORIGINS.map((o) => ({ value: o.id, label: o.chain }));
+const CHAINS = ORIGINS.map((o) => ({
+  value: o.id,
+  label: (
+    <span className="inline-flex items-center gap-1.5">
+      <ChainLogo chain={o.blockchain} />
+      {o.chain}
+    </span>
+  ),
+}));
 const OUTCOMES: { value: "ok" | "fail"; label: string }[] = [
   { value: "ok", label: "USDC arrives" },
   { value: "fail", label: "Refunded" },
