@@ -4,6 +4,7 @@ import { use, useMemo } from "react";
 import Link from "next/link";
 import { RotateCw } from "lucide-react";
 import { BurnLine } from "@/components/burn/burn-line";
+import { TokenChapters } from "@/components/chapters/lantern-chapters";
 import { effectiveFills, failText } from "@/components/result/compute";
 import { SupplyStory } from "@/components/result/supply-panel";
 import { buildTimeline } from "@/components/result/timeline";
@@ -167,6 +168,8 @@ function TokenHome({ sale, result }: { sale: Sale; result: SaleResult }) {
         <LaunchPanel sale={sale} result={result} figures={figures} />
         <BurnLine sale={sale} result={result} />
       </Frame>
+
+      <TokenChapters sale={sale} />
 
       <Reveal>
         <SupplyStory sale={sale} result={result} hideNoPool />

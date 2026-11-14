@@ -15,12 +15,12 @@ import {
   X,
 } from "lucide-react";
 import arena from "@/data/arena-results.json";
-import { BurnCounter } from "@/components/burn/burn-counter";
 import { ButtonLink } from "@/components/ui/button";
 import { Reveal } from "@/components/visual/reveal";
 import { isNearMode } from "@/lib/config";
 import { REPO_URL, appHref } from "@/lib/site";
 import { BidField } from "./bid-field";
+import { LandingMetricsPanel } from "./landing-metrics";
 import { LIVE_SNIPER } from "./live-evidence";
 import { LiveStrip } from "./live-strip";
 import { ArenaBars, ChecksDemo, SwapRoute, type ArenaMetric } from "./proof";
@@ -404,6 +404,9 @@ function Verify() {
               </li>
             ))}
           </ul>
+          <Link href={appHref("/attack")} className="mt-5 inline-flex min-h-9 items-center gap-1.5 text-small font-[510] text-accent-bright hover:underline">
+            Try to beat it <ArrowRight className="size-4" aria-hidden />
+          </Link>
         </Reveal>
         <Reveal delay={0.1}>
           <ChecksDemo />
@@ -414,7 +417,7 @@ function Verify() {
   );
 }
 
-/** The burn counter: what demand left unsold across launches, read live from the sales. */
+/** Activity across sales, with the per-token demand and burn breakdown. */
 function Burns() {
   return (
     <section className={`${wrap} mt-28 sm:mt-36`}>
@@ -423,7 +426,7 @@ function Burns() {
         lead="The crowd's sealed bids set the price and the supply. Every winner pays the clearing price, and every token the bids did not take burns when the creator is paid, so the supply that is left is the supply the community asked for."
       />
       <Reveal className="mt-10">
-        <BurnCounter />
+        <LandingMetricsPanel simulated={!isNearMode()} />
       </Reveal>
     </section>
   );

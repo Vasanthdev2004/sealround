@@ -149,6 +149,8 @@ function ResetDemo() {
     try {
       const client = getClient();
       await client.reset();
+      const { resetDemo } = await import("@/lib/chapters/demo");
+      resetDemo();
       // The connected demo account starts again with its test USDC.
       if (account) await client.faucet(account, DEMO_FAUCET_USDC);
       setStage("idle");
@@ -172,7 +174,7 @@ function ResetDemo() {
   }
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1" role="group" aria-label="Reset demo data">
-      <span className="text-muted">Delete every sale, bid and balance in this browser and start fresh?</span>
+      <span className="text-muted">Reset your demo sales, bids, balances and chapters in this browser?</span>
       <button
         type="button"
         onClick={reset}

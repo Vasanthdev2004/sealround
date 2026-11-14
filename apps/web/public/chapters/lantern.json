@@ -1,0 +1,44 @@
+{
+  "rounds": [
+    {
+      "title": "The first light",
+      "brief": "A moth finds one lantern in a sleeping harbor. Where should it carry the light?",
+      "candidates": [
+        {
+          "title": "Light the bridge",
+          "artist": "mira.test.near",
+          "image": "/chapters/lantern-1-a.webp",
+          "alt": "A moth's amber lantern lights a footbridge over dark tidewater.",
+          "content_sha256": "9577a4c949ec94a902ca7b5ba0bced0a86d8121e2a9252815f86e71aaebfb990"
+        },
+        {
+          "title": "Wake the lighthouse",
+          "artist": "sora.test.near",
+          "image": "/chapters/lantern-1-b.webp",
+          "alt": "A moth lights an empty lighthouse and guides a boat toward shore.",
+          "content_sha256": "b3823ddbfd370b993964a97349b4c9d36fd6d78fa76c8b18a277018ef7afac79"
+        }
+      ]
+    },
+    {
+      "title": "Lights across the harbor",
+      "brief": "The villagers see the first light. Choose how the harbor answers.",
+      "candidates": [
+        {
+          "title": "Light the windows",
+          "artist": "mira.test.near",
+          "image": "/chapters/lantern-2-a.webp",
+          "alt": "A trail of lanterns climbs from the quay to the houses on the hill.",
+          "content_sha256": "1fb2f577567554a0721a43c6ef849e8d77fb868028d9f62ff33a69ecb56a10b1"
+        },
+        {
+          "title": "Send lights out to sea",
+          "artist": "sora.test.near",
+          "image": "/chapters/lantern-2-b.webp",
+          "alt": "Villagers send small lanterns across the harbor toward returning boats.",
+          "content_sha256": "b673c7fa98be5da047af5cff3452f0b0931c6087968ec03937eed0e4ea4c9b99"
+        }
+      ]
+    }
+  ]
+}

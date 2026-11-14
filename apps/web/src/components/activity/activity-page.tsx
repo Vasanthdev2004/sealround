@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { ArrowDownToLine, ArrowRight, Check, Clock3, Eye, Layers3, LockKeyhole, RefreshCw, Wallet } from "lucide-react";
+import { ActivityChapterReminders } from "@/components/chapters/reveal-reminders";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { TokenAvatar } from "@/components/ui/bits";
 import { Segmented } from "@/components/ui/field";
@@ -89,6 +90,8 @@ function ConnectedActivity({ account, scope }: { account: string; scope: string 
         <Metric label="Ready to claim" value={count(ready.length)} hint="Tokens or refunds" accent={ready.length > 0} />
         <Metric label="Created sales" value={count(created.length)} hint="Managed by you" />
       </dl>
+
+      <ActivityChapterReminders account={account} />
 
       {reveals.length > 0 && (
         <section className="flex flex-col gap-4 rounded-panel border border-accent/25 bg-accent-soft p-5 sm:flex-row sm:items-center sm:justify-between" aria-labelledby="activity-reveal-title">

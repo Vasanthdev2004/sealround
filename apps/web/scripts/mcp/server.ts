@@ -53,7 +53,7 @@ const server = new McpServer(
   {
     instructions: [
       "Sealround runs sealed-bid, single-price token sales on NEAR. A bid's max price and max spend are sealed to the sale's enclave key in this process and opened only inside a TEE after the sale closes; every winner pays the same clearing price.",
-      "Flow: sealround_list_sales, sealround_get_sale, sealround_place_bid while the sale is open, sealround_my_bid, then after settlement sealround_get_result and sealround_claim. sealround_verify_sale checks the enclave's attestation and the frozen bid set.",
+      "Flow: sealround_list_sales, sealround_get_sale, sealround_place_bid while the sale is open, sealround_my_bid, then after settlement sealround_get_result and sealround_claim. sealround_verify_sale checks the enclave's attestation, the frozen bid set, and the contract and clearing rules.",
       "Amounts are whole quote-token units (e.g. USDC) as decimals. Never place a bid without the user's explicit approval of max_price, max_spend and max_deposit. Use direct: true only when the user approved paying NEAR gas.",
     ].join(" "),
   },
@@ -157,7 +157,7 @@ server.registerTool(
   {
     title: "Verify a sale",
     description:
-      "The checks of `pnpm --filter web verify-sale`, read-only: for each enclave run (the sale key and the clearing) it finds the transaction, fetches OutLayer's attestation and checks the attested and measured build, input and output hashes, the TDX quote's report data, the measurements, the request and the key; then it recomputes the frozen bid-set hash from every listed bid. Returns pass, fail or not_run per check with the evidence.",
+      "The public checks of `pnpm --filter web verify-sale`, read-only. Checks the enclave runs and recomputes the frozen bid-set hash. Also reports contract code, access keys, applied output, clearing rules, bid lengths and pool checks when available. Returns evidence and pass, fail, not_run or not_applicable for individual checks. The verdict includes every applicable check.",
     inputSchema: { sale_id: saleId },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },

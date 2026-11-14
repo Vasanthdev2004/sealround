@@ -7,10 +7,8 @@ import { Tag } from "@/components/ui/badge";
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
 import { TokenMark } from "@/components/ui/token-mark";
 import { BURN_CAP, burnHeadline, type BurnTotal, type LaunchBurn } from "@/lib/burn-total";
-import { isNearMode } from "@/lib/config";
 import { tokenFull } from "@/lib/format";
 import { APP_HOME, appHref } from "@/lib/site";
-import { useBurnTotal } from "./use-burn-total";
 
 /** Launch rows listed beside the headline. */
 const ROWS = 5;
@@ -24,23 +22,19 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * figure comes from the sales the client lists; with no settled sale it says
  * so instead of showing a number.
  */
-export function BurnCounter() {
-  const q = useBurnTotal();
-  const simulated = !isNearMode();
-
-  if (q.loading) return <CounterSkeleton />;
-  if (q.error || !q.data) {
+export function BurnCounter({ total: t, simulated, loading }: { total?: BurnTotal; simulated: boolean; loading: boolean }) {
+  if (loading) return <CounterSkeleton />;
+  if (!t) {
     return (
       <div className="panel p-6 sm:p-8">
         <Label simulated={simulated} />
         <p className="mt-3 max-w-[60ch] text-body text-muted">
-          Could not read the sales just now{q.error ? `: ${q.error.message}` : "."}
+          Could not read the sales just now.
         </p>
       </div>
     );
   }
 
-  const t = q.data;
   const h = burnHeadline(t);
   if (!h) {
     return (
@@ -101,7 +95,7 @@ function Label({ simulated }: { simulated: boolean }) {
     <div className="flex flex-wrap items-center gap-2 text-label text-subtle">
       <Flame className="size-4 text-muted" strokeWidth={1.75} aria-hidden />
       Burned at launch
-      {simulated && <Tag title="Sales on the simulated chain in this browser">simulated</Tag>}
+      {simulated && <Tag title="Seeded sales on the simulated chain">simulated</Tag>}
     </div>
   );
 }

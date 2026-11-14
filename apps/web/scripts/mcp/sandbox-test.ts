@@ -422,6 +422,7 @@ async function sandbox(w: World, report: Report): Promise<void> {
     t.ok("with the web client's words", runs.every((x) => (x.message ?? "").includes("no OutLayer attestation service")));
     t.eq("the bid set: recomputed hash = frozen hash, 4 of 4 bids, the agent's bid is #1", [get(r.json, "bidSet", "result"), get(r.json, "bidSet", "listed"), get(r.json, "bidSet", "accountPlace")], ["pass", 4, 1]);
     t.eq("the recomputed hash is the contract's", get(r.json, "bidSet", "recomputedHash"), (await view.sale(TEE)).bid_set_hash);
+    t.eq("contract and rule checks are unavailable on the sandbox", [get(r.json, "chain", "available"), get(r.json, "chain", "checks")], [false, []]);
     t.eq("verdict: incomplete, not a pass", [r.json["verdict"], r.json["ok"]], ["incomplete", false]);
   });
 

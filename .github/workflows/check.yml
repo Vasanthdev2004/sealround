@@ -1,17 +1,17 @@
-# Two jobs, run side by side:
+# Three jobs, run side by side:
 #
 # - `check` runs the repo's own check script, scripts/check.mjs, on Linux: the
 #   Rust workspace and enclave job native tests, the five Vitest suites,
 #   TypeScript for every package and the web ESLint (13 checks). It is the
 #   same command a reviewer runs by hand (`pnpm check`, README
 #   "Prerequisites").
+# - `web-build` builds the mock web app for production and checks its routes.
 # - `proofs` re-checks the committed OutLayer proof bundles offline with
 #   OutLayer's verifier.
 #
-# No Docker, no secrets, no chain. The network is used only to install the
-# toolchains and packages (rustup, crates.io, the npm registry) and to fetch
-# the verifier's source from GitHub. The sandbox suites (relayer, relayer
-# client) skip themselves without their env vars.
+# No Docker, no secrets, no chain. The network is used to install toolchains
+# and packages, fetch the verifier's source, and download fonts for the web
+# build. The sandbox suites skip themselves without their env vars.
 name: Check
 
 on:
@@ -102,6 +102,62 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+
+  web-build:
+    name: Web production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_FAIRGROUND_CONTRACT: ''
+      NEXT_PUBLIC_APP_URL: ''
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+        with:
+          cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: Install packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the web app
+        run: pnpm --filter web build
+
+      - name: Check production routes
+        working-directory: apps/web
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/next-start.log"
+          base="http://127.0.0.1:3100"
+          node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3100 > "$log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --max-time 2 "$base/" > /dev/null; then
+              break
+            fi
+            if ! kill -0 "$server" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          for route in / /sales /judge /activity /verify /verify/fairt /token/lantern; do
+            if ! status=$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "$base$route") || [ "$status" != 200 ]; then
+              cat "$log"
+              echo "::error::Expected $route to return HTTP 200, got $status"
+              exit 1
+            fi
+            echo "$route HTTP $status"
+          done
 
   # Re-checks the committed OutLayer proof bundles (evidence/outlayer/, see
   # evidence/README.md) with OutLayer's own open-source verifier, offline: the

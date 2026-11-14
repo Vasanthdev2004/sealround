@@ -6,6 +6,8 @@ members = [
     "contracts/fairground",
     "contracts/token",
     "contracts/mock-ft",
+    "contracts/chapters",
+    "contracts/chapters/factory",
 ]
 # Integration tests have their own lockfile so near-workspaces never builds with the contracts.
 exclude = ["contracts/tests", "enclave"]

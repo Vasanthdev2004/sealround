@@ -71,6 +71,8 @@ import {
   toB64,
 } from "../crypto";
 import { getBidSecret, saveBidSecret } from "../bid-secrets";
+import { hasDemoChapterStory } from "../chapters/demo";
+import { seriesFor } from "../chapters/model";
 import { locksTokens, poolUsdcKept, SEED_STEPS, STAGE_LABEL, stepPhrase } from "../liquidity";
 import { iconError, markIcon } from "../token-icon";
 import { checkApplied, checkLengths, checkPool, checkRules, parseClearOutput, type ClearOutput } from "../verify/checks";
@@ -435,7 +437,7 @@ export class MockClient implements FairgroundClient {
   // The seeded sales are timed from the first visit, so after a while none of
   // them is taking bids. Two rules keep the board alive:
   // - On load, when no seeded sale is live, re-seed them from now. Sales this
-  //   browser has bid in are never touched; if the live demo sale is one of
+  //   browser has bid in or enabled Chapters on are kept; if the live demo sale is one of
   //   them, a rolling copy of it opens instead ("Fair Test 2", id fairt-2).
   // - During a session nothing is re-seeded (sales would change under the
   //   viewer); a rolling copy opens as soon as no seeded sale is live.
@@ -450,6 +452,11 @@ export class MockClient implements FairgroundClient {
     return (this.s.bids[id] ?? []).some((b) => !b.tag || b.tag === "you");
   }
 
+  private keepSeed(id: string): boolean {
+    const sale = this.s.sales[id];
+    return this.hasUserBids(id) || (sale?.phase === "settled" && hasDemoChapterStory(seriesFor(sale)));
+  }
+
   private hasLiveSeed(now: number): boolean {
     return this.seededIds().some((id) => {
       const s = this.s.sales[id];
@@ -457,9 +464,9 @@ export class MockClient implements FairgroundClient {
     });
   }
 
-  /** Re-seed from `now`. User-created sales, judge runs, balances and any seeded sale with a user bid stay. */
+  /** Re-seed from `now`, keeping sales with user bids or an enabled story. */
   private async refreshSeed(now: number) {
-    const keep = new Set(this.seededIds().filter((id) => this.hasUserBids(id)));
+    const keep = new Set(this.seededIds().filter((id) => this.keepSeed(id)));
     for (const id of this.seededIds()) {
       if (!keep.has(id)) this.dropSeeded(id);
     }
@@ -493,7 +500,7 @@ export class MockClient implements FairgroundClient {
     return SEEDED_IDS.filter((id) => {
       const sale = this.s.sales[id];
       const def = defs.find((d) => d.id === id);
-      return !!sale && !!def && !this.hasUserBids(id) && sale.config.totalSupply !== seedTotalSupply(def);
+      return !!sale && !!def && !this.keepSeed(id) && sale.config.totalSupply !== seedTotalSupply(def);
     });
   }
 

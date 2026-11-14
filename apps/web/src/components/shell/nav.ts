@@ -5,5 +5,6 @@ export const NAV = [
   { href: "/verify", label: "Verify", primary: true, match: (p: string) => p.startsWith("/verify") },
   { href: "/judge", label: "Judge mode", primary: false, match: (p: string) => p.startsWith("/judge") },
   { href: "/arena", label: "Bot Arena", primary: false, match: (p: string) => p.startsWith("/arena") },
+  { href: "/attack", label: "Try to beat it", primary: false, match: (p: string) => p === "/attack" },
   { href: "/how", label: "How it works", primary: false, match: (p: string) => p.startsWith("/how") },
 ] as const;

@@ -28,7 +28,9 @@ import { fromB64, randomHex, sealBid, sealedBidLen, sha256Hex } from "../../src/
 import { jsonRpc, viewCall } from "../../src/lib/near/attestation-sources";
 import type { NearRpc } from "../../src/lib/near/rpc";
 import type { BidView, SaleView } from "../../src/lib/near/views";
-import type { AttestedRun, BidResult, ChainSaleStatus, MissingRun, RunCheckId, SaleResult } from "../../src/lib/types";
+import type { AttestedRun, BidResult, ChainSaleStatus, MissingRun, SaleResult } from "../../src/lib/types";
+import { CHAIN_LABELS, RUN_LABELS } from "../../src/lib/verify/labels";
+import type { FullVerification } from "../../src/lib/verify/types";
 import { ENV, ToolError, type ServerConfig } from "./config";
 import { asToolError, openChain, openSale, refuseWriteLocally, requireSaleId } from "./session";
 
@@ -719,17 +721,9 @@ export async function claim(cfg: ServerConfig, input: { sale_id: string; direct?
 
 // ---------------------------------------------------------------- verify_sale
 
-/** The Verified panel's wording, as scripts/verify-sale.ts prints it. */
-const LABELS: Record<RunCheckId, string> = {
-  build: "Attested build is the sealer the contract pins",
-  executed: "The worker measured the same build",
-  input: "Input hash matches the request on chain",
-  output: "Output hash matches what the contract received",
-  task: "The TDX quote commits to this record",
-  measurements: "Enclave measurements are approved on chain",
-  request: "The request came from the sale contract, for this sale",
-  key: "The job's answer names the sale's key",
-};
+function checkResult(ok: boolean | null) {
+  return ok === true ? "pass" : ok === false ? "fail" : "not_run";
+}
 
 function runOut(run: AttestedRun | MissingRun) {
   const name = run.kind === "clear" ? "Clearing run" : "Sale key run";
@@ -748,7 +742,7 @@ function runOut(run: AttestedRun | MissingRun) {
     requestId: run.requestId,
     blockHeight: run.blockHeight,
     at: new Date(run.at).toISOString(),
-    checks: run.checks.map((c) => ({ id: c.id, label: LABELS[c.id], result: c.ok === true ? "pass" : c.ok === false ? "fail" : "not_run", evidence: c.items })),
+    checks: run.checks.map((c) => ({ id: c.id, label: RUN_LABELS[c.id], result: checkResult(c.ok), evidence: c.items })),
     tdxQuote: `${run.quote.length} base64 characters (not included here)`,
     notCheckedHere: run.verifierUrl ? `The quote's signature chain up to Intel. OutLayer's verifier checks it: ${run.verifierUrl}` : "The quote's signature chain up to Intel.",
   };
@@ -758,8 +752,7 @@ export async function verifySale(cfg: ServerConfig, input: { sale_id: string }) 
   const notes: string[] = [];
   const s = await openSale(cfg, input.sale_id, {}, notes, { account: null });
   const saleId = s.opts.saleId;
-  // The enclave runs: on testnet and mainnet verifySaleRuns, on a sandbox "no OutLayer service", as the web client reports.
-  const verification = await s.client.verifySale(saleId);
+  const verification: FullVerification = await s.client.verifySale(saleId);
 
   // The bid set, as scripts/verify-sale.ts reads it: every bid the contract lists, hashed the way it froze them.
   const rpc = jsonRpc([cfg.rpcUrl]);
@@ -777,8 +770,20 @@ export async function verifySale(cfg: ServerConfig, input: { sale_id: string }) 
   );
 
   const runs = [verification.key, verification.clear].filter((r): r is AttestedRun | MissingRun => r !== null);
-  const failed = runs.some((r) => r.found && r.checks.some((c) => c.ok === false)) || (frozen && !bidSet.matches);
-  const incomplete = runs.some((r) => !r.found || r.checks.some((c) => c.ok === null));
+  const chain = verification.chain;
+  const chainChecks = chain?.checks.map((c) => ({
+    id: c.id,
+    label: CHAIN_LABELS[c.id],
+    result: c.applies ? checkResult(c.ok) : "not_applicable" as const,
+    evidence: c.items,
+    ...(c.note ? { note: c.note } : {}),
+    ...(c.subject ? { subject: c.subject } : {}),
+  })) ?? [];
+  const failed = (frozen && !bidSet.matches)
+    || runs.some((r) => r.found && r.checks.some((c) => c.ok === false))
+    || chainChecks.some((c) => c.result === "fail");
+  const incomplete = !chain || runs.some((r) => !r.found || r.checks.some((c) => c.ok === null))
+    || chainChecks.some((c) => c.result === "not_run");
   const verdict = failed ? "fail" : incomplete ? "incomplete" : "pass";
   const account = cfg.accountId;
   return {
@@ -787,10 +792,10 @@ export async function verifySale(cfg: ServerConfig, input: { sale_id: string }) 
     verdict,
     summary:
       verdict === "pass"
-        ? "Every check passed."
+        ? "Every applicable check passed."
         : verdict === "fail"
-          ? "A check failed: see the runs and the bid set."
-          : "Nothing failed, but some checks could not run: see each run's reason.",
+          ? "A check failed. See the enclave runs, bid set and contract checks."
+          : "Some checks could not run. See the enclave runs and contract checks for details.",
     network: cfg.network,
     contract: cfg.contractId,
     saleId,
@@ -799,6 +804,9 @@ export async function verifySale(cfg: ServerConfig, input: { sale_id: string }) 
     repoSealerHash: s.repoSealerHash,
     runs: runs.map(runOut),
     ...(runs.length === 0 ? { runsNote: "This sale has no enclave run to check (a commit-reveal sale, or no clearing result yet)." } : {}),
+    chain: chain
+      ? { available: true, simulated: chain.simulated, checks: chainChecks }
+      : { available: false, checks: chainChecks, note: "Contract and rule checks are unavailable on this network." },
     bidSet: {
       frozen,
       result: frozen ? (bidSet.matches ? "pass" : "fail") : "not_frozen_yet",
