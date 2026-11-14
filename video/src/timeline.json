@@ -1,0 +1,28 @@
+{
+  "fps": 30,
+  "bpm": 120,
+  "framesPerBar": 60,
+  "framesPerBeat": 15,
+  "bars": 44,
+  "scenes": [
+    { "id": "cold", "start": 0, "bars": 2, "act": "problem" },
+    { "id": "curve", "start": 2, "bars": 2, "act": "problem" },
+    { "id": "profit", "start": 4, "bars": 2, "act": "problem" },
+    { "id": "question", "start": 6, "bars": 1, "act": "problem" },
+    { "id": "title", "start": 7, "bars": 2, "act": "product" },
+    { "id": "seal", "start": 9, "bars": 2, "act": "product" },
+    { "id": "open", "start": 11, "bars": 2, "act": "product" },
+    { "id": "price", "start": 13, "bars": 2, "act": "product" },
+    { "id": "testnet", "start": 15, "bars": 1, "act": "proof" },
+    { "id": "sale", "start": 16, "bars": 3, "act": "proof" },
+    { "id": "timing", "start": 19, "bars": 2, "act": "proof" },
+    { "id": "reveal", "start": 21, "bars": 3, "act": "proof" },
+    { "id": "winners", "start": 24, "bars": 2, "act": "proof" },
+    { "id": "pool", "start": 26, "bars": 2, "act": "proof" },
+    { "id": "burn", "start": 28, "bars": 3, "act": "proof" },
+    { "id": "verify", "start": 31, "bars": 4, "act": "proof" },
+    { "id": "judges", "start": 35, "bars": 3, "act": "close" },
+    { "id": "recap", "start": 38, "bars": 2, "act": "close" },
+    { "id": "end", "start": 40, "bars": 4, "act": "close" }
+  ]
+}

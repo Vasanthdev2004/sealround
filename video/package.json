@@ -1,0 +1,26 @@
+{
+  "name": "sealround-video",
+  "private": true,
+  "description": "The Sealround launch video, built with Remotion. Not part of the pnpm workspace.",
+  "scripts": {
+    "studio": "remotion studio",
+    "score": "node scripts/score.mjs",
+    "shots": "node scripts/shots.mjs",
+    "still": "remotion still",
+    "render": "remotion render Launch out/sealround-launch.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.543",
+    "@remotion/google-fonts": "^4.0.543",
+    "@remotion/media-utils": "^4.0.543",
+    "@remotion/transitions": "^4.0.543",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "remotion": "^4.0.543"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "playwright-core": "^1.65.1",
+    "typescript": "^5.9.3"
+  }
+}
