@@ -1,19 +1,94 @@
-# Sealround
+<div align="center">
 
-[![Check](https://github.com/Vasanthdev2004/fairground/actions/workflows/check.yml/badge.svg)](https://github.com/Vasanthdev2004/fairground/actions/workflows/check.yml) [![Live testnet](https://github.com/Vasanthdev2004/fairground/actions/workflows/live-testnet.yml/badge.svg)](https://github.com/Vasanthdev2004/fairground/actions/workflows/live-testnet.yml)
+<img src=".github/readme/banner.png" alt="Sealround. Bots can't snipe what they can't see. Sealed-bid token launches on NEAR: every winner pays one clearing price." width="100%">
 
-Sealed-bid, single-price token sales on NEAR. Bids are sealed in the browser and opened only inside an OutLayer TEE (Intel TDX) after the sale closes, and every winner pays the same clearing price, so bots and people pay the same. After settlement the sale can open a Rhea pool at exactly that price, with the LP shares held by the sale contract.
+<br>
 
-- 90-second video: `<video link>`
-- Hosted demo, judge mode (no wallet, no funds): https://sealround-demo.vercel.app/judge (an older build; see [section 2](#2-try-it-in-2-minutes-with-no-funds))
-- Testnet results and transaction links: [section 7](#7-testnet-results)
-- Tracks: Memecoins With Mechanics; also Privacy & Private AI and Unstoppable DeFi
+[![Check](https://github.com/Vasanthdev2004/sealround/actions/workflows/check.yml/badge.svg)](https://github.com/Vasanthdev2004/sealround/actions/workflows/check.yml) [![Live testnet](https://github.com/Vasanthdev2004/sealround/actions/workflows/live-testnet.yml/badge.svg)](https://github.com/Vasanthdev2004/sealround/actions/workflows/live-testnet.yml) [![NEAR testnet](https://img.shields.io/badge/NEAR-testnet-0052FF?logo=near&logoColor=white)](#7-testnet-results) [![TEE](https://img.shields.io/badge/TEE-Intel%20TDX%20on%20OutLayer-0052FF)](#5-architecture-and-trust-assumptions) [![License: MIT](https://img.shields.io/badge/license-MIT-3D7EFF)](LICENSE)
 
-The product was first called Fairground. Package names (`@fairground/*`), crate names (`fairground-*`), the contract's method, event and storage names, the wasm file names and the `NEXT_PUBLIC_FAIRGROUND_*` variables keep `fairground` for compatibility. They all refer to Sealround.
+**[Live demo](https://sealround-demo.vercel.app)** &nbsp;·&nbsp; **[Judge checklist](https://sealround-demo.vercel.app/judges)** &nbsp;·&nbsp; **[Testnet results](#7-testnet-results)** &nbsp;·&nbsp; **[Verify a sale](#verify-a-sale-yourself)** &nbsp;·&nbsp; **[Claims](#claims-and-how-to-check-them)**
 
-**Status.** The contracts are unaudited. Nothing has run on mainnet. Testnet deployments, account creation and signing on public networks are done by the project owner ([LAUNCH.md](LAUNCH.md)).
+<!-- Video: add the 90-second launch video link here once it is uploaded. -->
 
-**AI-written code.** The code and documentation were written with AI coding agents (Claude Code and OpenAI Codex), directed and reviewed by the team. See [section 12](#ai-assisted-code).
+<sub>Memecoins With Mechanics &nbsp;·&nbsp; also entered in Privacy & Private AI and Unstoppable DeFi</sub>
+
+</div>
+
+## 1. What Sealround is
+
+On a bonding curve, bots buy in the first second and everyone after them pays more. In our [Bot Arena](#6-bot-arena-results) simulation, five sniper bots made **1,269 USDC per launch** on average, and the median person paid **2.61×** the bots' price. Sealround launches a token with a sealed-bid, single-price sale instead; in the same simulation the bots make 0.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+**01 &nbsp;Seal**
+
+Your maximum price and budget are encrypted in your browser. Its length depends only on the sale and account names, so even its size says nothing.
+
+</td>
+<td width="33%" valign="top">
+
+**02 &nbsp;Open**
+
+After the close, the pinned sealer opens every bid at once inside an Intel TDX enclave on OutLayer. Nobody sees a bid before that, not even us.
+
+</td>
+<td width="33%" valign="top">
+
+**03 &nbsp;One price**
+
+The contract re-checks the enclave's result. Every winner pays the same clearing price, early or late, bot or person. Unsold tokens burn.
+
+</td>
+</tr>
+</table>
+
+<p align="center">
+  <img src=".github/readme/how-it-works.gif" alt="Animation: a bid is sealed in the browser, an enclave opens every bid at once, and every winner pays the same clearing price while lower bids are refunded." width="800">
+</p>
+
+After settlement the sale can open a Rhea pool at exactly the clearing price, with the LP shares held by the sale contract, which has no access key.
+
+### Proven on NEAR testnet
+
+<table>
+<tr>
+<td align="center" valign="top" width="25%"><h3>0.002 USDC</h3>paid by all 17 winners of <code>swarm-11141341</code>, including six sniper bots that bid from 3.2 s after the open</td>
+<td align="center" valign="top" width="25%"><h3>0 keys</h3>on the sale contract since 12:39 UTC on 14 Nov, before its last two sales were created</td>
+<td align="center" valign="top" width="25%"><h3>8 of 8</h3>enclave runs proven up to Intel's signature by OutLayer's own verifier</td>
+<td align="center" valign="top" width="25%"><h3>58% burned</h3>Ember supply fell from 722,000 to 304,400 because demand did not take the rest</td>
+</tr>
+</table>
+
+Each number has a command that checks it against the chain in the [claims table](#claims-and-how-to-check-them); the transactions are in [section 7](#7-testnet-results).
+
+### What it looks like
+
+Real pages in testnet mode, reading sale `swarm-11141341` and Ember (`ember-11141303`) from the chain.
+
+<table>
+<tr>
+<td width="50%"><img src=".github/readme/result.jpg" alt="Result page of the Swarm sale: clearing price 0.002 USDC, all 17 winners paid it, 40,000 of 40,000 SWARM sold."><br><sub><b>Result.</b> One clearing price for all 17 winners; 40,000 of 40,000 sold.</sub></td>
+<td width="50%"><img src=".github/readme/timeline.jpg" alt="Fairness timeline: the first bid landed 3.1 s after the open and the last 8.3 s before the close; both paid 0.002 USDC per token."><br><sub><b>Early or late, one price.</b> The first bid and the last both paid 0.002.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src=".github/readme/verified.jpg" alt="Verified panel: 18 of 18 checks passed against OutLayer's attestations and the chain."><br><sub><b>Verified.</b> 18 of 18 checks against OutLayer's attestations, run in your browser.</sub></td>
+<td width="50%"><img src=".github/readme/supply.jpg" alt="Where every token went: Ember supply 722,000 at launch and 304,400 after the sale, with 417,600 burned."><br><sub><b>Where every token went.</b> Ember burned 417,600 of 722,000 at the creator payout.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src=".github/readme/pool.jpg" alt="Launch pool 2981 on Rhea: 16 USDC and 8,000 SWARM at 0.002, the clearing price; LP shares owned by the sale contract."><br><sub><b>Launch pool.</b> Rhea pool #2981 opened at the clearing price; the contract holds the LP shares.</sub></td>
+<td width="50%"><img src=".github/readme/judges.jpg" alt="The judges page: an evidence checklist that runs every public check in the browser."><br><sub><b>For judges.</b> <code>/judges</code> runs the public checks in five minutes, no wallet.</sub></td>
+</tr>
+</table>
+
+> [!WARNING]
+> **Status.** The contracts are unaudited. Nothing has run on mainnet. Testnet deployments, account creation and signing on public networks are done by the project owner ([LAUNCH.md](LAUNCH.md)).
+
+> [!NOTE]
+> **Names.** The product was first called Fairground. Package names (`@fairground/*`), crate names (`fairground-*`), the contract's method, event and storage names, the wasm file names and the `NEXT_PUBLIC_FAIRGROUND_*` variables keep `fairground` for compatibility; they all refer to Sealround. This repository was `Vasanthdev2004/fairground` until 14 Nov 2026. GitHub redirects the old address, and the contract wasm's NEP-330 metadata still links it, because changing it would change the pinned build.
+>
+> **AI-written code.** The code and documentation were written with AI coding agents (Claude Code and OpenAI Codex), directed and reviewed by the team. See [section 12](#ai-assisted-code).
 
 ### Check it in 10 minutes
 
@@ -119,7 +194,7 @@ The privacy here is what sets the price: a bid nobody can read before the close 
 
 ## Contents
 
-1. [What Sealround is](#sealround) (above, with the claims table)
+1. [What Sealround is](#1-what-sealround-is) (above, with the claims table)
 2. [Try it in 2 minutes with no funds](#2-try-it-in-2-minutes-with-no-funds)
 3. [How the auction works](#3-how-the-auction-works), including [the launch pool](#launch-pool-at-the-clearing-price)
 4. [What NEAR does here](#4-what-near-does-here)
@@ -720,6 +795,9 @@ Claims: each part of a claim (tokens, refund) is marked paid before the transfer
 
 ### Libraries (direct dependencies)
 
+<details>
+<summary>Every direct dependency of each package, and the external services</summary>
+
 **Web app** (`apps/web`)
 
 | Library | Purpose |
@@ -780,6 +858,8 @@ Claims: each part of a claim (tokens, refund) is marked paid before the transfer
 
 External services: OutLayer (TEE compute, secrets, attestations), NEAR Intents 1Click (`https://1click.chaindefuser.com`), Rhea (the launch pool), NEAR RPC. Build images: `rust:1.97.1-trixie` (enclave, pinned by digest), `sourcescan/cargo-near:0.22.0-rust-1.97.1` (contract reproducible-build metadata), `debian:trixie-slim` with nearcore sandbox 2.14.0 (local chain). Third-party wasm used only by the sandbox tests: OutLayer's contract and Rhea's exchange ([section 14](#14-license)).
 
+</details>
+
 ### AI-assisted code
 
 The code and documentation in this repository were written with AI coding agents (Claude Code and OpenAI Codex), directed and reviewed by the team. The agents worked from the project spec and shared notes in [AGENTS.md](AGENTS.md) and [WORKBOARD.md](WORKBOARD.md). The claims in this README were checked against the code and against the runs it quotes, with the date of each run.
@@ -838,6 +918,8 @@ MIT, see [LICENSE](LICENSE). Two third-party wasm files are used only by the san
 | `enclave/` | The OutLayer job, its runner, reproducible Docker build and deploy scripts ([README](enclave/README.md), [PERF](enclave/PERF.md)) |
 | `skills/sealround-bid` | Agent skill for bidding |
 | `scripts/` | `check.mjs` (`pnpm check`) and the PowerShell build, sandbox and test scripts |
+| `video/` | The 1:28 launch video and the README banner (Remotion; [README](video/README.md)) |
+| `.github/readme` | Images used in this README, captured from the app and the video |
 
 ## Deploying
 

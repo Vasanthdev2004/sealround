@@ -10,6 +10,7 @@ The 1:28 launch video, built with [Remotion](https://www.remotion.dev/) (React r
 | `public/audio/music.wav` | Music: "Inspired" by Kevin MacLeod ([incompetech.com](https://incompetech.com)), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credited on the end card. Not in git; the build steps below fetch it. |
 | `scripts/score.mjs` | An earlier synthesized score, no longer used. |
 | `scripts/shots.mjs` | Screenshots of the app in testnet mode (read-only). |
+| `src/Banner.tsx` | The 1280x640 banner at the top of the repository README (also fits GitHub's social preview). |
 
 ## Build it
 
@@ -22,6 +23,7 @@ ffmpeg -i Inspired.mp3 -t 88 -af "afade=t=in:st=0:d=1.2,afade=t=out:st=83.5:d=4.
 # sealround.itzbeast.testnet), then:
 node scripts/shots.mjs            # public/shots/*.png
 npx remotion render Launch out/sealround-launch.mp4
+npx remotion still Banner ../.github/readme/banner.png --scale=1.5
 npx remotion studio               # to preview and scrub
 ```
 

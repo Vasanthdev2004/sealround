@@ -16,4 +16,4 @@ export function appHref(path: string = APP_HOME): string {
 }
 
 /** The public source repository. */
-export const REPO_URL = "https://github.com/Vasanthdev2004/fairground";
+export const REPO_URL = "https://github.com/Vasanthdev2004/sealround";
