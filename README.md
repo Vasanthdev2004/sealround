@@ -38,7 +38,7 @@ Every claim below says which of these it was checked in.
 
 ### Claims and how to check them
 
-"Needs" is what you need beyond a clone: **Browser** (nothing to install), **Node 24** (`pnpm install` first), **Rust** (1.97.1, pinned), **Docker** (the sandbox runs in a container; the scripts are written for a Windows host with PowerShell), **testnet RPC** (read-only access to `rpc.testnet.fastnear.com` and `testnet-api.outlayer.ai`). Every command below was run on 13 Nov 2026 on Windows 11 with Node 24.19.0, with the result shown, unless the row says otherwise; the testnet rows were rerun on 14 Nov 2026 against the current contract. Rows C15 to C23 were checked on 13 Nov 2026 against `pnpm dev` at commit `576047c`, in a browser with no stored demo data; rows C26 to C29 on 14 Nov 2026 at `8be2fee` the same way, except the sandbox runs they cite, which Codex ran on 14 Nov 2026. The seeded demo sales (Lantern, Thistle, Driftwood, Ashfall, Kiln, Fair Test, Moth) come out the same in every fresh browser; judge runs and sales you create add to the board, the leaderboard and the burn counter, and "Reset demo data" in the footer starts over.
+"Needs" is what you need beyond a clone: **Browser** (nothing to install), **Node 24** (`pnpm install` first), **Rust** (1.97.1, pinned), **Docker** (the sandbox runs in a container; the scripts are written for a Windows host with PowerShell), **testnet RPC** (read-only access to `rpc.testnet.fastnear.com` and `testnet-api.outlayer.ai`). Every command below was run on 13 Nov 2026 on Windows 11 with Node 24.19.0, with the result shown, unless the row says otherwise; the testnet rows were rerun on 14 Nov 2026 against the current contract. Rows C15 to C23 were checked on 13 Nov 2026 against `pnpm dev` at commit `3903896`, in a browser with no stored demo data; rows C26 to C29 on 14 Nov 2026 at `ba69f08` the same way, except the sandbox runs they cite, which Codex ran on 14 Nov 2026. The seeded demo sales (Lantern, Thistle, Driftwood, Ashfall, Kiln, Fair Test, Moth) come out the same in every fresh browser; judge runs and sales you create add to the board, the leaderboard and the burn counter, and "Reset demo data" in the footer starts over.
 
 | # | Claim | How to check: do, then see | Mode | Needs |
 | --- | --- | --- | --- | --- |
@@ -140,7 +140,7 @@ Also: [Repository layout](#repository-layout), [Deploying](#deploying).
 
 Judge mode runs a whole sale in your browser: 50 fictional people, 3 sniper bots and 1 copycat bid, the sale closes, the enclave clears it, the launch pool is seeded, and you get the result. The chain, the accounts, the enclave, its attestation, the relayer and the pool are simulated; the bid encryption and the clearing math are the real code (see [Three ways to run it](#three-ways-to-run-it)).
 
-**Hosted demo.** As of 13 Nov 2026, https://sealround-demo.vercel.app serves a build from before commit `e59239c`, although `main` is at `576047c`. It has judge mode, but nothing added in `e59239c`, `4bd6e5a` or `576047c`: no launch pool, launch simulator, real attestation checks, fairness timeline, share cards, token icons, presets, demand meter, supply story, scorecard, token pages, leaderboard, burn counter or launch kit (`/token/thistle` and `/sale/moth/kit` answer 404 there). Claims C15 to C23 need a local run until the owner redeploys. `<owner: delete this paragraph after redeploying the demo>`. Locally, everything below works:
+**Hosted demo.** https://sealround-demo.vercel.app builds from `main` and runs in mock mode, so every page in the claims table opens there without a local run (checked 14 Nov 2026: `/judges`, `/token/thistle`, `/sale/moth/kit`, `/attack` and `/agents` answer 200). To run it locally:
 
 ```sh
 pnpm install     # about 1 minute on a fresh clone
@@ -644,23 +644,23 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-`pnpm check` (`scripts/check.mjs`) runs the Rust workspace unit tests, the enclave job's native tests, the Vitest suites and TypeScript of `clearing`, `relayer-client`, `relayer` and `arena`, then the web tests, web TypeScript and web ESLint. It prints a pass/fail summary and ends with `13/13 passed`. It passed on Linux x86_64 (12 Nov 2026, Node 24.22.3, from a clean archive of the commit before `e59239c` plus `scripts/check.mjs`) and on Windows 11 (13 Nov 2026, commit `e59239c`).
+`pnpm check` (`scripts/check.mjs`) runs the Rust workspace unit tests, the enclave job's native tests, the Vitest suites and TypeScript of `clearing`, `relayer-client`, `relayer` and `arena`, then the web tests, web TypeScript and web ESLint. It prints a pass/fail summary and ends with `13/13 passed`. It passed on Linux x86_64 (12 Nov 2026, Node 24.22.3, from a clean archive of the commit before `c5c60c6` plus `scripts/check.mjs`) and on Windows 11 (13 Nov 2026, commit `c5c60c6`).
 
-Results on 13 Nov 2026, Windows 11. The last column names the commit each run was on. From `e59239c` to `576047c` only the web app (with its scripts and tests), the `enclave/deploy` PowerShell scripts, the docs and the lockfile changed; no contract, crate, relayer or package code.
+Results on 13 Nov 2026, Windows 11. The last column names the commit each run was on. From `c5c60c6` to `3903896` only the web app (with its scripts and tests), the `enclave/deploy` PowerShell scripts, the docs and the lockfile changed; no contract, crate, relayer or package code.
 
 | Suite | Command (from the repo root unless noted) | Result | Commit |
 | --- | --- | --- | --- |
-| Everything without Docker | `pnpm check` | 13/13 passed | `e59239c` |
-| Rust unit (contract, clearing, sealer, token, test USDC) | `cargo test --workspace --locked` | 201 passed, 1 ignored | `e59239c` |
-| Enclave job, native | in `enclave/`: `cargo test --locked -p fairground-sealer-job` | 20 passed | `e59239c` |
-| Clearing TS | `pnpm --filter @fairground/clearing test` | 1,032 passed | `576047c` |
-| Arena | `pnpm --filter @fairground/arena test` | 27 passed | `576047c` |
-| Relayer | in `apps/relayer`: `pnpm test` | 411 passed, 10 sandbox tests skipped | `e59239c` |
-| Relayer client | in `packages/relayer-client`: `pnpm test` | 269 passed, 8 sandbox tests skipped | `e59239c` |
-| Web | in `apps/web`: `npx vitest run` | 500 passed in 33 files | `576047c` |
-| End to end (Docker) | `pnpm --filter web e2e:sandbox` | 21/21 scenarios, 484/484 checks | `576047c` |
-| MCP server (Docker) | `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts` | 13/13 scenarios, 90/90 checks, 44 s | `e59239c` |
-| Live bot (Docker) | `pnpm --filter web exec tsx scripts/live-bot/sandbox-test.ts` | 8/8 scenarios, 69/69 checks, 109 s | `e59239c` |
+| Everything without Docker | `pnpm check` | 13/13 passed | `c5c60c6` |
+| Rust unit (contract, clearing, sealer, token, test USDC) | `cargo test --workspace --locked` | 201 passed, 1 ignored | `c5c60c6` |
+| Enclave job, native | in `enclave/`: `cargo test --locked -p fairground-sealer-job` | 20 passed | `c5c60c6` |
+| Clearing TS | `pnpm --filter @fairground/clearing test` | 1,032 passed | `3903896` |
+| Arena | `pnpm --filter @fairground/arena test` | 27 passed | `3903896` |
+| Relayer | in `apps/relayer`: `pnpm test` | 411 passed, 10 sandbox tests skipped | `c5c60c6` |
+| Relayer client | in `packages/relayer-client`: `pnpm test` | 269 passed, 8 sandbox tests skipped | `c5c60c6` |
+| Web | in `apps/web`: `npx vitest run` | 500 passed in 33 files | `3903896` |
+| End to end (Docker) | `pnpm --filter web e2e:sandbox` | 21/21 scenarios, 484/484 checks | `3903896` |
+| MCP server (Docker) | `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts` | 13/13 scenarios, 90/90 checks, 44 s | `c5c60c6` |
+| Live bot (Docker) | `pnpm --filter web exec tsx scripts/live-bot/sandbox-test.ts` | 8/8 scenarios, 69/69 checks, 109 s | `c5c60c6` |
 | Contracts, full: build, unit, sandbox integration (Docker, PowerShell) | `powershell -File scripts\test-contracts.ps1` | 26 integration tests passed, 9 of them launch liquidity against Rhea's wasm | 12 Nov 2026, contract unchanged since; not rerun on 13 Nov |
 
 Other checks: `cargo clippy --workspace --all-targets --locked -- -D warnings`; `powershell -File scripts\run-enclave.ps1 -Test`; `powershell -File scripts\build-enclave.ps1 -Verify` (Docker, prints `verify: MATCH`); `pnpm typecheck` in `apps/relayer` and `packages/relayer-client`; `pnpm test:sandbox` in `apps/relayer`.

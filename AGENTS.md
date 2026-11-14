@@ -56,10 +56,10 @@ Run the ones that cover what you touched before you hand work back.
 | Web | in `apps/web`: `npx tsc --noEmit --incremental false`, `npx eslint src scripts`, `npx vitest run`, `pnpm build` |
 | End to end | `pnpm --filter web e2e:sandbox` |
 
-Last full pass (2026-11-13): all green. On the commit after `576047c` (judge
+Last full pass (2026-11-13): all green. On the commit after `3903896` (judge
 demand level): 506 web tests in 34 files, 27 arena, 21/21 e2e scenarios
-(484/484 checks); 1032 clearing TS at `576047c` (package unchanged since). At
-`e59239c` (no contract, crate, relayer or package change since): 201 Rust unit
+(484/484 checks); 1032 clearing TS at `3903896` (package unchanged since). At
+`c5c60c6` (no contract, crate, relayer or package change since): 201 Rust unit
 (1 ignored), 20 enclave job native, 411 relayer, 269 relayer client, MCP
 sandbox 13/13 (90/90), live-bot sandbox 8/8 (69/69), `pnpm check` 13/13.
 Contract sandbox integration (26) last ran 2026-11-12, not rerun.
