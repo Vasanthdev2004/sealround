@@ -718,18 +718,13 @@ export function eventsFromViews(
     if (p.raise_paid || p.allocation_paid || p.unsold_burned || p.reserve_returned) {
       // The creator's raise is the total less the launch pool's USDC.
       const raise = BigInt(result.total_raised) - poolUsdcKept(liq);
-      const allocationLeft = !p.allocation_paid && BigInt(sale.creator_allocation) > 0n;
       untimed(
         {
           kind: "claimed",
           detail: "proceeds_claimed",
           account: sale.creator,
           ...(p.raise_paid && raise > 0n ? { amount: raise } : {}),
-          note: p.raise_paid
-            ? allocationLeft && locksTokens(liq)
-              ? `Creator paid ${usdc(raise)} USDC of the raise. The creator allocation unlocks once the launch pool is seeded.`
-              : `Creator paid: ${usdc(raise)} USDC raised and the creator allocation. Unsold tokens burned.`
-            : "Creator allocation paid. The unsold sale tokens were burned.",
+          note: payoutNote(sale, result, raise),
         },
         base + 0.2,
         sent("claimed", sale.creator, "proceeds_claimed"),
@@ -794,6 +789,39 @@ export function eventsFromViews(
   }
 
   return out.sort((a, b) => b.at - a.at);
+}
+
+/**
+ * The creator payout row's text, from the `proceeds` flags. Each part is named
+ * only when its flag says it was paid and there was something to pay: a sale
+ * that sold out burned nothing, and a sale with every token for sale has no
+ * creator allocation.
+ */
+export function payoutNote(
+  sale: Pick<SaleView, "creator_allocation" | "decimals" | "token_symbol">,
+  result: Pick<ResultView, "unsold" | "proceeds" | "liquidity">,
+  raise: bigint,
+): string {
+  const p = result.proceeds;
+  const unsold = BigInt(result.unsold);
+  const hasAllocation = BigInt(sale.creator_allocation) > 0n;
+  const paid = [
+    ...(p.raise_paid && raise > 0n ? [`${usdc(raise)} USDC raised`] : []),
+    ...(p.allocation_paid && hasAllocation ? ["the creator allocation"] : []),
+  ];
+  const burned = p.unsold_burned && unsold > 0n;
+  const parts = [
+    paid.length > 0
+      ? `Creator paid: ${paid.join(" and ")}.`
+      : !burned && p.reserve_returned
+        ? "Creator payout: the unused NEAR reserve returned."
+        : "Creator payout sent.",
+    ...(burned ? [`${formatUnits(unsold, sale.decimals, 4)} ${sale.token_symbol} burned.`] : []),
+    ...(hasAllocation && !p.allocation_paid && locksTokens(result.liquidity)
+      ? ["The creator allocation unlocks once the launch pool is seeded."]
+      : []),
+  ];
+  return parts.join(" ");
 }
 
 /** What retry_setup must attach: OutLayer's compute deposit when the sale key step failed, nothing otherwise. */

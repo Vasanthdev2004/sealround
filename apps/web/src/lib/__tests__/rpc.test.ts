@@ -13,7 +13,7 @@ function node(reply: (call: Call) => unknown, status = 200) {
     calls.push({ method: body.method, params: body.params });
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, ...(reply(body) as object) }), { status });
   }) as typeof fetch;
-  return { calls, rpc: createRpc("http://127.0.0.1:3030", { fetch: fetchImpl }) };
+  return { calls, rpc: createRpc("http://127.0.0.1:3030", { fetch: fetchImpl, retryDelayMs: 0 }) };
 }
 
 const bytes = (value: unknown) => Array.from(new TextEncoder().encode(JSON.stringify(value)));
@@ -95,6 +95,7 @@ describe("view calls", () => {
     expect(await failure(node(() => ({}), 502).rpc.view("c.near", "m"))).toMatchObject({ code: "rpc_error" });
     expect(await failure(node(() => ({})).rpc.view("c.near", "m"))).toMatchObject({ message: "The NEAR RPC node sent an empty answer." });
     const down = createRpc("http://127.0.0.1:1", {
+      retryDelayMs: 0,
       fetch: (async () => {
         throw new TypeError("fetch failed");
       }) as typeof fetch,
@@ -103,6 +104,90 @@ describe("view calls", () => {
     expect(await failure(node(() => ({ result: { result: Array.from(new TextEncoder().encode("not json")) } })).rpc.view("c.near", "m"))).toMatchObject({
       code: "rpc_error",
     });
+  });
+});
+
+describe("a busy or unreachable node", () => {
+  const ok = (id: number) =>
+    new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { result: bytes("20000"), logs: [] } }), { status: 200 });
+  // What FastNear's public RPC sends past its rate limit.
+  const limited = (id: number) =>
+    new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -429, message: "Rate limits exceeded." } }), { status: 429 });
+
+  /** A fetch that plays `steps` in order, one per call. */
+  function script(steps: ((id: number, init?: RequestInit) => Response | Promise<Response>)[]) {
+    let n = 0;
+    const fetchImpl = (async (_url: unknown, init?: RequestInit) => {
+      const id = (JSON.parse(String(init?.body)) as { id: number }).id;
+      const step = steps[Math.min(n++, steps.length - 1)];
+      return step(id, init);
+    }) as typeof fetch;
+    return { fetchImpl, count: () => n };
+  }
+  const networkError = () => {
+    // How a browser reports a 429 without a CORS header, and how Node reports a refused connection.
+    throw new TypeError("Failed to fetch");
+  };
+
+  it("asks again after a 429, 502, 503 or 504 and returns the answer", async () => {
+    for (const status of [429, 502, 503, 504]) {
+      const busy = (id: number) => (status === 429 ? limited(id) : new Response("busy", { status }));
+      const s = script([busy, ok]);
+      const rpc = createRpc("http://rpc", { fetch: s.fetchImpl, retryDelayMs: 0 });
+      expect(await rpc.view("token.testnet", "ft_total_supply")).toBe("20000");
+      expect(s.count()).toBe(2);
+    }
+  });
+
+  it("asks again after a network error, which is how a browser sees a rate-limited public RPC", async () => {
+    const s = script([networkError, networkError, ok]);
+    const rpc = createRpc("http://rpc", { fetch: s.fetchImpl, retryDelayMs: 0 });
+    expect(await rpc.view("token.testnet", "ft_total_supply")).toBe("20000");
+    expect(s.count()).toBe(3);
+  });
+
+  it("gives up after `retries` more tries, as an rpc_error", async () => {
+    const s = script([limited]);
+    const rpc = createRpc("http://rpc", { fetch: s.fetchImpl, retryDelayMs: 0, retries: 2 });
+    expect((await failure(rpc.view("c.near", "m"))).message).toMatch(/Could not reach the NEAR RPC node/);
+    expect(s.count()).toBe(3);
+
+    const once = script([limited]);
+    await failure(createRpc("http://rpc", { fetch: once.fetchImpl, retries: 0 }).view("c.near", "m"));
+    expect(once.count()).toBe(1);
+  });
+
+  it("does not ask again after a timeout, a 500, a refused view or a bad answer", async () => {
+    const timeout = script([
+      () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      },
+    ]);
+    await failure(createRpc("http://rpc", { fetch: timeout.fetchImpl, retryDelayMs: 0 }).view("c.near", "m"));
+    expect(timeout.count()).toBe(1);
+
+    const internal = script([() => new Response("oops", { status: 500 })]);
+    await failure(createRpc("http://rpc", { fetch: internal.fetchImpl, retryDelayMs: 0 }).view("c.near", "m"));
+    expect(internal.count()).toBe(1);
+
+    const panic = script([
+      (id) =>
+        new Response(
+          JSON.stringify({ jsonrpc: "2.0", id, result: { error: 'HostError(GuestPanic { panic_msg: "unknown sale" })' } }),
+        ),
+    ]);
+    const e = await failure(createRpc("http://rpc", { fetch: panic.fetchImpl, retryDelayMs: 0 }).view("c.near", "m"));
+    expect(e.message).toBe("unknown sale");
+    expect(panic.count()).toBe(1);
+  });
+
+  it("waits longer before each try", async () => {
+    const s = script([networkError, networkError, ok]);
+    const rpc = createRpc("http://rpc", { fetch: s.fetchImpl, retryDelayMs: 20 });
+    const t0 = Date.now();
+    await rpc.view("c.near", "m");
+    // 20 ms, then 60 ms, each with up to half again: at least 80 ms in all.
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(75);
   });
 });
 

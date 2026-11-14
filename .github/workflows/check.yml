@@ -1,0 +1,215 @@
+# Two jobs, run side by side:
+#
+# - `check` runs the repo's own check script, scripts/check.mjs, on Linux: the
+#   Rust workspace and enclave job native tests, the five Vitest suites,
+#   TypeScript for every package and the web ESLint (13 checks). It is the
+#   same command a screener runs by hand (`pnpm check`, README
+#   "Prerequisites").
+# - `proofs` re-checks the committed OutLayer proof bundles offline with
+#   OutLayer's verifier.
+#
+# No Docker, no secrets, no chain. The network is used only to install the
+# toolchains and packages (rustup, crates.io, the npm registry) and to fetch
+# the verifier's source from GitHub. The sandbox suites (relayer, relayer
+# client) skip themselves without their env vars.
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  # A new push to a pull request replaces the run in progress; runs on main
+  # always finish, so the badge reflects every commit.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  check:
+    name: pnpm check
+    runs-on: ubuntu-latest
+    # A cold run (no caches) builds near-sdk's unit-testing dependencies from
+    # source; a warm run is a few minutes.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # enclave/rust-toolchain.toml pins the compiler, because the sealer wasm
+      # hash pinned on chain depends on it. The root workspace has no toolchain
+      # file, so it gets the same version as the default (the last Linux
+      # verification ran both workspaces on it). wasm32-wasip1 is listed in the
+      # enclave's toolchain file; installing it here keeps rustup from fetching
+      # it in the middle of the check.
+      - name: Install Rust from enclave/rust-toolchain.toml
+        run: |
+          channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' enclave/rust-toolchain.toml)
+          if [ -z "$channel" ]; then
+            echo "::error file=enclave/rust-toolchain.toml::no channel found"
+            exit 1
+          fi
+          rustup toolchain install "$channel" --profile minimal --target wasm32-wasip1 --no-self-update
+          rustup default "$channel"
+          rustc --version
+          cargo --version
+
+      # Caches ~/.cargo (registry, git) and both target directories. Only runs
+      # on main save it; pull requests restore main's cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            enclave -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # No `version` input: the action reads "packageManager": "pnpm@12.3.4"
+      # from package.json. `cache` keeps the pnpm store between runs.
+      - uses: pnpm/action-setup@v6
+        with:
+          cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          # The pnpm store is cached by pnpm/action-setup above.
+          package-manager-cache: false
+
+      - name: Install packages
+        run: pnpm install --frozen-lockfile
+
+      # check.mjs runs every check even after one fails and prints a summary;
+      # the summary also goes to the job page.
+      - name: pnpm check
+        run: |
+          status=0
+          pnpm check 2>&1 | tee "$RUNNER_TEMP/check.log" || status=$?
+          {
+            echo "## pnpm check"
+            echo
+            echo '```'
+            sed -n '/^Check summary$/,$p' "$RUNNER_TEMP/check.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  # Re-checks the committed OutLayer proof bundles (evidence/outlayer/, see
+  # evidence/README.md) with OutLayer's own open-source verifier, offline: the
+  # Intel signature chain of each TDX quote, the binding of the quote to the
+  # run's record, and the input and output hashes, all from the files alone.
+  # The verifier is built from GitHub at the commit the bundles were made with;
+  # that build is the only network use besides crates.io.
+  proofs:
+    name: OutLayer proof bundles (offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # One source of truth for the tool version: "tool.commit" in the manifest.
+      - name: Read the verifier commit from evidence/outlayer/manifest.json
+        id: verifier
+        run: |
+          rev=$(jq -r '.tool.commit' evidence/outlayer/manifest.json)
+          if ! [[ "$rev" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error file=evidence/outlayer/manifest.json::tool.commit is not a full commit hash: $rev"
+            exit 1
+          fi
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+
+      # The built binary is cached by commit, so only the first run compiles it.
+      - name: Restore outlayer-verify
+        id: verifier-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/outlayer-verify
+          key: outlayer-verify-${{ steps.verifier.outputs.rev }}-${{ runner.os }}-${{ hashFiles('enclave/rust-toolchain.toml') }}
+
+      - name: Install Rust from enclave/rust-toolchain.toml
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
+        run: |
+          channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' enclave/rust-toolchain.toml)
+          if [ -z "$channel" ]; then
+            echo "::error file=enclave/rust-toolchain.toml::no channel found"
+            exit 1
+          fi
+          rustup toolchain install "$channel" --profile minimal --no-self-update
+          rustup default "$channel"
+          rustc --version
+
+      - name: Build outlayer-verify
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
+        env:
+          REV: ${{ steps.verifier.outputs.rev }}
+        run: cargo install --git https://github.com/out-layer/outlayer-verify --rev "$REV" --locked outlayer-verify
+
+      - name: Re-check every bundle offline
+        working-directory: evidence/outlayer
+        run: |
+          bin="$HOME/.cargo/bin/outlayer-verify"
+          failures=0
+
+          # The files are the ones the manifest lists, byte for byte.
+          if ! jq -r '.runs[] | "\(.bundle_sha256)  \(.bundle)"' manifest.json | sha256sum -c -; then
+            echo "::error file=evidence/outlayer/manifest.json::a bundle does not match its sha256 in the manifest"
+            failures=$((failures + 1))
+          fi
+
+          # Cut the network for the check when the runner allows it (a fresh
+          # network namespace with only loopback); otherwise --offline alone
+          # keeps the tool from fetching anything.
+          wrap=()
+          where="--offline (the runner did not allow cutting the network)"
+          me=$(id -un)
+          if sudo -n unshare --net -- sudo -n -u "$me" -- true 2> /dev/null; then
+            wrap=(sudo -n unshare --net -- sudo -n -u "$me" --)
+            where="--offline, inside a network namespace with no network (unshare --net)"
+          fi
+          echo "Running $where"
+
+          mapfile -t bundles < <(find . -mindepth 2 -maxdepth 2 -name '*.json' | sed 's#^\./##' | sort)
+          expected=$(jq '.runs | length' manifest.json)
+          rows=""
+          for f in "${bundles[@]}"; do
+            status=0
+            line=$("${wrap[@]}" "$bin" bundle "$f" --offline --short) || status=$?
+            echo "$f: $line (exit $status)"
+            if [ "$status" -ne 0 ] || [[ "$line" != PROVEN* ]]; then
+              echo "::error file=evidence/outlayer/$f::outlayer-verify exit $status: $line"
+              failures=$((failures + 1))
+            fi
+            rows+="| \`$f\` | $(printf '%s' "$line" | sed 's/|/\\|/g') | $status |"$'\n'
+          done
+          if [ "${#bundles[@]}" -ne "$expected" ]; then
+            echo "::error file=evidence/outlayer/manifest.json::${#bundles[@]} bundle files, the manifest lists $expected runs"
+            failures=$((failures + 1))
+          fi
+
+          {
+            echo "## OutLayer proof bundles"
+            echo
+            echo "outlayer-verify $(jq -r '.tool.version' manifest.json) at commit \`$(jq -r '.tool.commit' manifest.json)\`, run with $where."
+            echo
+            echo "| Bundle | Verdict | Exit |"
+            echo "| --- | --- | --- |"
+            printf '%s' "$rows"
+            echo
+            if [ "$failures" -eq 0 ]; then
+              echo "${#bundles[@]} of $expected bundles PROVEN, and each matches its sha256 in the manifest."
+            else
+              echo "$failures problem(s); see the log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$failures" -eq 0 ]

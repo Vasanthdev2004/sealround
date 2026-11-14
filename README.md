@@ -1,17 +1,30 @@
 # Sealround
 
+[![Check](https://github.com/Vasanthdev2004/fairground/actions/workflows/check.yml/badge.svg)](https://github.com/Vasanthdev2004/fairground/actions/workflows/check.yml) [![Live testnet](https://github.com/Vasanthdev2004/fairground/actions/workflows/live-testnet.yml/badge.svg)](https://github.com/Vasanthdev2004/fairground/actions/workflows/live-testnet.yml)
+
 Sealed-bid, single-price token sales on NEAR. Bids are sealed in the browser and opened only inside an OutLayer TEE (Intel TDX) after the sale closes, and every winner pays the same clearing price, so bots and people pay the same. After settlement the sale can open a Rhea pool at exactly that price, with the LP shares held by the sale contract.
 
 - 90-second video: `<video link>`
 - Hosted demo, judge mode (no wallet, no funds): https://sealround-demo.vercel.app/judge (an older build; see [section 2](#2-try-it-in-2-minutes-with-no-funds))
 - Testnet results and transaction links: [section 7](#7-testnet-results)
-- Tracks: Memecoins With Mechanics; also Privacy & Private AI, Unstoppable DeFi, Open Innovation, Agent Economy
+- Tracks: Memecoins With Mechanics; also Privacy & Private AI and Unstoppable DeFi
 
 The product was first called Fairground. Package names (`@fairground/*`), crate names (`fairground-*`), the contract's method, event and storage names, the wasm file names and the `NEXT_PUBLIC_FAIRGROUND_*` variables keep `fairground` for compatibility. They all refer to Sealround.
 
 **Status.** The contracts are unaudited. Nothing has run on mainnet. Testnet deployments, account creation and signing on public networks are done by the project owner ([LAUNCH.md](LAUNCH.md)).
 
 **AI-written code.** The code and documentation were written with AI coding agents (Claude Code and OpenAI Codex), directed and reviewed by the team. See [section 12](#ai-assisted-code).
+
+### Check it in 10 minutes
+
+No Docker, no wallet, no keys. Steps 2 to 5 read NEAR testnet and OutLayer; nothing is signed.
+
+1. Open https://sealround-demo.vercel.app/judge and click **Run demo** (or `pnpm install`, `pnpm dev`, then `/judge`). A whole sale with 3 sniper bots, a copycat and 50 people settles in about 35 s. See "Bots paid" and "People paid" at the same price. The chain and the enclave are simulated here, and the page says so.
+2. `pnpm install`, then `pnpm --filter web verify-sale --contract sealround.itzbeast.testnet --sale nosnipe-11140458`: a real testnet sale in which a sniper bot bid 3.6 s after the open. See 16 `[PASS]` lines, the bid set recomputed (6 of 6) and "Every check passed." (C3, C10).
+3. Define the helpers under the [claims table](#claims-and-how-to-check-them), then `view sealround.itzbeast.testnet get_fills '{"sale_id":"nosnipe-11140458"}'`: the bot and the person who bid last each paid 5 USDC for 2,500 tokens (C1). `bidsizes nosnipe-11140458`: every sealed bid has exactly the size its account name predicts, so size reveals nothing (C2).
+4. `keys sealround.itzbeast.testnet`: the contract account's access keys (C5).
+5. Intel's signature on every enclave run: install `outlayer-verify`, then re-check the six proof bundles in `evidence/outlayer` offline (C24, [Verify a sale yourself](#verify-a-sale-yourself)).
+6. `pnpm check`: 13 checks, the same set CI runs (Rust and enclave tests, five Vitest suites, TypeScript, ESLint).
 
 ### Three ways to run it
 
@@ -25,20 +38,20 @@ Every claim below says which of these it was checked in.
 
 ### Claims and how to check them
 
-"Needs" is what you need beyond a clone: **Browser** (nothing to install), **Node 24** (`pnpm install` first), **Rust** (1.97.1, pinned), **Docker** (the sandbox runs in a container; the scripts are written for a Windows host with PowerShell), **testnet RPC** (read-only access to `rpc.testnet.near.org` and `testnet-api.outlayer.ai`). Every command below was run on 13 Nov 2026 on Windows 11 with Node 24.19.0, with the result shown, unless the row says otherwise. Rows C15 to C23 were checked on 13 Nov 2026 against `pnpm dev` at commit `576047c`, in a browser with no stored demo data. The seeded demo sales (Lantern, Thistle, Driftwood, Ashfall, Kiln, Fair Test, Moth) come out the same in every fresh browser; judge runs and sales you create add to the board, the leaderboard and the burn counter, and "Reset demo data" in the footer starts over.
+"Needs" is what you need beyond a clone: **Browser** (nothing to install), **Node 24** (`pnpm install` first), **Rust** (1.97.1, pinned), **Docker** (the sandbox runs in a container; the scripts are written for a Windows host with PowerShell), **testnet RPC** (read-only access to `rpc.testnet.fastnear.com` and `testnet-api.outlayer.ai`). Every command below was run on 13 Nov 2026 on Windows 11 with Node 24.19.0, with the result shown, unless the row says otherwise; the testnet rows were rerun on 14 Nov 2026 against the current contract. Rows C15 to C23 were checked on 13 Nov 2026 against `pnpm dev` at commit `576047c`, in a browser with no stored demo data. The seeded demo sales (Lantern, Thistle, Driftwood, Ashfall, Kiln, Fair Test, Moth) come out the same in every fresh browser; judge runs and sales you create add to the board, the leaderboard and the burn counter, and "Reset demo data" in the footer starts over.
 
 | # | Claim | How to check: do, then see | Mode | Needs |
 | --- | --- | --- | --- | --- |
-| C1 | Every winner pays one clearing price, bots included. | Open `/judge`, click **Run demo**, wait about 35 s. See "Bots paid" and "People paid" at the same price and "Bots and people paid exactly the clearing price." marked Passed. On a chain: `pnpm --filter web e2e:sandbox`; scenario 11 prints "contract get_fills: tokens, spent, refund and penalty of every bid = reference clearing". | Mock; sandbox | Browser; Docker |
-| C2 | Bids are sealed in the browser, and the chain sees no price and no amount. | `pnpm --filter web e2e:sandbox`; scenario 10 prints, for every bid, "the sealed box is 224 + len(sale id) + len(bidder) = 246 bytes" and "the contract stores the box unchanged". Both amounts are padded to 39 digits, so the length says nothing. Sealing code: `apps/web/src/lib/crypto.ts`. | Sandbox | Docker |
-| C3 | Bids are opened only by the pinned enclave job, in an attested Intel TDX enclave. | `pnpm --filter web verify-sale --contract fairground.itzbeast.testnet --sale smoke-11120830`. See 16 `[PASS]` lines (8 for each enclave run), including "Attested build is the sealer the contract pins" and "The TDX quote commits to this record", then "Every check passed." and exit code 0. | Testnet | Node 24, testnet RPC |
-| C4 | The contract re-checks the enclave's result and fails the sale on any mismatch. | `cargo test -p fairground --locked every_check_can_fail_the_sale` passes: each named check fails the sale on its own. On testnet, `get_result` for `smoke-11120830` shows `"failed_checks":[]` (commands below). | Unit; testnet | Rust; testnet RPC |
+| C1 | Every winner pays one clearing price, bots included. | Open `/judge`, click **Run demo**, wait about 35 s. See "Bots paid" and "People paid" at the same price and "Bots and people paid exactly the clearing price." marked Passed. On a chain: `pnpm --filter web e2e:sandbox`; scenario 11 prints "contract get_fills: tokens, spent, refund and penalty of every bid = reference clearing". On testnet: `view sealround.itzbeast.testnet get_fills '{"sale_id":"nosnipe-11140458"}'` shows the sniper bot (the first bid, 3.6 s after the open) and the last bidder (559.4 s after the open) each paid 5 USDC for 2,500 tokens, 0.002 USDC per token, like every winner ([section 7](#sale-nosnipe-11140458-14-nov-2026)). | Mock; sandbox; testnet | Browser; Docker; testnet RPC |
+| C2 | Bids are sealed in the browser, and the chain sees no price and no amount. | `pnpm --filter web e2e:sandbox`; scenario 10 prints, for every bid, "the sealed box is 224 + len(sale id) + len(bidder) = 246 bytes" and "the contract stores the box unchanged". Both amounts are padded to 39 digits, so the length says nothing. Sealing code: `apps/web/src/lib/crypto.ts`. On testnet, `bidsizes nosnipe-11140458` (below) prints each stored bid's size next to 224 + len(sale id) + len(bidder): all 6 match (260 to 263 bytes), and `get_bids` holds only the sealed box and the deposit. | Sandbox; testnet | Docker; Node 24, testnet RPC |
+| C3 | Bids are opened only by the pinned enclave job, in an attested Intel TDX enclave. | `pnpm --filter web verify-sale --contract sealround.itzbeast.testnet --sale nosnipe-11140458`. See 16 `[PASS]` lines (8 for each enclave run, attestations #95200 and #95341), including "Attested build is the sealer the contract pins" and "The TDX quote commits to this record", then "Every check passed." and exit code 0. The same passes for `nosnipe-11140429` and for `smoke-11120830` on `fairground.itzbeast.testnet`. | Testnet | Node 24, testnet RPC |
+| C4 | The contract re-checks the enclave's result and fails the sale on any mismatch. | `cargo test -p fairground --locked every_check_can_fail_the_sale` passes: each named check fails the sale on its own. On testnet, `get_result` for `nosnipe-11140458` shows `"failed_checks":[]` (commands below). | Unit; testnet | Rust; testnet RPC |
 | C5 | No admin key: a sale's rules are fixed at `create_sale`, and a deployed contract account has no access key. | Read [contracts/DESIGN.md](contracts/DESIGN.md) "Safety rules" and `contracts/fairground/src/lib.rs`: no owner, no admin, no upgrade method. On testnet, `keys <contract>` (below) must print `"keys":[]`. For the evidence contract: `<link: access key list of sealround.itzbeast.testnet after lock>`. The smoke-sale contract `fairground.itzbeast.testnet` still has its deployer's full-access key: it was never locked (section 7). | Testnet | testnet RPC |
 | C6 | A failed sale refunds everyone. | Judge mode: `/sale/driftwood/result` (missed its minimum raise, everyone refunded), `/sale/ashfall` (the enclave never answered; past the settle timeout, "Switch this sale to refunds" lets anyone trigger full refunds). Sandbox: scenario 20 "refund mode: nobody closes the sale, everyone gets the whole deposit back" and scenario 13 (the enclave refuses, `retry_setup` and a second `close_sale` recover). | Mock; sandbox | Browser; Docker |
 | C7 | Unsold supply is burned. | `view smoke-11120830.fairground.itzbeast.testnet ft_total_supply '{}'` (below) prints `"900000000000000000000"`: 1,000 tokens were minted once, 100 of the 600 for sale went unsold and were burned at `claim_proceeds`. In judge mode, `/sale/thistle/result` shows 292,200 THSL burned (C15), a `/judge` run at **Low** demand burns about 52,800 of its tokens at the creator payout, `/create` "Simulate this launch" has a "Burned" row and `/arena` has "Sealround: supply burned as demand changes". | Testnet; mock | testnet RPC; Browser |
-| C8 | The launch pool opens on Rhea at exactly the clearing price, and the LP shares stay with the keyless contract. | `powershell -File scripts\test-contracts.ps1` runs 9 liquidity integration tests against Rhea's own wasm (v1.9.19); 26 integration tests passed on 12 Nov 2026 (not rerun on 13 Nov). Judge mode: the result page's **Launch pool** panel shows "Pool price equals the clearing price" Passed, labelled simulated. Testnet: `<link: evidence sale pool, section 7>`. | Sandbox; mock; testnet pending | Docker and PowerShell; Browser |
+| C8 | The launch pool opens on Rhea at exactly the clearing price, and the LP shares stay with the keyless contract. | `powershell -File scripts\test-contracts.ps1` runs 9 liquidity integration tests against Rhea's own wasm (v1.9.19); 26 integration tests passed on 12 Nov 2026 (not rerun on 13 Nov). Judge mode: the result page's **Launch pool** panel shows "Pool price equals the clearing price" Passed, labelled simulated. Testnet: `nosnipe-11140458` seeded pool 2971 on `ref-finance-101.testnet` with 4 USDC and 2,000 NOSNIPE, 0.002 USDC per token, the clearing price, and all LP shares belong to `sealround.itzbeast.testnet` ([section 7](#sale-nosnipe-11140458-14-nov-2026); `view ref-finance-101.testnet get_pool '{"pool_id":2971}'`). | Sandbox; mock; testnet | Docker and PowerShell; Browser; testnet RPC |
 | C9 | Bidders need no NEAR: the relayer pays the gas. | `pnpm --filter web e2e:sandbox`; scenarios 4 and 10 print "alice.test.near's NEAR balance moved by exactly 0" (and the same for every other bidder) for every bid, scenarios 8 and 12 for every claim. `cd apps/relayer && pnpm test`: 411 passed, 10 sandbox tests skipped. | Sandbox; unit | Docker; Node 24 |
-| C10 | Anyone can verify a sale without trusting the app or us. | Same command as C3. It also recomputes the bid set: "Bid set: [PASS] 1 of 1 bids listed; recomputed 4019e54c… = frozen 4019e54c…". In NEAR mode the result page's **Verified** panel runs the same code in the browser. In judge mode it shows "11 of 11 checks passed" against an unsigned, simulated attestation, labelled simulated. | Testnet; mock | Node 24, testnet RPC; Browser |
+| C10 | Anyone can verify a sale without trusting the app or us. | Same command as C3. It also recomputes the bid set: "Bid set: [PASS] 6 of 6 bids listed; recomputed c2946fae… = frozen c2946fae…". In NEAR mode the result page's **Verified** panel runs the same code in the browser. In judge mode it shows "11 of 11 checks passed" against an unsigned, simulated attestation, labelled simulated. | Testnet; mock | Node 24, testnet RPC; Browser |
 | C11 | A creator can simulate the launch before choosing its parameters. | Open `/create`, scroll to **Simulate this launch**. With the form's defaults and 200 people per crowd, the table shows bot profit 1.58, 3.97, 7.36 and 9.46 USDC at 0.5×, 1×, 2× and 4× demand. `pnpm --filter @fairground/arena test`: 27 passed. | Mock (a model) | Browser; Node 24 |
 | C12 | An AI agent can bid through MCP, within a budget the user set, without seeing the key. | `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts --offline`: 3/3 scenarios, 24/24 checks (handshake, the seven tools, refusals before any network call). Without `--offline`: 13/13 scenarios, 90/90 checks, including a relayed bid, a gasless claim and "no key in any tool answer or server log". | Sandbox | Node 24; Docker for the full test |
 | C13 | The Bot Arena numbers are reproducible. | `pnpm arena` prints the table in section 6 and rewrites `apps/web/src/data/arena-results.json`; `git status` then shows no change to that file. | Model | Node 24 |
@@ -52,13 +65,18 @@ Every claim below says which of these it was checked in.
 | C21 | A creator can start from a meme launch preset and give the token an icon. | Open `/create`. **Start from a preset**: **Pure fair launch** fills 900,000 for sale, floor 0.001 USDC, min raise 100 USDC, deposits 2 to 25 USDC and a 5-minute window; **Pool first** adds a launch pool with 20 % of the raise; **Community burn** sets floor 0.002 USDC and min raise 900 USDC. Name, symbol, icon and description stay as typed; editing a number shows "Custom"; **Undo** restores the values from before the first preset. **Icon**: **Generate** (up to 3 letters or one emoji), **Upload** (shrunk until it fits the contract's 2,048-byte limit) or **None**. Seeded sales show their marks on `/sales` and in the sale and result headers. | Mock | Browser |
 | C22 | After `/create`, the creator gets a launch kit. | On `/create` pick a preset, type a name and symbol, click **Review**, **Connect to create** (the demo wallet), then **Create sale and lock the rules**: the app lands on `/sale/<id>/kit`, "Your launch kit". Or open `/sale/moth/kit` directly (it is public). See bids open, close and reveal times in UTC and in your time zone, **Add the reveal to a calendar**, a countdown image and a link preview with **Download PNG**, three posts for X, each with its length counted the X way ("N of 280") and ending "Simulated sale on Sealround." plus the sale link, a watch link, a QR code (**Download PNG**, **Download SVG**) and "What bidders need". | Mock | Browser |
 | C23 | Share cards: "I'm in" after a bid, "No bot paid less" after a win, a countdown for the creator. None shows a max price or a deposit. | With `pnpm dev` running: `curl -s -o bid.png "http://localhost:3000/api/og/bid?sale=fairt&bid=29&name=Fair+Test&ticker=FAIRT"`, `curl -s -o win.png "http://localhost:3000/api/og/win?sale=thistle&win=2&name=Thistle&ticker=THSL&got=3280000000000000000000&dec=18&price=1000&winners=19&bids=19"` and `curl -s -o countdown.png "http://localhost:3000/api/og/countdown?sale=moth&name=Moth&ticker=MOTH&start=1798761600000&end=1798783200000&floor=1500"` each give a 1200x630 PNG: "I'm in. Sealed bid #29 in $FAIRT"; "No bot paid less. I got 3,280 $THSL at 0.001 USDC each."; "Bids open 00:00 UTC Fri, 1 Jan 2027". Each says "Simulated sale". A bad or missing parameter gives the generic app card, never an error. `curl -s "http://localhost:3000/sale/fairt?bid=29&name=Fair+Test&ticker=FAIRT" \| grep og:image` points at `/api/og/bid`. In the app: bid on `/sale/fairt` (Connect first): **Show you're in** appears under the bid; on the result of a `/judge` run in which your own bid won: **Share your win**. | Mock | Browser, curl |
+| C24 | Each enclave run ran on genuine Intel TDX hardware, checked up to Intel's signature. | Install `outlayer-verify` (OutLayer's verifier, command in [Verify a sale yourself](#verify-a-sale-yourself)), then in `evidence/outlayer`: `for f in */*.json; do outlayer-verify bundle "$f" --offline --short; done`. See six lines `PROVEN task …` (the sale-key and clearing runs of the three testnet sales) and exit 0, with no network. Change the clearing price, a bidder name or one bit of the quote in a bundle and it prints `NOT PROVEN`. | Testnet (offline bundles) | Rust |
 
 Read-only testnet helpers used above (bash; Node 24 has `fetch`):
 
 ```sh
 view() { node -e 'const [a,m,j]=process.argv.slice(1);fetch("https://rpc.testnet.fastnear.com",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"query",params:{request_type:"call_function",finality:"final",account_id:a,method_name:m,args_base64:Buffer.from(j).toString("base64")}})}).then(r=>r.json()).then(r=>console.log(Buffer.from(r.result.result).toString()))' "$1" "$2" "$3"; }
+bidsizes() { node -e 'const s=process.argv[1];fetch("https://rpc.testnet.fastnear.com",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"query",params:{request_type:"call_function",finality:"final",account_id:"sealround.itzbeast.testnet",method_name:"get_bids",args_base64:Buffer.from(JSON.stringify({sale_id:s})).toString("base64")}})}).then(r=>r.json()).then(r=>{for(const b of JSON.parse(Buffer.from(r.result.result))){console.log(b.bidder,Buffer.from(b.payload,"base64").length,"bytes, expected",224+s.length+b.bidder.length)}})' "$1"; }
 keys() { curl -s https://rpc.testnet.fastnear.com -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":{\"request_type\":\"view_access_key_list\",\"finality\":\"final\",\"account_id\":\"$1\"}}"; echo; }
 
+view sealround.itzbeast.testnet get_result '{"sale_id":"nosnipe-11140458"}'  # "status":"settled","clearing_price":"2000",...,"failed_checks":[]
+view sealround.itzbeast.testnet get_fills '{"sale_id":"nosnipe-11140458"}'   # every winner: spent = tokens x 0.002 USDC
+bidsizes nosnipe-11140458                                                      # sniper.itzbeast.testnet 263 bytes, expected 263 (and 5 more)
 view fairground.itzbeast.testnet get_result '{"sale_id":"smoke-11120830"}'   # "status":"settled","clearing_price":"2000",...,"failed_checks":[]
 view smoke-11120830.fairground.itzbeast.testnet ft_total_supply '{}'          # "900000000000000000000"
 keys fairground.itzbeast.testnet                                              # one FullAccess key: this contract was never locked
@@ -216,7 +234,7 @@ So the pool's price is the clearing price, at most one USDC base unit above it i
 - **Lost results.** A step with no result after 600 blocks is given up; the next call reads the exchange (`get_deposits`, then `get_pool_shares` or a page of `get_pools`) before it goes on, so no pool is created twice and no deposit is sent twice. Each callback carries an attempt number, so a late or duplicate result changes nothing.
 - **What Rhea controls.** Rhea's owner and guardians can pause the exchange, freeze a token or change a pool's fee. The contract only guarantees that it never removes the liquidity itself.
 
-Code and tests: `contracts/fairground/src/liquidity.rs`, 22 unit tests (`contracts/fairground/src/tests/liquidity.rs`), 9 sandbox integration tests against Rhea's v1.9.19 wasm (`contracts/tests/src/liquidity.rs`). Full design: [contracts/DESIGN.md](contracts/DESIGN.md) "Launch liquidity". Not yet run on testnet: see the evidence sale in [section 7](#7-testnet-results).
+Code and tests: `contracts/fairground/src/liquidity.rs`, 22 unit tests (`contracts/fairground/src/tests/liquidity.rs`), 9 sandbox integration tests against Rhea's v1.9.19 wasm (`contracts/tests/src/liquidity.rs`). Full design: [contracts/DESIGN.md](contracts/DESIGN.md) "Launch liquidity". On testnet: pools 2970 and 2971, each seeded at its sale's clearing price ([section 7](#7-testnet-results)).
 
 ## 4. What NEAR does here
 
@@ -290,13 +308,29 @@ Launch pool, only for a sale with one:
 ### What you trust
 
 - **OutLayer's TEE** keeps bid prices secret and runs the published job. The job's hash is pinned in the contract at deployment and cannot change; the contract only ever asks OutLayer to run that exact build.
-- **OutLayer's master secret (known privacy risk).** OutLayer's own docs say a DAO full-access key can currently obtain the shared master secret outside an enclave. Whoever holds it could derive a sale's key and read its sealed bids. The contract would still check the clearing math and the payouts, but price privacy would not hold. OutLayer governance today (one account approves enclave measurements, contracts upgraded by key, a closed-source coordinator) is written up in [enclave/README.md](enclave/README.md), section 11.
+- **OutLayer's master secret (known privacy risk).** OutLayer's own docs say a DAO full-access key can currently obtain the shared master secret outside an enclave. Whoever holds it could derive a sale's key and read its sealed bids. The contract would still hold every payout to its public rules (one price, deposits, supply), but price privacy would not hold. OutLayer governance today (one account approves enclave measurements, contracts upgraded by key, a closed-source coordinator) is written up in [enclave/README.md](enclave/README.md), section 11.
 - **OutLayer's liveness.** If its workers stop, sales cannot clear and end in full refunds after their settle timeout.
 - **The deployer.** The contract account's full-access key must be deleted before anyone bids, or its holder could make OutLayer open bids (a deployment invariant, [contracts/DESIGN.md](contracts/DESIGN.md) "Deployment invariants"). Check it with `keys <contract>` ([claims](#claims-and-how-to-check-them), C5). The account that owns the OutLayer project and secret can stop sales from clearing (they then refund) and could change the secret's access condition to admit another build, so bidders trust that account too; any such change is a public NEAR transaction.
 - **Rhea**, only for a sale with a launch pool. Its owner can pause the exchange, freeze a token or change the pool's fee. A paused exchange makes seeding fail until the deadline, after which the pool is abandoned and the tokens unlock.
 - **NEAR Intents 1Click** routes funding through solvers. When 1Click confirms a refund, it goes to the refund address the bidder supplied on the origin chain.
 - **The gas relayer** only pays gas. It cannot move anyone's funds.
 - **The contracts are unaudited.**
+
+### If the enclave is wrong
+
+In TEE mode the contract cannot see the sealed prices, so it cannot recompute the clearing itself. It checks everything it can see ([section 4](#4-what-near-does-here), "Contract-side checks"), and that bounds what a buggy or dishonest result can do:
+
+| A wrong result could | It could not |
+| --- | --- |
+| Pick another single price between the floor and the ceiling | Charge two winners different prices (`spent_equals_tokens_times_price_<i>`) |
+| Fill a bid above its sealed maximum price, or charge more than its sealed maximum spend, as long as it stays within that bid's public deposit | Take more than a bid's deposit (`spent_within_deposit_<i>`) |
+| Leave out a valid bid (zero fill) or void an honest one (1 % penalty) | Sell more than the supply, use another bid set or sale key, or fill a voided bid |
+
+What covers the gap:
+
+- **Which code ran.** The sealer is open source, rebuilt reproducibly (`scriptsuild-enclave.ps1 -Verify` prints `verify: MATCH`) and pinned by hash in the contract; the attestation shows that build ran on approved TDX hardware (C3), up to Intel's signature (C24).
+- **No enclave at all.** Commit-reveal mode clears entirely on chain with `clear_onchain` ([section 4](#4-what-near-does-here)). Bids become public at the reveal: that is the price of not trusting the enclave.
+- **No answer.** If the enclave never answers, anyone switches the sale to refunds after its settle timeout and every deposit comes back (C6).
 
 ### Verify a sale yourself
 
@@ -321,9 +355,20 @@ For each enclave run of the sale (the sale key at `create_sale`, the clearing at
 
 Then it lists every bid (`get_bids`), recomputes the bid-set hash chain and compares it with the hash the contract froze at close. On the result page, "Check any account" finds a bidder's bid in that set ("bid #k of N, counted").
 
-Not checked here: the quote's signature chain up to Intel. The panel and the command link OutLayer's verifier for that step. OutLayer's attestation endpoints take no verifier nonce ([contracts/DESIGN.md](contracts/DESIGN.md) "Spec deviations" 1), so each run is tied to the sale by its hashes, and its block and time are shown.
+The quote's signature chain up to Intel is not checked by `verify-sale` or the panel; OutLayer's own open-source verifier, `outlayer-verify`, checks it. Every OutLayer run of the testnet sales in section 7 passes it, and its proof bundles are in [evidence/](evidence/README.md):
 
-By mode: on testnet everything above is real (16 of 16 for `smoke-11120830`, section 7). On a local sandbox no attestation service exists, so both runs report "no OutLayer service" and only the bid set is checked. In judge mode the panel shows the same rows against an unsigned, simulated attestation, labelled simulated; the sha256 values are real hashes of the simulated request and answer. `enclave/deploy/Verify-Attestation.ps1` is the PowerShell original of these checks.
+```sh
+cargo install --git https://github.com/out-layer/outlayer-verify --rev 90c27d9d4fc843194ddc6f8ebaafa4eb320c3bb6 --locked outlayer-verify
+cd evidence/outlayer
+for f in */*.json; do outlayer-verify bundle "$f" --offline --short; done   # six lines "PROVEN task ...", exit 0, no network needed
+outlayer-verify tx 8vjEzwQFzKjZvAXB36G6Ps2MDcyEKkrSAAPbjUFXkqrK --network testnet --api https://testnet-api.outlayer.ai   # one run, online
+```
+
+Each run's verdict reads "PROVEN  every check passed: this input produced this output, inside genuine Intel TDX hardware, running code approved on chain.", with "Intel signature chain valid, TCB UpToDate". `outlayer-verify` does not know which contract asked for the run or which build our contract pins; `verify-sale` checks those, so the two are used together. Offline mode takes the chain's saved answer on the measurements as recorded; the online command re-reads it. Details and limits: [evidence/README.md](evidence/README.md).
+
+The panel and the command also link OutLayer's web verifier for each run. OutLayer's attestation endpoints take no verifier nonce ([contracts/DESIGN.md](contracts/DESIGN.md) "Spec deviations" 1), so each run is tied to the sale by its hashes, and its block and time are shown.
+
+By mode: on testnet everything above is real (16 of 16 for each sale in section 7). On a local sandbox no attestation service exists, so both runs report "no OutLayer service" and only the bid set is checked. In judge mode the panel shows the same rows against an unsigned, simulated attestation, labelled simulated; the sha256 values are real hashes of the simulated request and answer. `enclave/deploy/Verify-Attestation.ps1` is the PowerShell original of these checks.
 
 ### Pinned hashes
 
@@ -377,7 +422,59 @@ The bots' profit is not always zero here, and the page says why. With the form's
 
 ## 7. Testnet results
 
-Two contract builds are involved. The smoke sale ran on the build before launch liquidity; the evidence sale runs on the current build (`e93c4275…a941`). Placeholders in angle brackets are filled by the owner from `powershell -File enclave\deploy\8-evidence-sale.ps1 -Phase Report`, which prints this section's evidence as Markdown.
+Every sale below ran on NEAR testnet against OutLayer's testnet TDX workers and Rhea's testnet exchange. The USDC is a test token (`usdc.fakes.testnet`). The bidders are accounts the project owner created and funded (`<name>.itzbeast.testnet`), driven by the live bot (`pnpm --filter web live-bot`) and by `enclave/deploy/8-evidence-sale.ps1`; none of them is an outside user. Every row links its transaction on NearBlocks, and `verify-sale` re-checks each sale with no key. `evidence/sales.json` lists every sale; the [Live testnet](.github/workflows/live-testnet.yml) workflow re-checks each one every 6 hours (access keys, code hash, `verify-sale`, and `outlayer-verify` online), and [Check](.github/workflows/check.yml) re-checks the six Intel proof bundles offline on every push.
+
+| Sale | Contract | Contract locked when it ran | Bids | Clearing price | Pool |
+| --- | --- | --- | ---: | --- | --- |
+| `nosnipe-11140458` | `sealround.itzbeast.testnet` (current build) | No | 6 (1 voided) | 0.002 USDC (floor 0.001) | 2971 at 0.002 |
+| `nosnipe-11140429` | `sealround.itzbeast.testnet` (current build) | No | 2 | 0.001 USDC (the floor) | 2970 at 0.001 |
+| `smoke-11120830` | `fairground.itzbeast.testnet` (older build) | No, never | 1 | 0.002 USDC (the floor) | none (that build has no pool) |
+
+**Before the lock.** These three sales ran while the contract account still had its deployer's full-access key. [contracts/DESIGN.md](contracts/DESIGN.md) "Deployment invariants" says why that matters: until the key is deleted, its holder could have made OutLayer open bids early. So these sales show that the mechanism works on testnet (sealing, the enclave, one price, the checks, the pool, the claims); they do not show the no-admin-key claim. Sales run after the key is deleted are listed above them as they settle.
+
+### Contract `sealround.itzbeast.testnet`
+
+- Created by [3nXi12Ht…](https://testnet.nearblocks.io/txns/3nXi12Htah6CGzNGZ1gBc9zE7yLYBniBa1897aNHpX3k) (04:25:29 UTC, 14 Nov 2026); deployed and initialised by [Firr89zr…](https://testnet.nearblocks.io/txns/Firr89zrFFW3BpV1Uw6GNxdCAtx929tBGcXJ66UApgxs) (`DEPLOY_CONTRACT` and `new`, 04:26:14 UTC), with `dex: ref-finance-101.testnet`.
+- Code hash `GhTHg5s7c97X8gALyghMchc8o51AnjYD4qDeStHPvMM2`, which is base58 for the pinned `e93c4275…a941` (`contracts/res/fairground.wasm`). Check: `curl -s https://rpc.testnet.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_account","finality":"final","account_id":"sealround.itzbeast.testnet"}}'` prints `"code_hash":"GhTHg5s7c97X8gALyghMchc8o51AnjYD4qDeStHPvMM2"`.
+- Access keys: `keys sealround.itzbeast.testnet` ([claims](#claims-and-how-to-check-them)).
+
+### Sale `nosnipe-11140458` (14 Nov 2026)
+
+A meme token `NOSNIPE`: 10,000 for sale, floor 0.001 USDC, 20 % of the raise to a launch pool, a 10-minute window (05:04:21 to 05:14:21 UTC). A sniper bot bid as soon as the sale opened, three people bid two minutes later, a copycat replayed one person's sealed bid under its own account, and one person bid in the last minute.
+
+| Step | Transaction | What happened |
+| --- | --- | --- |
+| `create_sale` | [D94S8AmX…](https://testnet.nearblocks.io/txns/D94S8AmXhyY2rNJ4aoMtEzEqG3DDwAqsCs3UknNpwuj4) | The enclave made the sale key: OutLayer request 42637, attestation #95200 ([record](https://testnet-api.outlayer.ai/attestations/by-tx/D94S8AmXhyY2rNJ4aoMtEzEqG3DDwAqsCs3UknNpwuj4)) |
+| Sniper bot's bid | [4XA47Kqc…](https://testnet.nearblocks.io/txns/4XA47KqcjkkXfKW8TeUiqhoow7N5DuACx1Yx4aimt8tC) | 3.6 s after the open, the first bid of the sale |
+| People's bids | [HGnXNkLM…](https://testnet.nearblocks.io/txns/HGnXNkLMu2fL99T3eAuMeddxke4SQeHBVT1JKFYE3EdD), [69ubFzMq…](https://testnet.nearblocks.io/txns/69ubFzMqkiZmXYhkUWwB8yNhyYiTt2ukkEjtwBQVuGsy), [H2PMMUBi…](https://testnet.nearblocks.io/txns/H2PMMUBisPq85jciE3CiRcSFuqrxWTY2pqjnwCetQxr5) | ana +108.5 s, ravi +115.7 s, mei +123.0 s |
+| Copycat bid | [FJZMbbdK…](https://testnet.nearblocks.io/txns/FJZMbbdKYRUaoSZbuAmCqU8NNgQX4t2pRA8BYPRfPGZL) | +130.3 s: ana's ciphertext replayed by `copy.itzbeast.testnet`. The enclave sees a sealed bid that names another bidder and voids it: refund 4.95 USDC, 1 % penalty 0.05 USDC |
+| Late bid | [BcqstmuB…](https://testnet.nearblocks.io/txns/BcqstmuBZae2Z4SSm8fuT4gwbx1mbuhKRCBNgK7FMbD7) | late +559.4 s, 41 s before the close |
+| `close_sale` | [8vjEzwQF…](https://testnet.nearblocks.io/txns/8vjEzwQFzKjZvAXB36G6Ps2MDcyEKkrSAAPbjUFXkqrK) | The enclave opened the six bids and cleared the sale: OutLayer request 42704, attestation #95341 ([record](https://testnet-api.outlayer.ai/attestations/by-tx/8vjEzwQFzKjZvAXB36G6Ps2MDcyEKkrSAAPbjUFXkqrK)). Settled at 0.002 USDC per token; 20 USDC raised; 5 valid bids, 1 voided; `failed_checks: []` |
+| `seed_liquidity` | [2BP1h4KH…](https://testnet.nearblocks.io/txns/2BP1h4KH4LyJpniTAnBDojrNu9qUDXEpbLxetZDyrtJA) | Pool 2971 on `ref-finance-101.testnet`: 4 USDC and 2,000 NOSNIPE, so 0.002 USDC per token, the clearing price. All LP shares (10^24) belong to `sealround.itzbeast.testnet` |
+| `claim_proceeds` | [BPuD9iy9…](https://testnet.nearblocks.io/txns/BPuD9iy9cPXCz8iuWnAUMsQmfwkESozLd3wm5d1CqHJH) | The creator's raise less the pool's USDC. Sold out, so nothing burned |
+
+What each bidder got (`get_fills`):
+
+| Bidder | Bid placed | Tokens | Paid (USDC) | Refund (USDC) | Penalty |
+| --- | --- | ---: | ---: | ---: | ---: |
+| sniper (bot) | +3.6 s | 2,500 | 5 | 0 | 0 |
+| ana | +108.5 s | 2,500 | 5 | 1 | 0 |
+| ravi | +115.7 s | 2,500 | 5 | 0 | 0 |
+| mei | +123.0 s | 0 | 0 | 3 | 0 |
+| copy (copycat) | +130.3 s | 0 | 0 | 4.95 | 0.05 |
+| late | +559.4 s | 2,500 | 5 | 1 | 0 |
+
+The bot that bid first and the person who bid last each paid 5 USDC for 2,500 tokens: 0.002 USDC per token, the same as every winner. mei did not win and got the whole 3 USDC deposit back.
+
+```sh
+pnpm --filter web verify-sale --contract sealround.itzbeast.testnet --sale nosnipe-11140458
+```
+
+Output (14 Nov 2026): both runs found by scanning the blocks the contract recorded (`block_scan`); 8 of 8 checks pass for the sale-key run (attestation #95200) and 8 of 8 for the clearing run (#95341); "Bid set: [PASS] 6 of 6 bids listed; recomputed c2946fae… = frozen c2946fae…"; "Every check passed."
+
+### Sale `nosnipe-11140429` (14 Nov 2026)
+
+The same terms with two bidders, 04:35:03 to 04:45:03 UTC: undersubscribed, so it settled at the 0.001 floor. ana (+396.2 s) and the sniper bot (+403.1 s) each got 5,000 tokens for 5 USDC. [create](https://testnet.nearblocks.io/txns/7srGSogu9337s5WiUzwYEza4djr2W5cAVZr8CfPVG6Ty), [close](https://testnet.nearblocks.io/txns/9ZdpEuQp9z6CTQGueQY4JtvhLG9qPUDUiKbmaXgMDeiQ), [seed](https://testnet.nearblocks.io/txns/Ge5wL5cKZU1R4hBtUHGfAqkFVkcby7r3EwTJAfeVLFA7) (pool 2970: 2 USDC and 2,000 NOSNIPE at 0.001), [claim_proceeds](https://testnet.nearblocks.io/txns/BGyL5bpj7u8Hc4BaoCjnkbGNyAJcXoc6hv95hDSFBkP2). The pool took the reserve the creator set aside for it, so no token was burned here either. `verify-sale` passes every check, bid set 2 of 2.
 
 ### Smoke sale `smoke-11120830` (12 Nov 2026, older contract build)
 
@@ -402,27 +499,6 @@ pnpm --filter web verify-sale --contract fairground.itzbeast.testnet --sale smok
 ```
 
 Output: both runs found through OutLayer's job list; 8 of 8 checks pass for the sale key run and 8 of 8 for the clearing run; "Bid set: [PASS] 1 of 1 bids listed; recomputed 4019e54cc1dc35323be5145d0238dd930c6ccf6715f82038f5395df07d055608 = frozen 4019e54cc1dc35323be5145d0238dd930c6ccf6715f82038f5395df07d055608"; "Every check passed." If it times out while searching for a transaction, run it again: the public testnet RPC is sometimes slow.
-
-### Evidence sale (current contract, pending)
-
-Planned by `enclave/deploy/8-evidence-sale.ps1`: a meme token (`NOSNIPE`, 10,000 for sale, floor 0.001 USDC) with a launch pool (20 % of the raise). A sniper bot bids in the first block after the open, three people bid, a copycat replays one sealed bid, one person bids in the last two minutes; the enclave clears it, anyone seeds the pool, everyone claims. The script's plan expects a clearing price of 0.002 USDC; the real numbers go below.
-
-| Item | Result |
-| --- | --- |
-| Contract (code hash must be `GhTHg5s7c97X8gALyghMchc8o51AnjYD4qDeStHPvMM2`) | `<link: sealround.itzbeast.testnet>` |
-| Contract locked: `keys sealround.itzbeast.testnet` prints `"keys":[]` | `<link: delete-key transaction>` |
-| Sale id and bid window | `<to be filled>` |
-| Sniper bot bid at the open, and the second it landed | `<link>` |
-| Copycat bid: voided, 1 % penalty | `<link>` |
-| Late bid by a person | `<link>` |
-| `close_sale` and the clearing attestation | `<link>` |
-| Clearing price; what the bot and the late person each paid per token | `<to be filled>` |
-| Pool seeded on Rhea: pool id, amounts, pool price, LP shares held by the contract | `<link>` |
-| Claims and `claim_proceeds` (with the burn) | `<link>` |
-| `verify-sale` output | `<to be filled>` |
-| Result page with the Verified panel | `<testnet app link>/sale/<sale id>/result` |
-
-A capped mainnet pilot is planned in [LAUNCH.md](LAUNCH.md) (10 USDC maximum deposit per account, at most 50 bids). It has not run: `<to be filled if it runs>`.
 
 ## 8. Run it locally
 

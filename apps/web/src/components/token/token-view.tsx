@@ -7,6 +7,7 @@ import { BurnLine } from "@/components/burn/burn-line";
 import { effectiveFills, failText } from "@/components/result/compute";
 import { SupplyStory } from "@/components/result/supply-panel";
 import { buildTimeline } from "@/components/result/timeline";
+import { useTokenSupply } from "@/components/result/use-token-supply";
 import { SaleNotFound } from "@/components/sale/sale-page";
 import { SaleStatusBadge } from "@/components/ui/badge";
 import { Countdown, SimulatedNote } from "@/components/ui/bits";
@@ -15,6 +16,7 @@ import { Empty } from "@/components/ui/panel";
 import { Reveal } from "@/components/visual/reveal";
 import { isNearMode } from "@/lib/config";
 import { DocumentTitle, useBids, useResult, useSale } from "@/lib/hooks";
+import { supplyFigure } from "@/lib/near/token-supply";
 import type { Sale, SaleResult } from "@/lib/types";
 import { holdersOf, tokenFigures } from "./figures";
 import { LaunchPanel } from "./launch-panel";
@@ -142,7 +144,12 @@ function TokenHome({ sale, result }: { sale: Sale; result: SaleResult }) {
   // Stable while the result is unchanged, so the timeline does not redo work.
   const fills = useMemo(() => effectiveFills(result), [result]);
   const holders = holdersOf(fills);
-  const figures = useMemo(() => tokenFigures(sale, result, holders), [sale, result, holders]);
+  // On NEAR the supply now is the token's own ft_total_supply, holders' burns included.
+  const supplyNow = useTokenSupply(sale).data;
+  const figures = useMemo(() => {
+    const f = tokenFigures(sale, result, holders);
+    return { ...f, supply: supplyFigure(f.supply, supplyNow) };
+  }, [sale, result, holders, supplyNow]);
   // Public bids, only for when each landed (the headline). Never their prices.
   const bids = useBids(sale.id);
   const timeline = useMemo(

@@ -1,0 +1,28 @@
+{
+  "network": "testnet",
+  "rpc": "https://rpc.testnet.fastnear.com",
+  "pinnedCodeHash": "GhTHg5s7c97X8gALyghMchc8o51AnjYD4qDeStHPvMM2",
+  "sales": [
+    {
+      "contract": "fairground.itzbeast.testnet",
+      "sale": "smoke-11120830",
+      "mode": "tee",
+      "afterLock": false,
+      "note": "First smoke sale on an older contract build. That contract was never locked."
+    },
+    {
+      "contract": "sealround.itzbeast.testnet",
+      "sale": "nosnipe-11140429",
+      "mode": "tee",
+      "afterLock": false,
+      "note": "Two bidders, settled at the 0.001 floor, pool 2970. Ran before the contract key was deleted."
+    },
+    {
+      "contract": "sealround.itzbeast.testnet",
+      "sale": "nosnipe-11140458",
+      "mode": "tee",
+      "afterLock": false,
+      "note": "Six bids: sniper 3.6 s after open, copycat voided, settled at 0.002, pool 2971. Ran before the contract key was deleted."
+    }
+  ]
+}

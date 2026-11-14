@@ -1,0 +1,497 @@
+# A scheduled watch on the live testnet evidence in evidence/sales.json.
+#
+# For every sale it runs apps/web/scripts/verify-sale.ts: the result page's
+# Verified panel checks (OutLayer attestation of the sale key run and the
+# clearing run, enclave measurements, request origin) and the frozen bid set,
+# all read from chain and OutLayer's public API.
+#
+# For every contract it reads the access keys and the deployed code hash. A
+# contract that holds a sale with "afterLock": true must have no access keys
+# and must run the pinned code hash (sales.json "pinnedCodeHash"); for any
+# other contract both are only reported. fairground.itzbeast.testnet runs an
+# older build on purpose, and none of its sales ran after a lock.
+#
+# For every OutLayer run in evidence/outlayer/manifest.json it runs OutLayer's
+# own verifier online (outlayer-verify tx): the TDX quote's signature chain up
+# to Intel, and whether the chain still approves the enclave measurements.
+#
+# Read-only: no keys, no secrets, no transactions. The job summary has one row
+# per sale, per contract and per OutLayer run.
+name: Live testnet
+
+on:
+  schedule:
+    # Every 6 hours at minute 37 (01:37, 07:37, 13:37 and 19:37 UTC). An odd
+    # minute stays clear of the top-of-hour rush on GitHub's scheduler.
+    - cron: "37 1,7,13,19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-testnet
+  cancel-in-progress: false
+
+env:
+  SALES_FILE: evidence/sales.json
+  # Tried in order after the RPC named in sales.json when the network is
+  # testnet. FastNear answers 429 to busy shared IPs, which CI runners are.
+  TESTNET_FALLBACK_RPCS: https://near-testnet.drpc.org https://rpc.testnet.near.org
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  live:
+    name: Verify sales, contracts and OutLayer runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # No `version` input: the action reads "packageManager" from package.json.
+      - uses: pnpm/action-setup@v6
+        with:
+          cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: Install packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Read evidence/sales.json
+        run: |
+          out="$RUNNER_TEMP/live"
+          mkdir -p "$out"
+          : > "$out/failures.txt"
+          if ! jq -e '
+              (.network == "testnet" or .network == "mainnet")
+              and (.rpc | type == "string" and startswith("https://"))
+              and (.pinnedCodeHash | type == "string" and length > 0)
+              and (.sales | type == "array" and length > 0)
+              and all(.sales[];
+                (.contract | type == "string" and test("^([a-z0-9]+[-_])*[a-z0-9]+(\\.([a-z0-9]+[-_])*[a-z0-9]+)*$"))
+                and (.sale | type == "string" and length > 0)
+                and (.afterLock | type == "boolean"))
+            ' "$SALES_FILE" > /dev/null; then
+            echo "::error file=$SALES_FILE::expected {network, rpc, pinnedCodeHash, sales: [{contract, sale, mode, afterLock, note}]}"
+            echo "$SALES_FILE does not have the expected shape" >> "$out/failures.txt"
+            exit 1
+          fi
+          network=$(jq -r '.network' "$SALES_FILE")
+          primary=$(jq -r '.rpc' "$SALES_FILE")
+          fallbacks=""
+          if [ "$network" = testnet ]; then fallbacks=$TESTNET_FALLBACK_RPCS; fi
+          {
+            echo "NETWORK=$network"
+            echo "PRIMARY_RPC=$primary"
+            echo "PINNED_CODE_HASH=$(jq -r '.pinnedCodeHash' "$SALES_FILE")"
+            # The primary RPC first, then the fallbacks, without repeats.
+            echo "RPC_LIST=$(printf '%s\n' "$primary" $fallbacks | awk 'NF && !seen[$0]++' | tr '\n' ' ')"
+            if [ "$network" = testnet ]; then
+              echo "EXPLORER=https://testnet.nearblocks.io"
+            else
+              echo "EXPLORER=https://nearblocks.io"
+            fi
+          } >> "$GITHUB_ENV"
+          jq -r '"\(.sales | length) sales on \([.sales[].contract] | unique | length) contracts"' "$SALES_FILE"
+
+      - name: Check the contracts (access keys, code hash)
+        run: |
+          out="$RUNNER_TEMP/live"
+          : > "$out/contracts.md"
+
+          # One table cell: a single line, with pipes escaped.
+          cell() { printf '%s' "$1" | tr '\n\r' '  ' | sed 's/|/\\|/g'; }
+
+          # query <params>: one JSON-RPC "query". Sets ANSWER (the result) and
+          # ANSWERED_BY. Moves on to the next RPC when one is unreachable or
+          # rate limited; a node's definite error (UNKNOWN_ACCOUNT and the
+          # like) is final and goes to ANSWER_ERROR.
+          query() {
+            local body url try
+            ANSWER=""
+            ANSWERED_BY=""
+            ANSWER_ERROR="no RPC answered"
+            for url in $RPC_LIST; do
+              for try in 1 2; do
+                body=$(jq -nc --argjson p "$1" '{jsonrpc: "2.0", id: "live-testnet", method: "query", params: $p}' |
+                  curl -sS --max-time 20 -H 'content-type: application/json' --data-binary @- "$url" 2>&1) || true
+                if jq -e '.result | type == "object"' <<< "$body" > /dev/null 2>&1; then
+                  ANSWER=$(jq -c '.result' <<< "$body")
+                  ANSWERED_BY=$url
+                  return 0
+                fi
+                if jq -e '.error.cause.name | type == "string"' <<< "$body" > /dev/null 2>&1; then
+                  ANSWER_ERROR=$(jq -r '.error.cause.name' <<< "$body")
+                  ANSWERED_BY=$url
+                  return 1
+                fi
+                ANSWER_ERROR="$url: $(printf '%s' "$body" | head -c 160)"
+                echo "No answer from $url (try $try): $(cell "$(printf '%s' "$body" | head -c 160)")"
+                sleep 5
+              done
+            done
+            return 1
+          }
+
+          mapfile -t contracts < <(jq -r '[.sales[].contract] | unique | .[]' "$SALES_FILE")
+          for contract in "${contracts[@]}"; do
+            lock=$(jq -r --arg c "$contract" 'any(.sales[]; .contract == $c and .afterLock == true)' "$SALES_FILE")
+            result=PASS
+            reasons=()
+            sources=()
+
+            keys=""
+            if query "$(jq -nc --arg a "$contract" '{request_type: "view_access_key_list", finality: "final", account_id: $a}')"; then
+              keys=$(jq '.keys | length' <<< "$ANSWER")
+              full=$(jq '[.keys[] | select(.access_key.permission == "FullAccess")] | length' <<< "$ANSWER")
+              sources+=("$ANSWERED_BY")
+              if [ "$keys" -eq 0 ]; then
+                keys_text="none (locked)"
+              else
+                keys_text="$keys ($full full access)"
+              fi
+              if [ "$lock" = true ] && [ "$keys" -gt 0 ]; then
+                result=FAIL
+                reasons+=("$keys access key(s) on a contract that holds a sale run after the lock")
+              fi
+            else
+              keys_text="not read: $ANSWER_ERROR"
+              result=FAIL
+              reasons+=("access keys not read ($ANSWER_ERROR)")
+            fi
+
+            code=""
+            if query "$(jq -nc --arg a "$contract" '{request_type: "view_account", finality: "final", account_id: $a}')"; then
+              code=$(jq -r '.code_hash' <<< "$ANSWER")
+              block=$(jq -r '.block_height' <<< "$ANSWER")
+              sources+=("$ANSWERED_BY")
+              if [ "$code" = "$PINNED_CODE_HASH" ]; then
+                code_text="pinned build \`$code\`"
+              elif [ "$lock" = true ]; then
+                code_text="\`$code\`, not the pinned build"
+                result=FAIL
+                reasons+=("code hash $code is not the pinned $PINNED_CODE_HASH")
+              elif [ "$code" = 11111111111111111111111111111111 ]; then
+                code_text="no contract deployed (reported only)"
+              else
+                code_text="other build \`$code\` (reported only: no sale here ran after a lock)"
+              fi
+              code_text="$code_text at block $block"
+            else
+              code_text="not read: $ANSWER_ERROR"
+              result=FAIL
+              reasons+=("code hash not read ($ANSWER_ERROR)")
+            fi
+
+            if [ "$lock" = true ]; then lock_text="yes"; else lock_text="no"; fi
+            detail=$(printf '%s; ' "${reasons[@]}")
+            detail=${detail%; }
+            answered=$(printf '%s\n' "${sources[@]}" | awk 'NF && !seen[$0]++' | sed 's#https://##' | paste -sd, -)
+            echo "$contract: $result, keys $keys_text, code $code_text${detail:+, $detail}"
+            echo "| [$contract]($EXPLORER/address/$contract) | $lock_text | $(cell "$keys_text") | $(cell "$code_text") | **$result**$( [ -n "$detail" ] && printf '%s' ": $(cell "$detail")") | $(cell "$answered") |" >> "$out/contracts.md"
+            if [ "$result" != PASS ]; then
+              echo "::error::$contract: $detail"
+              echo "contract $contract: $detail" >> "$out/failures.txt"
+            fi
+          done
+          touch "$out/contracts.done"
+
+      # verify-sale exits 0 when every check that ran passed, 1 when one failed
+      # or could not run, 2 on bad options. `pnpm --dir apps/web` keeps that
+      # code; `pnpm --filter web` reports any failure as 1. A failed attempt is
+      # retried with the next RPC in RPC_LIST, since a rate-limited RPC or a slow
+      # OutLayer API also gives exit 1.
+      #
+      # verify-sale also checks that the sale contract runs the pinned build
+      # and that nobody holds a key to it (contract_keys, contract_code). For a
+      # sale with "afterLock": false those two may fail: the contract was not
+      # locked yet, or (fairground.itzbeast.testnet) runs an older build on
+      # purpose. When they are the only failures, the sale passes with a note,
+      # and the contracts table reports the keys and the code. Any other failed
+      # check fails the sale. The ids come from the last line of the text
+      # output ("Some checks failed or could not run: <ids>.").
+      #
+      # To switch to the JSON output: add --json (keep --silent so stdout is
+      # only the JSON), then read `.ok`, `.failed` (the ids) and `.checks[]`
+      # ({id, ok, detail}) with jq instead of the text, for example
+      #   jq -r '.failed[] | sub(":.*$"; "")' "$log"      # in place of failed_ids
+      #   jq '[.checks[] | select(.ok == true)] | length'  # in place of the [PASS] count
+      - name: Verify each sale
+        run: |
+          out="$RUNNER_TEMP/live"
+          : > "$out/sales.md"
+          cell() { printf '%s' "$1" | tr '\n\r' '  ' | sed 's/|/\\|/g'; }
+
+          # Checks that only hold once the contract is locked.
+          LOCK_CHECKS=" contract_keys contract_code "
+          # failed_ids <log>: the failed check ids from verify-sale's last line,
+          # one per line, without a ":subject" suffix. Empty when none are listed.
+          failed_ids() {
+            sed -n 's/^Some checks failed or could not run: \(.*\)\.$/\1/p' "$1" | tail -n 1 |
+              tr ',' '\n' | sed -e 's/^ *//' -e 's/:.*$//' | awk 'NF'
+          }
+          # only_lock_checks <log>: true when ids are listed and all are lock checks.
+          only_lock_checks() {
+            local ids id
+            ids=$(failed_ids "$1")
+            [ -n "$ids" ] || return 1
+            while IFS= read -r id; do
+              [[ "$LOCK_CHECKS" == *" $id "* ]] || return 1
+            done <<< "$ids"
+          }
+
+          count=$(jq '.sales | length' "$SALES_FILE")
+          for ((i = 0; i < count; i++)); do
+            entry=$(jq -c --argjson i "$i" '.sales[$i]' "$SALES_FILE")
+            contract=$(jq -r '.contract' <<< "$entry")
+            sale=$(jq -r '.sale' <<< "$entry")
+            mode=$(jq -r '.mode // "?"' <<< "$entry")
+            after=$(jq -r 'if .afterLock then "yes" else "no" end' <<< "$entry")
+            note=$(jq -r '.note // ""' <<< "$entry")
+            log="$out/sale-$i.log"
+
+            status=1
+            attempt=0
+            used=""
+            for rpc in $RPC_LIST; do
+              attempt=$((attempt + 1))
+              if [ "$attempt" -gt 1 ]; then
+                echo "Retrying $sale in 15 s with $rpc"
+                sleep 15
+              fi
+              echo "::group::verify-sale $sale on $contract (attempt $attempt, $rpc)"
+              status=0
+              timeout --kill-after=10 300 \
+                pnpm --silent --dir apps/web verify-sale --network "$NETWORK" --rpc "$rpc" --contract "$contract" --sale "$sale" \
+                > "$log" 2>&1 || status=$?
+              cat "$log"
+              echo "::endgroup::"
+              used=$rpc
+              if [ "$status" -eq 0 ] || [ "$status" -eq 2 ]; then break; fi
+              # Only lock checks failed: an answer from the chain, not a flaky read.
+              if [ "$status" -eq 1 ] && only_lock_checks "$log"; then break; fi
+            done
+
+            # Counts from the text output (see the comment above for --json).
+            checks=$(grep -cE '^  \[(PASS|FAIL|NOT RUN)\]' "$log" || true)
+            passed=$(grep -cE '^  \[PASS\]' "$log" || true)
+            missing=$(grep -c 'NOT CHECKED' "$log" || true)
+            bidset=$(grep -oE '^Bid set: (\[[A-Z]+\]|not frozen yet)' "$log" | head -n 1 | sed -e 's/^Bid set: //' -e 's/\[\(.*\)\]/\1/' || true)
+            ids=$(failed_ids "$log" | paste -sd, - | sed 's/,/, /g')
+            detail="$passed of $checks checks pass"
+            if [ "$missing" -gt 0 ]; then detail="$detail, $missing run(s) not found"; fi
+            detail="$detail; bid set ${bidset:-not read}"
+            if [ "$attempt" -gt 1 ]; then detail="$detail; attempt $attempt via ${used#https://}"; fi
+
+            case "$status" in
+              0) result=PASS ;;
+              1) result=FAIL ;;
+              2) result="ERROR (bad options)" ;;
+              124) result="ERROR (timed out)" ;;
+              *) result="ERROR (exit $status)" ;;
+            esac
+            if [ "$status" -eq 1 ] && [ "$after" = no ] && only_lock_checks "$log"; then
+              result="PASS (before lock)"
+              detail="$detail; expected before the lock, reported only: $ids (see Contracts)"
+              echo "::notice::$sale on $contract: $ids failed, expected for a sale run before the lock"
+              status=0
+            elif [ -n "$ids" ]; then
+              detail="$detail; failed: $ids"
+            fi
+            if [ "$status" -ne 0 ]; then
+              last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1)
+              detail="$detail; last line: $last"
+              echo "::error::$sale on $contract: verify-sale exit $status"
+              echo "sale $sale on $contract: verify-sale exit $status ($last)" >> "$out/failures.txt"
+            fi
+            echo "$sale on $contract: $result, $detail"
+            echo "| \`$(cell "$sale")\` | $contract | $(cell "$mode") | $after | **$result** | $(cell "$detail") | $(cell "$note") |" >> "$out/sales.md"
+          done
+          touch "$out/sales.done"
+
+      # verify-sale says "Not checked here: the quote's signature chain up to
+      # Intel". OutLayer's own verifier checks it: every run listed in
+      # evidence/outlayer/manifest.json is fetched again from OutLayer's API and
+      # the chain, its TDX quote checked up to Intel's root CA, and its enclave
+      # measurements asked of worker.outlayer.testnet as of today. The tool is
+      # built at the commit in the manifest; the binary is cached by commit
+      # (same cache key as the proofs job in check.yml).
+      - name: Read the verifier commit from evidence/outlayer/manifest.json
+        id: verifier
+        run: |
+          rev=$(jq -r '.tool.commit' evidence/outlayer/manifest.json)
+          if ! [[ "$rev" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error file=evidence/outlayer/manifest.json::tool.commit is not a full commit hash: $rev"
+            exit 1
+          fi
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+
+      - name: Restore outlayer-verify
+        id: verifier-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/outlayer-verify
+          key: outlayer-verify-${{ steps.verifier.outputs.rev }}-${{ runner.os }}-${{ hashFiles('enclave/rust-toolchain.toml') }}
+
+      - name: Install Rust from enclave/rust-toolchain.toml
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
+        run: |
+          channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' enclave/rust-toolchain.toml)
+          if [ -z "$channel" ]; then
+            echo "::error file=enclave/rust-toolchain.toml::no channel found"
+            exit 1
+          fi
+          rustup toolchain install "$channel" --profile minimal --no-self-update
+          rustup default "$channel"
+          rustc --version
+
+      - name: Build outlayer-verify
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
+        env:
+          REV: ${{ steps.verifier.outputs.rev }}
+        run: cargo install --git https://github.com/out-layer/outlayer-verify --rev "$REV" --locked outlayer-verify
+
+      # outlayer-verify exits 0 when every layer passed, 1 when one failed (the
+      # proof is invalid), 2 when it could not complete (UNPROVEN, usually an
+      # RPC or the API did not answer), 3 on a usage error. Exit 2 and timeouts
+      # are retried with the next RPC.
+      # --api is required: the tool's built-in testnet API answers HTTP 410.
+      - name: Re-check each OutLayer run online
+        run: |
+          out="$RUNNER_TEMP/live"
+          : > "$out/outlayer.md"
+          cell() { printf '%s' "$1" | tr '\n\r' '  ' | sed 's/|/\\|/g'; }
+
+          manifest=evidence/outlayer/manifest.json
+          api=$(jq -r '.endpoints.api // "https://testnet-api.outlayer.ai"' "$manifest")
+          archival=$(jq -r '.endpoints.archival_rpc // ""' "$manifest")
+          bin="$HOME/.cargo/bin/outlayer-verify"
+
+          count=$(jq '.runs | length' "$manifest")
+          for ((i = 0; i < count; i++)); do
+            entry=$(jq -c --argjson i "$i" '.runs[$i]' "$manifest")
+            tx=$(jq -r '.transaction' <<< "$entry")
+            sale=$(jq -r '.sale' <<< "$entry")
+            kind=$(jq -r '.run' <<< "$entry")
+            task=$(jq -r '.outlayer_task' <<< "$entry")
+            log="$out/outlayer-$i.log"
+            if ! [[ "$tx" =~ ^[1-9A-HJ-NP-Za-km-z]{43,44}$ ]]; then
+              echo "::error file=$manifest::run $i: not a transaction hash: $tx"
+              echo "OutLayer run $i in the manifest: not a transaction hash" >> "$out/failures.txt"
+              continue
+            fi
+
+            status=1
+            attempt=0
+            used=""
+            for rpc in $RPC_LIST; do
+              attempt=$((attempt + 1))
+              if [ "$attempt" -gt 1 ]; then
+                echo "Retrying $tx in 15 s with $rpc"
+                sleep 15
+              fi
+              args=(tx "$tx" --network "$NETWORK" --api "$api" --rpc "$rpc" --no-color)
+              if [ -n "$archival" ]; then args+=(--archival-rpc "$archival"); fi
+              echo "::group::outlayer-verify tx $tx ($sale, $kind; attempt $attempt, $rpc)"
+              status=0
+              timeout --kill-after=10 300 "$bin" "${args[@]}" > "$log" 2>&1 || status=$?
+              cat "$log"
+              echo "::endgroup::"
+              used=$rpc
+              case "$status" in 0 | 1 | 3) break ;; esac
+            done
+
+            verdict=$(grep -m 1 -oE '^  (NOT PROVEN|PROVEN|UNPROVEN|INCOMPLETE)\b' "$log" | sed 's/^ *//' || true)
+            detail="task $task, verdict ${verdict:-none printed}"
+            if [ "$attempt" -gt 1 ]; then detail="$detail; attempt $attempt via ${used#https://}"; fi
+            case "$status" in
+              0) result=PROVEN ;;
+              1) result=FAIL ;;
+              2) result="UNPROVEN (could not complete)" ;;
+              3) result="ERROR (usage)" ;;
+              124) result="ERROR (timed out)" ;;
+              *) result="ERROR (exit $status)" ;;
+            esac
+            if [ "$status" -ne 0 ]; then
+              last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1)
+              detail="$detail; last line: $last"
+              echo "::error::outlayer-verify tx $tx ($sale, $kind): exit $status"
+              echo "OutLayer run $tx ($sale, $kind): outlayer-verify exit $status ($last)" >> "$out/failures.txt"
+            fi
+            echo "$sale $kind $tx: $result, $detail"
+            echo "| \`$(cell "$sale")\` | $(cell "$kind") | [\`${tx:0:8}…\`]($EXPLORER/txns/$tx) | **$result** | $(cell "$detail") |" >> "$out/outlayer.md"
+          done
+          touch "$out/outlayer.done"
+
+      - name: Summary
+        if: always()
+        run: |
+          out="$RUNNER_TEMP/live"
+          mkdir -p "$out"
+          touch "$out/failures.txt"
+          [ -f "$out/contracts.done" ] || echo "the contract checks did not finish" >> "$out/failures.txt"
+          [ -f "$out/sales.done" ] || echo "the sale checks did not finish" >> "$out/failures.txt"
+          [ -f "$out/outlayer.done" ] || echo "the OutLayer run checks did not finish" >> "$out/failures.txt"
+          {
+            echo "## Live ${NETWORK:-testnet} check"
+            echo
+            echo "Sales from \`$SALES_FILE\`. RPCs, tried in this order: ${RPC_LIST:-?}. Pinned contract code hash \`${PINNED_CODE_HASH:-?}\`."
+            echo "Run $(date -u '+%Y-%m-%d %H:%M UTC'), commit ${GITHUB_SHA:0:7}, trigger ${GITHUB_EVENT_NAME:-local}."
+            echo
+            echo "### Sales"
+            echo
+            echo "| Sale | Contract | Mode | After lock | Result | Detail | Note |"
+            echo "| --- | --- | --- | --- | --- | --- | --- |"
+            cat "$out/sales.md" 2> /dev/null || true
+            echo
+            echo "### Contracts"
+            echo
+            echo "| Contract | Holds a sale after lock | Access keys | Code | Result | Answered by |"
+            echo "| --- | --- | --- | --- | --- | --- |"
+            cat "$out/contracts.md" 2> /dev/null || true
+            echo
+            echo "### OutLayer runs, Intel signature chain (outlayer-verify, online)"
+            echo
+            echo "| Sale | Run | Transaction | Result | Detail |"
+            echo "| --- | --- | --- | --- | --- |"
+            cat "$out/outlayer.md" 2> /dev/null || true
+            echo
+            if [ -s "$out/failures.txt" ]; then
+              echo "### Failures"
+              echo
+              sed 's/^/- /' "$out/failures.txt"
+            else
+              echo "Every check passed."
+            fi
+            echo
+            for log in "$out"/sale-*.log; do
+              [ -f "$log" ] || continue
+              echo "<details><summary>verify-sale output: $(head -n 1 "$log" | sed 's/[<>&]//g')</summary>"
+              echo
+              echo '```text'
+              cat "$log"
+              echo '```'
+              echo
+              echo "</details>"
+            done
+            for log in "$out"/outlayer-*.log; do
+              [ -f "$log" ] || continue
+              echo "<details><summary>outlayer-verify output: $(head -n 1 "$log" | sed 's/[<>&]//g')</summary>"
+              echo
+              echo '```text'
+              cat "$log"
+              echo '```'
+              echo
+              echo "</details>"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -s "$out/failures.txt" ]; then
+            cat "$out/failures.txt"
+            exit 1
+          fi

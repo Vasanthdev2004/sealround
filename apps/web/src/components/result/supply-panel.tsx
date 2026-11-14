@@ -10,7 +10,8 @@ import { cn } from "@/lib/cn";
 import { getClient } from "@/lib/client";
 import { isNearMode } from "@/lib/config";
 import { accountUrl, dateTime, shortAccount, tokenFull } from "@/lib/format";
-import { useClientQuery } from "@/lib/hooks";
+import { useClientQuery, type Query } from "@/lib/hooks";
+import { supplyReading, type SupplyReading } from "@/lib/near/token-supply";
 import type { Sale, SaleEvent, SaleResult } from "@/lib/types";
 import {
   poolLeftover,
@@ -21,6 +22,7 @@ import {
   type SupplyLedger,
   type SupplyPartId,
 } from "./supply";
+import { useTokenSupply } from "./use-token-supply";
 
 /*
  * One whole (the supply minted at launch) split into where it ended up. Blue
@@ -57,7 +59,8 @@ const LABEL_MIN_PX = 44;
  * bought, the launch pool, the creator allocation and the burn; the supply
  * after the sale; and the log of the mint and the burn with their
  * transactions. Every amount comes from the views (get_sale, get_result) and
- * the parts add up to the supply at launch in base units.
+ * the parts add up to the supply at launch in base units; on NEAR the supply
+ * now and the burn since launch come from the token (ft_total_supply).
  *
  * `hideNoPool` drops the closing "No Sealround pool" line, for a page that
  * already says so (the token page's trade column).
@@ -451,6 +454,10 @@ function Ledger({ sale, result, ledger: l }: { sale: Sale; result: SaleResult; l
  * The mint and the burn, with their transactions, and the token's supply now.
  * A real contract's views do not hold the burn's transaction unless this
  * browser sent it; the token's explorer page lists its ft_burn event either way.
+ *
+ * On NEAR the supply now is read from the token (ft_total_supply), and so is
+ * every burn since launch, holders' own burns included. The simulated chain
+ * has no token contract, so there both come from the sale's views.
  */
 function SupplyLog({ sale, ledger: l }: { sale: Sale; ledger: SupplyLedger }) {
   const c = sale.config;
@@ -458,6 +465,8 @@ function SupplyLog({ sale, ledger: l }: { sale: Sale; ledger: SupplyLedger }) {
   const sym = c.tokenSymbol;
   const near = isNearMode();
   const events = useClientQuery<SaleEvent[]>(() => getClient().getEvents(sale.id), ["supply-events", sale.id], 10_000);
+  const supplyQ = useTokenSupply(sale);
+  const reading = near && typeof supplyQ.data === "bigint" ? supplyReading(l, supplyQ.data) : null;
   const created = events.data?.find((e) => e.kind === "created" && !e.detail);
   const payouts = (events.data ?? []).filter((e) => e.kind === "claimed" && e.detail === "proceeds_claimed");
   const payout = payouts[0] ?? null; // newest first
@@ -527,23 +536,124 @@ function SupplyLog({ sale, ledger: l }: { sale: Sale; ledger: SupplyLedger }) {
             }
           />
         )}
+        {reading && reading.holderBurned !== null && reading.holderBurned > 0n && (
+          <LogRow
+            what="Burned by holders"
+            amount={`${tokenFull(reading.holderBurned, d)} ${sym}`}
+            detail="Holders burned their own tokens after launch (ft_burn). Read from the token: the burn it shows beyond the sale's own."
+            fallback={<TokenEvents href={tokenPage} event="ft_burn" account={sale.tokenAccount} />}
+          />
+        )}
       </ol>
+      {near ? <ReadSupply sale={sale} ledger={l} query={supplyQ} reading={reading} /> : <DerivedSupply sale={sale} ledger={l} />}
+    </div>
+  );
+}
+
+const SUPPLY_NOTE =
+  "The token has no mint method and any holder may burn their own tokens, so its supply can only fall from here.";
+
+/** The simulated chain: the supply now as the sale's mint and burn leave it. */
+function DerivedSupply({ sale, ledger: l }: { sale: Sale; ledger: SupplyLedger }) {
+  const c = sale.config;
+  return (
+    <div className="mt-3">
+      <p className="flex flex-wrap items-baseline gap-x-1.5 text-small text-muted">
+        Token supply now:
+        {l.supplyNow !== null ? (
+          <span className="num text-fg">
+            {tokenFull(l.supplyNow, c.decimals)} {c.tokenSymbol}
+          </span>
+        ) : (
+          <span>part of the burn may have landed; the views do not say how much.</span>
+        )}
+      </p>
+      <p className="mt-0.5 text-label text-subtle">From the sale&rsquo;s mint and burn. {SUPPLY_NOTE}</p>
+    </div>
+  );
+}
+
+/**
+ * NEAR: the supply now and every burn since launch, read from the token
+ * contract (ft_total_supply). Until the read lands, or when it fails, it says
+ * so and shows what the sale's views imply instead.
+ */
+function ReadSupply({
+  sale,
+  ledger: l,
+  query,
+  reading,
+}: {
+  sale: Sale;
+  ledger: SupplyLedger;
+  query: Query<bigint | null>;
+  reading: SupplyReading | null;
+}) {
+  const c = sale.config;
+  const d = c.decimals;
+  const sym = c.tokenSymbol;
+  const token = shortAccount(sale.tokenAccount, 28);
+  const amount = (v: bigint) => (
+    <span className="num text-fg">
+      {tokenFull(v, d)} {sym}
+    </span>
+  );
+
+  if (!reading) {
+    const failed = !!query.error;
+    return (
       <div className="mt-3">
         <p className="flex flex-wrap items-baseline gap-x-1.5 text-small text-muted">
           Token supply now:
-          {l.supplyNow !== null ? (
-            <span className="num text-fg">
-              {tokenFull(l.supplyNow, d)} {sym}
-            </span>
+          {!failed ? (
+            <span>reading {token}&hellip;</span>
+          ) : l.supplyNow !== null ? (
+            <>
+              {amount(l.supplyNow)}
+              <span>as the sale&rsquo;s views imply</span>
+            </>
           ) : (
             <span>part of the burn may have landed; the views do not say how much.</span>
           )}
         </p>
-        <p className="mt-0.5 text-label text-subtle">
-          From the sale&rsquo;s mint and burn. The token has no mint method and any holder may burn their own tokens, so
-          its supply can only fall from here.
-        </p>
+        {failed && (
+          <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-label text-subtle">
+            <span>Could not read the token&rsquo;s supply just now.</span>
+            <button
+              type="button"
+              onClick={query.refetch}
+              className="text-muted underline decoration-line-strong underline-offset-2 hover:text-fg"
+            >
+              Read again
+            </button>
+          </p>
+        )}
       </div>
+    );
+  }
+
+  return (
+    <div className="mt-3">
+      <dl className="flex flex-col gap-0.5 text-small text-muted">
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
+          <dt>Token supply now:</dt>
+          <dd>{amount(reading.now)}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
+          <dt>Burned since launch:</dt>
+          <dd>{amount(reading.burnedSoFar)}</dd>
+        </div>
+      </dl>
+      {reading.excess > 0n && (
+        <p className="mt-1 flex items-start gap-1.5 text-label text-warn">
+          <TriangleAlert className="mt-px size-3.5 shrink-0" strokeWidth={2} aria-hidden />
+          The token holds {tokenFull(reading.excess, d)} {sym} more than the sale&rsquo;s views allow.
+        </p>
+      )}
+      <p className="mt-0.5 text-label text-subtle">
+        Read from the token contract (ft_total_supply on {token}): the burn is the supply minted at launch less the supply
+        now. {SUPPLY_NOTE}
+      </p>
     </div>
   );
 }
