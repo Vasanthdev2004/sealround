@@ -38,7 +38,7 @@ Every claim below says which of these it was checked in.
 
 ### Claims and how to check them
 
-"Needs" is what you need beyond a clone: **Browser** (nothing to install), **Node 24** (`pnpm install` first), **Rust** (1.97.1, pinned), **Docker** (the sandbox runs in a container; the scripts are written for a Windows host with PowerShell), **testnet RPC** (read-only access to `rpc.testnet.fastnear.com` and `testnet-api.outlayer.ai`). Every command below was run on 13 Nov 2026 on Windows 11 with Node 24.19.0, with the result shown, unless the row says otherwise; the testnet rows were rerun on 14 Nov 2026 against the current contract. Rows C15 to C23 were checked on 13 Nov 2026 against `pnpm dev` at commit `3903896`, in a browser with no stored demo data; rows C26 to C29 on 14 Nov 2026 at `ba69f08` the same way, except the sandbox runs they cite, which Codex ran on 14 Nov 2026. The seeded demo sales (Lantern, Thistle, Driftwood, Ashfall, Kiln, Fair Test, Moth) come out the same in every fresh browser; judge runs and sales you create add to the board, the leaderboard and the burn counter, and "Reset demo data" in the footer starts over.
+"Needs" is what you need beyond a clone: **Browser** (nothing to install), **Node 24** (`pnpm install` first), **Rust** (1.97.1, pinned), **Docker** (the sandbox runs in a container; the scripts are written for a Windows host with PowerShell), **testnet RPC** (read-only access to `rpc.testnet.fastnear.com` and `testnet-api.outlayer.ai`). Every command below was run on 13 Nov 2026 on Windows 11 with Node 24.19.0, with the result shown, unless the row says otherwise; the testnet rows were rerun on 14 Nov 2026 against the current contract. Rows C15 to C23 were checked on 13 Nov 2026 against `pnpm dev` at commit `f847dea`, in a browser with no stored demo data; rows C26 to C29 on 14 Nov 2026 at `9366984` the same way, except the sandbox runs they cite, which Codex ran on 14 Nov 2026. The seeded demo sales (Lantern, Thistle, Driftwood, Ashfall, Kiln, Fair Test, Moth) come out the same in every fresh browser; judge runs and sales you create add to the board, the leaderboard and the burn counter, and "Reset demo data" in the footer starts over.
 
 | # | Claim | How to check: do, then see | Mode | Needs |
 | --- | --- | --- | --- | --- |
@@ -577,7 +577,7 @@ The same terms with two bidders, 04:35:03 to 04:45:03 UTC: undersubscribed, so i
 
 ### Smoke sale `smoke-11120830` (12 Nov 2026, older contract build)
 
-- Contract: [`fairground.itzbeast.testnet`](https://testnet.nearblocks.io/address/fairground.itzbeast.testnet). Its code hash is `bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800`, the `contracts/res/fairground.wasm` committed at `721b00d` (check: `git show 721b00d:contracts/res/fairground.wasm | sha256sum`). That build has no launch pool.
+- Contract: [`fairground.itzbeast.testnet`](https://testnet.nearblocks.io/address/fairground.itzbeast.testnet). Its code hash is `bfc2f80059936d4344aafc136aacfed3b1ce37ace7814bfefde6e88cdc3ea800`, the `contracts/res/fairground.wasm` committed at `39d7ebb` (check: `git show 39d7ebb:contracts/res/fairground.wasm | sha256sum`). That build has no launch pool.
 - **Not locked.** The account still has its deployer's full-access key (`keys fairground.itzbeast.testnet`). This sale proves the TEE path on testnet; it does not prove the no-admin-key claim.
 - One bidder (the project owner), signing directly rather than through the relayer. Token `SMOKE`, 1,000 minted, 600 for sale, floor 0.002 USDC.
 
@@ -644,23 +644,23 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-`pnpm check` (`scripts/check.mjs`) runs the Rust workspace unit tests, the enclave job's native tests, the Vitest suites and TypeScript of `clearing`, `relayer-client`, `relayer` and `arena`, then the web tests, web TypeScript and web ESLint. It prints a pass/fail summary and ends with `13/13 passed`. It passed on Linux x86_64 (12 Nov 2026, Node 24.22.3, from a clean archive of the commit before `c5c60c6` plus `scripts/check.mjs`) and on Windows 11 (13 Nov 2026, commit `c5c60c6`).
+`pnpm check` (`scripts/check.mjs`) runs the Rust workspace unit tests, the enclave job's native tests, the Vitest suites and TypeScript of `clearing`, `relayer-client`, `relayer` and `arena`, then the web tests, web TypeScript and web ESLint. It prints a pass/fail summary and ends with `13/13 passed`. It passed on Linux x86_64 (12 Nov 2026, Node 24.22.3, from a clean archive of the commit before `a186182` plus `scripts/check.mjs`) and on Windows 11 (13 Nov 2026, commit `a186182`).
 
-Results on 13 Nov 2026, Windows 11. The last column names the commit each run was on. From `c5c60c6` to `3903896` only the web app (with its scripts and tests), the `enclave/deploy` PowerShell scripts, the docs and the lockfile changed; no contract, crate, relayer or package code.
+Results on 13 Nov 2026, Windows 11. The last column names the commit each run was on. From `a186182` to `f847dea` only the web app (with its scripts and tests), the `enclave/deploy` PowerShell scripts, the docs and the lockfile changed; no contract, crate, relayer or package code.
 
 | Suite | Command (from the repo root unless noted) | Result | Commit |
 | --- | --- | --- | --- |
-| Everything without Docker | `pnpm check` | 13/13 passed | `c5c60c6` |
-| Rust unit (contract, clearing, sealer, token, test USDC) | `cargo test --workspace --locked` | 201 passed, 1 ignored | `c5c60c6` |
-| Enclave job, native | in `enclave/`: `cargo test --locked -p fairground-sealer-job` | 20 passed | `c5c60c6` |
-| Clearing TS | `pnpm --filter @fairground/clearing test` | 1,032 passed | `3903896` |
-| Arena | `pnpm --filter @fairground/arena test` | 27 passed | `3903896` |
-| Relayer | in `apps/relayer`: `pnpm test` | 411 passed, 10 sandbox tests skipped | `c5c60c6` |
-| Relayer client | in `packages/relayer-client`: `pnpm test` | 269 passed, 8 sandbox tests skipped | `c5c60c6` |
-| Web | in `apps/web`: `npx vitest run` | 500 passed in 33 files | `3903896` |
-| End to end (Docker) | `pnpm --filter web e2e:sandbox` | 21/21 scenarios, 484/484 checks | `3903896` |
-| MCP server (Docker) | `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts` | 13/13 scenarios, 90/90 checks, 44 s | `c5c60c6` |
-| Live bot (Docker) | `pnpm --filter web exec tsx scripts/live-bot/sandbox-test.ts` | 8/8 scenarios, 69/69 checks, 109 s | `c5c60c6` |
+| Everything without Docker | `pnpm check` | 13/13 passed | `a186182` |
+| Rust unit (contract, clearing, sealer, token, test USDC) | `cargo test --workspace --locked` | 201 passed, 1 ignored | `a186182` |
+| Enclave job, native | in `enclave/`: `cargo test --locked -p fairground-sealer-job` | 20 passed | `a186182` |
+| Clearing TS | `pnpm --filter @fairground/clearing test` | 1,032 passed | `f847dea` |
+| Arena | `pnpm --filter @fairground/arena test` | 27 passed | `f847dea` |
+| Relayer | in `apps/relayer`: `pnpm test` | 411 passed, 10 sandbox tests skipped | `a186182` |
+| Relayer client | in `packages/relayer-client`: `pnpm test` | 269 passed, 8 sandbox tests skipped | `a186182` |
+| Web | in `apps/web`: `npx vitest run` | 500 passed in 33 files | `f847dea` |
+| End to end (Docker) | `pnpm --filter web e2e:sandbox` | 21/21 scenarios, 484/484 checks | `f847dea` |
+| MCP server (Docker) | `pnpm --filter web exec tsx scripts/mcp/sandbox-test.ts` | 13/13 scenarios, 90/90 checks, 44 s | `a186182` |
+| Live bot (Docker) | `pnpm --filter web exec tsx scripts/live-bot/sandbox-test.ts` | 8/8 scenarios, 69/69 checks, 109 s | `a186182` |
 | Contracts, full: build, unit, sandbox integration (Docker, PowerShell) | `powershell -File scripts\test-contracts.ps1` | 26 integration tests passed, 9 of them launch liquidity against Rhea's wasm | 12 Nov 2026, contract unchanged since; not rerun on 13 Nov |
 
 Other checks: `cargo clippy --workspace --all-targets --locked -- -D warnings`; `powershell -File scripts\run-enclave.ps1 -Test`; `powershell -File scripts\build-enclave.ps1 -Verify` (Docker, prints `verify: MATCH`); `pnpm typecheck` in `apps/relayer` and `packages/relayer-client`; `pnpm test:sandbox` in `apps/relayer`.
@@ -786,9 +786,9 @@ The code and documentation in this repository were written with AI coding agents
 
 ### Baseline
 
-Every commit in this repository was made during the hackathon, which opened with the announcement on 19 Oct 2026. The first commit is `781f75b` (9 Nov 2026), and no code from before 19 Oct 2026 was copied in, so there is no pre-hackathon baseline to separate and no baseline diff applies: the whole history is hackathon work.
+Every commit in this repository was made during the hackathon, which opened with the announcement on 19 Oct 2026. The first commit is `e129838` (9 Nov 2026), and no code from before 19 Oct 2026 was copied in, so there is no pre-hackathon baseline to separate and no baseline diff applies: the whole history is hackathon work.
 
-Commit `ee5c419` (11 Nov 2026) has "Baseline" in its title only because it was the first commit of the combined contracts, enclave, relayer and web app, which the later commits build on. It is hackathon work, not pre-existing code.
+Commit `c0ceda5` (11 Nov 2026) has "Baseline" in its title only because it was the first commit of the combined contracts, enclave, relayer and web app, which the later commits build on. It is hackathon work, not pre-existing code.
 
 ## 13. Roadmap (not built)
 
