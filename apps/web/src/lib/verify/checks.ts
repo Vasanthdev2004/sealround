@@ -370,7 +370,7 @@ export function checkRules(f: SaleFacts): ChainCheck {
 // ---------- sealed bid lengths ----------
 
 /** Every sealed bid is 224 + len(sale_id) + len(bidder) bytes (the contract refuses any other); a commitment is 32 bytes. */
-export function checkLengths(f: SaleFacts): ChainCheck {
+export function checkLengths(f: Pick<SaleFacts, "saleId" | "bids" | "mode">): ChainCheck {
   if (f.bids.length === 0) return notApplicable("lengths", "The sale has no bids.");
   const tee = f.mode === "tee";
   const wrong: { index: number; got: number; want: number }[] = [];

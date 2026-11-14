@@ -11,7 +11,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * single-host preview such as the Vercel demo) nothing redirects and the app
  * is under /sales on the same host.
  */
-const APP_PATHS = ["/sales", "/sale/", "/token/", "/create", "/activity", "/verify", "/judge", "/arena", "/attack", "/how", "/lab"];
+const APP_PATHS = ["/sales", "/sale/", "/token/", "/create", "/activity", "/verify", "/judges", "/judge", "/arena", "/attack", "/agents", "/how", "/lab"];
 
 function isAppHost(host: string): boolean {
   return host.startsWith("app.");

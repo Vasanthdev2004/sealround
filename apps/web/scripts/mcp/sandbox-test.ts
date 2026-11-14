@@ -66,6 +66,13 @@ const TOOLS = [
 ];
 const OFFLINE = process.argv.includes("--offline");
 
+type RecordedBid = {
+  saleId: string;
+  accepted: { tool: "sealround_place_bid"; transaction: string; index: number; depositTestUsdc: string; sealedBytes: number; gasPaidBy: "relayer" };
+  refused: { tool: "sealround_place_bid"; maxDepositTestUsdc: string; attemptedDepositTestUsdc: string; code: "over_budget"; nothingSent: true; nonceAndBalanceUnchanged: true };
+};
+let recordedBid: RecordedBid | null = null;
+
 // ---------------------------------------------------------------- MCP servers as processes
 
 type Json = Record<string, unknown> & { ok?: boolean; error?: { code?: string; message?: string; nothingSent?: boolean } };
@@ -318,10 +325,11 @@ async function sandbox(w: World, report: Report): Promise<void> {
   });
 
   const agentBid = { sale_id: TEE, max_price: "0.02", max_spend: "2", max_deposit: "5", deposit: "5" };
+  const lowerCap = "4.999999";
 
   await report.scenario("refusals", "refusals on chain: nothing signed, nothing moved", ["setup"], async (t) => {
     await unchanged(t, "place_bid before the sale opens", agent, () => mcp.call("sealround_place_bid", agentBid), "sale_closed");
-    await unchanged(t, "place_bid above max_deposit", agent, () => mcp.call("sealround_place_bid", { ...agentBid, max_deposit: "4.999999" }), "over_budget");
+    await unchanged(t, "place_bid above max_deposit", agent, () => mcp.call("sealround_place_bid", { ...agentBid, max_deposit: lowerCap }), "over_budget");
     await unchanged(t, "a void bid (max_spend above the deposit)", agent, () => mcp.call("sealround_place_bid", { ...agentBid, deposit: "2", max_spend: "3" }), "invalid_terms");
     await unchanged(t, "a void bid (max_price below the floor)", agent, () => mcp.call("sealround_place_bid", { ...agentBid, max_price: "0.001" }), "invalid_terms");
     const wrongKey = await Mcp.start("wrong-key", envFor(agent, { SEALROUND_ACCOUNT: alice.id }));
@@ -360,6 +368,14 @@ async function sandbox(w: World, report: Report): Promise<void> {
 
     const mine = await mcp.call("sealround_my_bid", { sale_id: TEE });
     t.eq("my_bid: the public bid and the secret file, no result yet", [get(mine.json, "bid", "index"), get(mine.json, "bid", "deposit", "amount"), get(mine.json, "secretFile", "status"), mine.json["result"]], [0, "5", "placed", null]);
+    const transaction = r.json["txHash"];
+    if (typeof transaction === "string" && TX_HASH.test(transaction) && onChain) {
+      recordedBid = {
+        saleId: TEE,
+        accepted: { tool: "sealround_place_bid", transaction, index: onChain.index, depositTestUsdc: agentBid.deposit, sealedBytes: payload.length, gasPaidBy: "relayer" },
+        refused: { tool: "sealround_place_bid", maxDepositTestUsdc: lowerCap, attemptedDepositTestUsdc: agentBid.deposit, code: "over_budget", nothingSent: true, nonceAndBalanceUnchanged: true },
+      };
+    }
   });
 
   await report.scenario("direct", "place_bid with direct: true signs and pays from the account", ["bid"], async (t) => {
@@ -482,6 +498,16 @@ async function main(): Promise<number> {
   for (const s of servers) if (s.log.some((l) => /could not start/.test(l))) console.log(`SERVER ${s.label}: ${s.log.join("").slice(-400)}`);
   console.log(`\nTook ${((Date.now() - started) / 1000).toFixed(0)} s. Logs and bid secret files: ${RUN_DIR}`);
   writeFileSync(path.join(RUN_DIR, "report.json"), JSON.stringify({ passed: report.allPassed && problems.length === 0, offlineOnly: OFFLINE, scenarios: report.scenarios, teardown: problems }, null, 2));
+  if (!OFFLINE && report.allPassed && problems.length === 0 && recordedBid) {
+    const publicRecord = {
+      schema: "sealround.mcp-sandbox-bid.v1",
+      network: "sandbox",
+      recordedAt: new Date().toISOString(),
+      passedChecks: report.scenarios.flatMap((scenario) => scenario.checks).filter((check) => check.ok).length,
+      ...recordedBid,
+    };
+    writeFileSync(path.join(RUN_DIR, "public-bid.json"), JSON.stringify(publicRecord, null, 2) + "\n");
+  }
   return report.allPassed && problems.length === 0 ? 0 : 1;
 }
 

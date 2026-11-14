@@ -9,19 +9,20 @@ import {
 } from "@/lib/chapters/creator";
 import { readDemoView, runDemo } from "@/lib/chapters/demo";
 import { readSubmittedArt } from "@/lib/chapters/art";
-import { LANTERN_STORY, artistLabel, chapterAmount, isLanternPilot, type ChapterRound, type ChapterSeries, type ChapterState, type ChapterSubmission } from "@/lib/chapters/model";
+import { LANTERN_STORY, artistLabel, chapterAmount, isLanternPilot, latestChapterWinner, minimumChapterLock, type ChapterRound, type ChapterSeries, type ChapterState, type ChapterSubmission } from "@/lib/chapters/model";
 import type { ChapterSandbox } from "@/lib/chapters/sandbox";
 import { canSignChapter, chapterWalletSigner } from "@/lib/chapters/wallet";
 import { dateTime } from "@/lib/format";
 import type { WalletState } from "@/lib/wallet";
 import { ArtistSubmissions, VerifiedArtwork } from "./artist-submissions";
+import { ChapterArtists } from "./chapter-artists";
 
 type CreatorProps = {
   series: ChapterSeries;
   state: ChapterState;
   sandbox: ChapterSandbox | null;
   wallet: WalletState;
-  onUpdate: (state: ChapterState) => void;
+  onUpdate: (state: ChapterState, createdRound?: number) => void;
 };
 
 export function ChapterCreator({ series, state, sandbox, wallet, onUpdate }: CreatorProps) {
@@ -33,31 +34,37 @@ export function ChapterCreator({ series, state, sandbox, wallet, onUpdate }: Cre
     return <FundRound key={round.round_id} round={round} wallet={wallet} sandbox={sandbox}
       balance={state.quoteBalance} series={series} onUpdate={onUpdate} />;
   }
-  if (id === null) return round?.round_id === 1 && round.phase === "finalized" && round.winner === null
-    ? <p className="panel p-5 text-small text-muted">Chapter 2 opens after Chapter 1 publishes a winning panel.</p> : null;
+  if (id === null) return null;
   const submissions = state.submissions?.[id] ?? [];
-  const parentSha256 = round?.winner != null ? round.candidates[round.winner].content_sha256 : null;
+  const parent = latestChapterWinner(state.rounds);
+  const parentSha256 = parent?.winner != null ? parent.candidates[parent.winner].content_sha256 : null;
+  const artists = state.artists?.roundId === id ? state.artists.accounts : undefined;
+  const storyIndex = parent ? 1 : 0;
   return <>
-    <ArtistSubmissions key={`artwork:${wallet.account}:${id}`} id={id} parent={round} submissions={submissions} series={series}
-      wallet={wallet} sandbox={sandbox} onUpdate={onUpdate} />
+    {canCreate && wallet.account && sandbox && artists && <ChapterArtists key={`artists:${id}:${artists.join(",")}`}
+      id={id} artists={artists} account={wallet.account} sandbox={sandbox} wallet={wallet} onUpdate={onUpdate} />}
+    <ArtistSubmissions key={`artwork:${wallet.account}:${id}`} id={id} parent={parent} submissions={submissions} series={series}
+      artists={artists} wallet={wallet} sandbox={sandbox} onUpdate={onUpdate} />
     {wallet.account && canCreate ? <Setup key={`setup:${wallet.account}:${id}`} id={id} account={wallet.account} series={series}
       wallet={wallet} sandbox={sandbox} quoteBalance={state.quoteBalance} onUpdate={onUpdate}
-      submissions={submissions} parentSha256={parentSha256} requiresSubmissions={!isLanternPilot(series) || !!sandbox?.story || !!round?.submission_ids} />
+      submissions={submissions} parentSha256={parentSha256} storyIndex={storyIndex}
+      requiresSubmissions={!isLanternPilot(series) || !!sandbox?.story || state.rounds.some((r) => !!r.submission_ids)} />
       : state.config && <p className="panel p-5 text-small text-muted">
         The curator <span className="break-all text-fg">{state.config.curator}</span> selects two panels for this chapter.
       </p>}
   </>;
 }
 
-function Setup({ id, account, series, wallet, sandbox, quoteBalance, submissions, parentSha256, requiresSubmissions, onUpdate }: Omit<CreatorProps, "state"> & {
+function Setup({ id, account, series, wallet, sandbox, quoteBalance, submissions, parentSha256, storyIndex, requiresSubmissions, onUpdate }: Omit<CreatorProps, "state"> & {
   id: number;
   account: string;
   quoteBalance?: string | null;
   submissions: ChapterSubmission[];
   parentSha256: string | null;
+  storyIndex: number;
   requiresSubmissions: boolean;
 }) {
-  const story = isLanternPilot(series) ? LANTERN_STORY[id - 1] : undefined;
+  const story = isLanternPilot(series) ? LANTERN_STORY[storyIndex] : undefined;
   const quoteSymbol = sandbox?.quoteSymbol ?? "test USDC";
   const quoteDecimals = sandbox?.quoteDecimals ?? 6;
   const [draft, setDraft] = useState<ChapterDraft>({
@@ -95,7 +102,7 @@ function Setup({ id, account, series, wallet, sandbox, quoteBalance, submissions
       if (!review) {
         if (!ready) throw new Error("Choose two artist submissions first.");
         const picks = selected.length === 2 ? [selected[0], selected[1]] as [ChapterSubmission, ChapterSubmission] : undefined;
-        const prepared = await reviewChapter(sandbox, id, draft, series.decimals, picks, parentSha256, series);
+        const prepared = await reviewChapter(sandbox, id, draft, series.decimals, picks, parentSha256, series, storyIndex);
         if (!sandbox && quoteBalance != null && BigInt(prepared.terms.bounty) > BigInt(quoteBalance)) {
           throw new Error(`The bounty exceeds your demo balance of ${chapterAmount(quoteBalance, quoteDecimals, quoteSymbol)}.`);
         }
@@ -103,10 +110,10 @@ function Setup({ id, account, series, wallet, sandbox, quoteBalance, submissions
         return;
       }
       if (sandbox) {
-        onUpdate(await createChapter(sandbox, account, review, () => chapterWalletSigner(wallet, sandbox.network ?? "sandbox", account)));
+          onUpdate(await createChapter(sandbox, account, review, () => chapterWalletSigner(wallet, sandbox.network ?? "sandbox", account)), id);
       } else {
         await runDemo({ kind: "create", terms: review.terms, account }, series);
-        onUpdate(readDemoView(account, series));
+          onUpdate(readDemoView(account, series), id);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The chapter could not be prepared.");
@@ -171,6 +178,7 @@ function Setup({ id, account, series, wallet, sandbox, quoteBalance, submissions
           <Term label="Sponsor" value={review.terms.sponsor} />
           <Term label="Artist bounty" value={chapterAmount(review.terms.bounty, quoteDecimals, quoteSymbol)} numeric />
           <Term label="Revealed quorum" value={chapterAmount(review.terms.quorum, series.decimals, series.symbol)} numeric />
+          <Term label="Minimum vote lock" value={chapterAmount(minimumChapterLock(review.terms).toString(), series.decimals, series.symbol)} numeric />
           <Term label="Voter slots" value={review.terms.max_voters} numeric />
           {review.deposit !== null && <>
             <Term label="Storage deposit" value={chapterAmount(review.deposit, 24, "NEAR")} numeric />

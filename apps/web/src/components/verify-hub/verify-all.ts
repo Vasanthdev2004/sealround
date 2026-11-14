@@ -3,11 +3,11 @@ import type { FairgroundClient } from "@/lib/client";
 import type { AppConfig } from "@/lib/config";
 import { createRpc } from "@/lib/near/rpc";
 import { foldStatus, type SaleView } from "@/lib/near/views";
-import type { Sale } from "@/lib/types";
+import type { RevealMode, Sale } from "@/lib/types";
 import type { FullVerification } from "@/lib/verify/types";
 import { evidenceState } from "./public-evidence";
 
-type ListedSale = Pick<Sale, "id" | "status" | "bidSetHash" | "bidCount"> & { name: string };
+export type ListedSale = Pick<Sale, "id" | "status" | "bidSetHash" | "bidCount"> & { name: string; mode: RevealMode };
 type VerificationClient = Pick<FairgroundClient, "listSales" | "verifySale" | "getBids">;
 
 export type VerificationRow = {
@@ -22,10 +22,11 @@ export type VerificationRow = {
 
 const PAGE_SIZE = 50;
 
-async function listSales(config: AppConfig, client: VerificationClient, signal: AbortSignal): Promise<ListedSale[]> {
+export async function listVerificationSales(config: AppConfig, client: Pick<VerificationClient, "listSales">, signal: AbortSignal): Promise<ListedSale[]> {
   if (config.mode === "mock") {
     return (await client.listSales()).toSorted((a, b) => a.createdAt - b.createdAt).map((sale) => ({
-      id: sale.id, status: sale.status, name: sale.config.tokenName, bidSetHash: sale.bidSetHash, bidCount: sale.bidCount,
+      id: sale.id, status: sale.status, name: sale.config.tokenName, mode: sale.config.revealMode,
+      bidSetHash: sale.bidSetHash, bidCount: sale.bidCount,
     }));
   }
   const { contractId, rpcUrl, rpcUrls } = config.near;
@@ -33,13 +34,14 @@ async function listSales(config: AppConfig, client: VerificationClient, signal: 
   const sales: ListedSale[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     signal.throwIfAborted();
-    const page = await rpc.view<Pick<SaleView, "sale_id" | "status" | "token_name" | "closed_at" | "bid_set_hash" | "bid_count">[]>(
+    const page = await rpc.view<Pick<SaleView, "sale_id" | "status" | "token_name" | "reveal_mode" | "closed_at" | "bid_set_hash" | "bid_count">[]>(
       contractId, "get_sales", { from_index: from, limit: PAGE_SIZE },
     );
     sales.push(...page.map((sale): ListedSale => ({
       id: sale.sale_id,
       status: foldStatus(sale.status),
       name: sale.token_name,
+      mode: sale.reveal_mode === "CommitReveal" ? "commit_reveal" : "tee",
       bidSetHash: sale.closed_at ? sale.bid_set_hash : null,
       bidCount: sale.bid_count,
     })));
@@ -79,8 +81,9 @@ export async function verifyAllSales(
   client: VerificationClient,
   report: (rows: VerificationRow[]) => void,
   signal: AbortSignal,
+  snapshot?: ListedSale[],
 ) {
-  const sales = await listSales(config, client, signal);
+  const sales = snapshot ?? await listVerificationSales(config, client, signal);
   signal.throwIfAborted();
   const rows = sales.map((sale): VerificationRow => ({ sale }));
   report([...rows]);
@@ -127,4 +130,5 @@ export async function verifyAllSales(
     rows[index] = checkRow(current, verification, bidSet);
     report([...rows]);
   }
+  return rows;
 }

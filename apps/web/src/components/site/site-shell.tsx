@@ -10,6 +10,7 @@ import { SpotlightTracker } from "@/components/visual/spotlight";
 import { REPO_URL, appHref } from "@/lib/site";
 
 const LINKS = [
+  { href: appHref("/judges"), label: "For judges" },
   { href: appHref("/sales"), label: "Sales" },
   { href: appHref("/verify"), label: "Verify a launch" },
   { href: appHref("/how"), label: "How it works" },

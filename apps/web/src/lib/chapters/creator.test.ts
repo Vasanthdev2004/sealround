@@ -27,6 +27,7 @@ function fixture(initial: ChapterRound[] = [], submissions: ChapterSubmission[] 
     if (method === "get_round_count") return rounds.length as T;
     if (method === "get_round") return rounds[Number(args?.round_id) - 1] as T;
     if (method === "get_submissions") return submissions.filter((item) => item.round_id === Number(args?.round_id)) as T;
+    if (method === "get_artists") return [] as T;
     if (method === "get_vote") return null as T;
     if (method === "ft_balance_of") return "100000000" as T;
     if (method === "storage_cost") return DEPOSIT as T;
@@ -70,7 +71,7 @@ describe("chapter creator terms", () => {
     expect(() => chapterTerms({ ...DRAFT, openIn: "1" }, 1, 18, NOW)).toThrow(/Funding window/);
     expect(() => chapterTerms({ ...DRAFT, slots: "513" }, 1, 18, NOW)).toThrow(/Voter slots/);
     expect(nextChapterId(shape([scheduled()]))).toBeNull();
-    expect(nextChapterId(shape([{ ...scheduled(), phase: "finalized", outcome: "tie" }]))).toBeNull();
+    expect(nextChapterId(shape([{ ...scheduled(), phase: "finalized", outcome: "tie" }]))).toBe(2);
     expect(nextChapterId(shape([{ ...scheduled(), phase: "finalized", outcome: "winner", winner: 1 }]))).toBe(2);
   });
 
@@ -83,7 +84,7 @@ describe("chapter creator terms", () => {
     expect(() => chapterTerms(DRAFT, 2, 18, NOW, [one, { ...two, artist: one.artist }])).toThrow(/different artists/);
     expect(() => chapterTerms(DRAFT, 1, 18, NOW, [one, two])).toThrow(/this chapter/);
     await expect(reviewChapter(null, 2, DRAFT, 18, [one, two], TERMS.candidates[0].content_sha256))
-      .rejects.toThrow(/first chapter’s winning panel/);
+      .rejects.toThrow(/previous winning panel/);
   });
 });
 

@@ -9,6 +9,7 @@ import { useClientQuery, useResult } from "@/lib/hooks";
 import { focusEl, scrollToTop } from "@/lib/scroll";
 import type { Sale } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
+import { BeTheBot } from "./be-the-bot";
 import { BidStream, BidStreamFrame } from "./bid-stream";
 import { JudgeBidForm, JudgeBidFormFrame } from "./judge-bid-form";
 import { JudgeNotes } from "./judge-notes";
@@ -120,8 +121,12 @@ export function JudgeMode() {
         )}
       </div>
 
-      {/* Not during a run: the live stage is the one thing to watch then. */}
-      {!running && <JudgeNotes />}
+      {!running && (
+        <>
+          <BeTheBot />
+          <JudgeNotes />
+        </>
+      )}
     </div>
   );
 }

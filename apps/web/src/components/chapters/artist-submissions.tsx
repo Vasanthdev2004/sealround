@@ -47,13 +47,14 @@ type ArtistProps = {
   id: number;
   series: ChapterSeries;
   parent: ChapterRound | undefined;
+  artists?: string[];
   submissions: ChapterSubmission[];
   sandbox: ChapterSandbox | null;
   wallet: WalletState;
   onUpdate: (state: ChapterState) => void;
 };
 
-export function ArtistSubmissions({ id, parent, submissions, sandbox, wallet, series, onUpdate }: ArtistProps) {
+export function ArtistSubmissions({ id, parent, artists, submissions, sandbox, wallet, series, onUpdate }: ArtistProps) {
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const winnerChoice = parent?.winner;
@@ -61,13 +62,14 @@ export function ArtistSubmissions({ id, parent, submissions, sandbox, wallet, se
   const full = submissions.length >= MAX_ART_SUBMISSIONS;
   const submitted = submissions.some(({ artist }) => artist === wallet.account);
   const canSubmit = !sandbox || canSignChapter(wallet, sandbox.network ?? "sandbox");
+  const invited = !wallet.account || !artists || artists.includes(wallet.account);
   return (
     <section className="panel grid gap-4 p-5 sm:p-6" aria-labelledby="chapter-art-title">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 id="chapter-art-title" className="text-h3 text-fg">Artwork for chapter {id}</h3>
           <p className="mt-1 text-small text-muted">{winner
-            ? <>Continue the story from <span className="text-fg">{winner.title}</span>, the first chapter’s winning panel.</>
+            ? <>Continue the story from <span className="text-fg">{winner.title}</span>, the last winning panel.</>
             : "Submit an original panel for the curator to consider."}</p>
         </div>
         <span className="num text-label text-muted">{submissions.length} of {MAX_ART_SUBMISSIONS} submitted</span>
@@ -75,9 +77,11 @@ export function ArtistSubmissions({ id, parent, submissions, sandbox, wallet, se
       {parent && winnerChoice != null && winner && <figure className="grid max-w-sm gap-2">
         <VerifiedArtwork assetKey={winner.content_sha256} load={() => readChapterArt(parent, winnerChoice, sandbox, undefined, series)}
           className="aspect-[3/2] rounded-[10px] border border-line" />
-        <figcaption className="text-label text-muted">Chapter 1 winner · {artistLabel(winner.artist)}</figcaption>
+        <figcaption className="text-label text-muted">Round {parent.round_id} winner · {artistLabel(winner.artist)}</figcaption>
       </figure>}
-      {full ? <p className="text-small text-muted">All submission slots are filled.</p>
+      {artists?.length === 0 ? <p className="text-small text-muted">The curator must invite artists before submissions open.</p>
+        : !invited ? <p className="text-small text-muted">This wallet needs an invitation from the curator to upload.</p>
+        : full ? <p className="text-small text-muted">All submission slots are filled.</p>
         : sandbox && submitted ? <p className="text-small text-muted">This wallet has submitted its entry.</p>
           : open && wallet.account ? <ArtworkForm id={id} wallet={wallet} series={series} sandbox={sandbox} parentSha256={winner?.content_sha256 ?? null}
             submissions={submissions} onCancel={() => setOpen(false)} onSubmitted={(next, title) => {

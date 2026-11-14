@@ -7,6 +7,7 @@ export type Choice = 0 | 1;
 export type ChapterPhase = "funding" | "commit" | "reveal" | "awaiting_finalization" | "finalized";
 export type ChapterOutcome = "winner" | "tie" | "no_quorum" | "unfunded";
 export type PaymentState = "unclaimed" | "pending" | "paid";
+export const MAX_CHAPTER_ROUNDS = 64;
 
 export type ChapterSeries = {
   saleId: string;
@@ -69,6 +70,7 @@ export type ChapterRound = {
   bounty: string;
   quorum: string;
   max_voters: number;
+  min_lock?: string;
   starts_at: string;
   commit_end: string;
   reveal_end: string;
@@ -100,6 +102,7 @@ export type ChapterState = {
   story?: ChapterStory;
   quoteBalance?: string | null;
   submissions?: Record<number, ChapterSubmission[]>;
+  artists?: { roundId: number; accounts: string[] };
 };
 
 export type VoteSecret = { choice: Choice; salt: string };
@@ -129,6 +132,23 @@ export function parseLockAmount(text: string, decimals: number): bigint | null {
   }
 }
 
+export function minimumChapterLock(round: Pick<ChapterRound, "quorum" | "max_voters" | "min_lock">): bigint {
+  return round.min_lock === undefined
+    ? (BigInt(round.quorum) + BigInt(round.max_voters) - 1n) / BigInt(round.max_voters)
+    : BigInt(round.min_lock);
+}
+
+export function latestChapterWinner(rounds: readonly ChapterRound[], before = Infinity) {
+  return rounds.findLast((round) => round.round_id < before && round.phase === "finalized" && round.winner !== null);
+}
+
+export function nextChapterId(state: Pick<ChapterState, "rounds">): number | null {
+  const prior = state.rounds.at(-1);
+  if (!prior) return 1;
+  return prior.phase === "finalized" && prior.round_id < MAX_CHAPTER_ROUNDS &&
+    state.rounds.filter(({ winner }) => winner !== null).length < 2 ? prior.round_id + 1 : null;
+}
+
 export function chapterAmount(value: string, decimals: number, symbol: string) {
   return `${formatUnits(BigInt(value), decimals)} ${symbol}`;
 }
@@ -138,6 +158,9 @@ export function voteCommitment(contract: string, round: number, account: string,
 }
 
 export function newVoteSecret(choice: Choice): VoteSecret {
+  if (typeof globalThis.crypto?.getRandomValues !== "function") {
+    throw new Error("This browser cannot securely generate a reveal code. Use a secure browser context.");
+  }
   return { choice, salt: randomHex(32) };
 }
 

@@ -102,7 +102,7 @@ describe("Chapter networks and signers", () => {
       .mockResolvedValueOnce(null).mockResolvedValueOnce({ min: "1250" })
       .mockResolvedValueOnce(null).mockResolvedValueOnce({ min: "1300" })
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null).mockResolvedValueOnce({ min: "1250" }).mockResolvedValueOnce({ total: "1250" });
+      .mockResolvedValueOnce(null).mockResolvedValueOnce({ min: "1250" }).mockResolvedValueOnce({ total: "1250", available: "0" });
     const sandbox: ChapterSandbox = {
       network: "testnet", contract: ESCROW, token: sale.tokenAccount, quote: QUOTE,
       rpc: { view: async <T,>(...args: Parameters<ChapterSandbox["rpc"]["view"]>) => await view(...args) as T,

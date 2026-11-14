@@ -36,6 +36,14 @@ pnpm --filter web exec tsx scripts/chapters/sandbox.ts --fair-test
 pnpm --filter web exec tsx scripts/chapters/sandbox.ts --serve --fair-test
 ```
 
+Add `--rhea` with `--fair-test` to run the buy-and-vote fixture against the
+pinned Rhea exchange binary. If the cached artifact is missing, fetch it
+with `node scripts/fetch-rhea-wasm.mjs`. The script checks the hash and
+deploys the binary only to its local sandbox. The run checks Rhea's minimum
+output protection and the input refund, then verifies output delivery and
+locks and withdraws the acquired voting tokens. The `--serve` variant also
+shows **Buy FAIRT on Rhea** above Chapters on the Fair Test token page.
+
 The automated run checks that only the settled sale creator can open the
 story, that the factory creates a keyless child from the published code
 hash, and that both token registrations succeed. It then runs the linked
@@ -45,13 +53,17 @@ The fixture settles Fair Test and configures `NEXT_PUBLIC_CHAPTERS_FACTORY`.
 Load its `sandbox.env` in an isolated web dev process as shown below and
 open `http://localhost:3101/token/fairt#meme-chapters`. Connect the sale
 creator, `sponsor.test.near`, and choose **Enable Chapters**. Give the story
-a title and artist brief. Review the setup deposit and confirm. The factory
+a title and artist brief. Review the setup deposit and both current token
+storage quotes, then confirm. The factory
 reads the settled sale and creates a keyless escrow with the sale's voting
-token and payout token. Use **Register escrow** to review and pay the two
-token registration deposits before accepting funds. Each registration can
-be retried on its own.
+token and payout token. Use **Register escrow** to review and pay any
+remaining deposits before accepting funds. The creator's wallet signs each
+registration directly, so any duplicate deposit returns to that wallet.
+After an interruption or refusal, return to the token page to retry only
+the registrations still needed.
 
-Switch to Mira and Sora to submit two artworks, then switch back to the
+Use **Invite artists** and confirm the roster for `mira.test.near` and
+`sora.test.near`. Switch to Mira and Sora to submit two artworks, then switch back to the
 creator to select both, create the round and fund its bounty. Follow the
 voting and payout steps below with FAIRT as the voting token.
 
@@ -59,7 +71,7 @@ voting and payout steps below with FAIRT as the voting token.
 
 For the original browser fixture run the sandbox command with `--serve --creator`. It
 launches Lantern and leaves the Chapters contract empty. The first connected
-wallet is `sponsor.test.near`, the curator. In the wallet menu switch to
+wallet is `sponsor.test.near`, the curator. Invite Mira and Sora. In the wallet menu switch to
 `mira.test.near` and `sora.test.near` in turn. Use **Submit artwork** to pick
 a different JPEG, PNG or WebP from each wallet. Review the 48 KiB preview
 and exact storage deposit before confirming. Switch back to the sponsor,
@@ -150,7 +162,7 @@ older claims, add a receipt-capable testnet endpoint to
    **Enable Chapters**, review the setup deposit and sign with a testnet wallet.
    Register the escrow with the voting and payout tokens. Approve each
    registration separately if the wallet opens a new page.
-2. Have two artists upload and sign their own distinct Chapter 1 panels. The
+2. Have the curator invite both artist accounts. Have both artists upload and sign their own distinct Chapter 1 panels. The
    creator selects both, reviews the timings, quorum and selected panels, and
    creates the round. The designated sponsor signs **Fund artist bounty**.
    Each signer needs testnet NEAR for gas. The sponsor needs enough of the
@@ -161,7 +173,7 @@ older claims, add a receipt-capable testnet endpoint to
    have holders withdraw their locks. The winner claims the bounty. If their
    wallet needs payout-token registration, review and confirm its storage
    deposit and then claim.
-4. Have the artists continue the winning panel for Chapter 2. The submission
+4. Invite the artists for the next round and have them continue the winning panel for Chapter 2. The submission
    form binds both entries to the winner's SHA-256. Repeat selection, funding,
    voting, revealing and payout with returning holders.
 5. Open each payout verification link in a signed-out browser and run the

@@ -41,13 +41,19 @@ when a deployment is pending or complete. Wait for `phase == "enabled"`
 before using the escrow. Each round created through the factory requires two
 wallet-signed artwork entries.
 
-Register the Chapters account with both fungible tokens before accepting
-transfers. The fixed payout accounts need quote-token storage registration to
-collect a bounty.
+The creator reviews the factory cost and both tokens' NEP-145 minimums. After
+deployment the creator's wallet registers the escrow directly with each token.
+This sends any duplicate-registration refund back to the payer. The app reads
+both registrations before continuing and skips completed registrations on a retry.
+Payout recipients also need quote-token storage registration.
 
 ## How rounds work
 
-1. Artists can use `submit_art({round_id, title, mime_type, image_base64,
+1. The curator invites two to eight named artists using
+   `set_artists({round_id, artists})` and the deposit from
+   `artist_roster_cost({round_id})`. After the first list, changes cost zero
+   and may replace unused invitations. Signed submissions keep their slots.
+   An invited artist can use `submit_art({round_id, title, mime_type, image_base64,
    parent_sha256})` to submit their artwork for the next round. Each account
    signs for its own entry and prepays the exact quote from
    `art_storage_cost({byte_length})`. The quote reserves the file size plus
@@ -71,10 +77,12 @@ collect a bounty.
    `ft_transfer_call` with the exact bounty and message
    `{"kind":"fund","round_id":1}`. An unfunded round never accepts votes.
 5. During commit, a holder calls the voting token's `ft_transfer_call` with
-   the amount they want to lock and message
+   at least the round's `min_lock` and message
    `{"kind":"commit","round_id":1,"commitment":"<lowercase hex>"}`.
-   A refused transfer returns the full amount using the token's resolver.
-6. The holder saves the candidate index and a random 32-byte salt locally.
+   The minimum is the quorum divided by voter slots, rounded up in base
+   units. A refused transfer returns the full amount using the token's resolver.
+6. The browser generates the 32-byte salt with Web Crypto and saves it with
+   the candidate index before sending the lock.
    Keep a backup under the voter's control until the vote is revealed. The
    commitment is the lowercase hex SHA-256 of the UTF-8 preimage
    `sealround-chapter-v1|<chapters account>|<round id>|<voter account>|<0 or 1>|<64 lowercase salt hex>`.
@@ -85,14 +93,16 @@ collect a bounty.
    round misses its start. If the revealed weight meets quorum and one
    candidate has more weight, the on-chain winner identifies the next panel
    and its artist. Round 1 artwork has a null `parent_sha256`. The next
-   round's submitted artwork must differ from the preceding finalized
-   winner and name that winner's digest as its parent. A tie, missed quorum
-   or unfunded ending cannot anchor a follow-up with submissions.
+   round's submitted artwork must differ from the most recent winning panel
+   and name that winner's digest as its parent. A tie, missed quorum or
+   unfunded round keeps its own history. A fresh attempt uses the most recent
+   winner, or a null parent if a winner has yet to be published.
 8. Each holder can call `withdraw_vote({round_id})` even if they missed the
    reveal. The winning artist calls `claim_bounty({round_id})`. The sponsor
    can claim the bounty back after a funded tie or missed quorum. Each claim
-   takes one yoctoNEAR and at least 55 TGas. The contract authorizes only the
-   actual recipient and records pending and paid states.
+   takes one yoctoNEAR and at least 70 TGas. The contract reserves 30 TGas for
+   the token transfer and 15 TGas for its callback. Only the recipient can
+   claim, and the contract records pending and paid states.
 
 Read `get_config()`, `get_round_count()`, `get_round({round_id})` and
 `get_vote({round_id, account_id})` to show the state. Round IDs start at 1.
@@ -132,7 +142,8 @@ The parent digest records which work the artist chose to continue. The
 artist and curator decide how the visual work builds on it. Funding and
 voting deadlines cannot be extended. Slots are first come, first served.
 Votes carry the weight of tokens actually locked. Splitting tokens across
-accounts can use extra slots with the same weight. Larger holders can decide
+accounts can still use multiple slots if every lock meets the minimum.
+Artists rely on the curator for invitations and selection. Larger holders can decide
 an outcome. Missing a reveal forfeits the vote, with the lock still
 withdrawable after finalization. Each bounty has its own sponsor and escrow.
 

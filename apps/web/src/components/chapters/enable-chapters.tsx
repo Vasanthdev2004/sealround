@@ -7,8 +7,8 @@ import { canEnableDemoChapters, runDemo } from "@/lib/chapters/demo";
 import { chapterAmount, validateChapterStory, type ChapterSeries, type ChapterStory } from "@/lib/chapters/model";
 import { canSignChapter, chapterWalletSigner } from "@/lib/chapters/wallet";
 import {
-  chapterEscrowRegistration, enableSandboxChapters, registerChapterEscrow,
-  type ChapterFactory, type ChapterSandbox, type EscrowRegistration,
+  chapterEscrowRegistration, chapterSetupQuote, enableSandboxChapters, registerChapterEscrow,
+  type ChapterFactory, type ChapterSandbox, type ChapterSetupQuote, type EscrowRegistration,
 } from "@/lib/chapters/sandbox";
 import type { Sale } from "@/lib/types";
 import type { WalletState } from "@/lib/wallet";
@@ -23,7 +23,7 @@ export function EnableChapters({ sale, series, wallet, factory, onEnabled }: {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [brief, setBrief] = useState("");
-  const [review, setReview] = useState<{ story: ChapterStory; deposit: string | null } | null>(null);
+  const [review, setReview] = useState<{ story: ChapterStory; quote: ChapterSetupQuote | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
@@ -41,10 +41,10 @@ export function EnableChapters({ sale, series, wallet, factory, onEnabled }: {
     try {
       if (!review) {
         const story = validateChapterStory(title, brief);
-        const deposit = factory ? await factory.rpc.view<string>(factory.account, "enable_cost") : null;
-        setReview({ story, deposit });
-      } else if (factory && review.deposit !== null) {
-        onEnabled(await enableSandboxChapters(factory, sale, review.story, review.deposit,
+        const quote = factory ? await chapterSetupQuote(factory, sale) : null;
+        setReview({ story, quote });
+      } else if (factory && review.quote) {
+        onEnabled(await enableSandboxChapters(factory, sale, review.story, review.quote,
           () => chapterWalletSigner(wallet, factory.network, series.creator)));
       } else {
         await runDemo({ kind: "enable", account, ...review.story }, series);
@@ -74,7 +74,11 @@ export function EnableChapters({ sale, series, wallet, factory, onEnabled }: {
     {review ? <div className="grid gap-1 break-words text-small text-muted">
       <p className="font-[510] text-fg">{review.story.title}</p>
       <p className="whitespace-pre-wrap">{review.story.brief}</p>
-      {review.deposit !== null && <p className="mt-2">Escrow setup deposit <strong className="num text-fg">{chapterAmount(review.deposit, 24, "NEAR")}</strong>. Registering the escrow with the two tokens is a separate step.</p>}
+      {review.quote && <div className="mt-2 space-y-1">
+        <p>Escrow setup deposit <strong className="num text-fg">{chapterAmount(review.quote.setup, 24, "NEAR")}</strong>.</p>
+        <p>After deployment, your wallet pays each storage deposit the escrow still needs.</p>
+        <RegistrationDeposits steps={review.quote.registrations} />
+      </div>}
     </div> : <fieldset className="grid min-w-0 gap-3" disabled={busy}>
       <Field label="Story title" value={title} maxLength={96} required onChange={(event) => setTitle(event.target.value)} />
       <label className="grid gap-1.5 text-label font-[510] text-muted">
@@ -95,6 +99,11 @@ export function EnableChapters({ sale, series, wallet, factory, onEnabled }: {
   </form>;
 }
 
+function RegistrationDeposits({ steps }: { steps: readonly EscrowRegistration[] }) {
+  return <ul className="space-y-1 text-small text-muted">{steps.map(({ token, deposit }) =>
+    <li key={token} className="break-words">{token} · {chapterAmount(deposit, 24, "NEAR")}</li>)}</ul>;
+}
+
 export function ChapterEscrowSetup({ sandbox, wallet, ready }: { sandbox: ChapterSandbox; wallet: WalletState; ready: () => void }) {
   const [steps, setSteps] = useState<EscrowRegistration[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -112,7 +121,7 @@ export function ChapterEscrowSetup({ sandbox, wallet, ready }: { sandbox: Chapte
         const remaining = await chapterEscrowRegistration(sandbox);
         if (current) { setSteps(remaining); setError(null); }
       } catch {
-        if (current) setError("Could not read the escrow’s token registrations.");
+        if (current) { setSteps(null); setError("Could not read the escrow’s token registrations."); }
       }
     }
     void load();
@@ -125,17 +134,21 @@ export function ChapterEscrowSetup({ sandbox, wallet, ready }: { sandbox: Chapte
     pending.current = true;
     setError(null);
     setBusy(true);
-    try {
-      for (const step of steps) await registerChapterEscrow(sandbox, step, () => chapterWalletSigner(wallet, network, curator));
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "Escrow registration did not confirm.");
-    } finally {
-      const remaining = await chapterEscrowRegistration(sandbox).catch(() => null);
-      if (remaining) setSteps(remaining);
-      setConfirmed(false);
-      setBusy(false);
-      pending.current = false;
+    let reason: string | null = null;
+    for (const step of steps) {
+      try {
+        await registerChapterEscrow(sandbox, step, () => chapterWalletSigner(wallet, network, curator));
+      } catch (problem) {
+        reason = `${step.token} registration did not confirm. ${problem instanceof Error ? problem.message : "Check the current status before retrying."}`;
+        break;
+      }
     }
+    const remaining = await chapterEscrowRegistration(sandbox).catch(() => null);
+    setSteps(remaining);
+    setError(remaining?.length === 0 ? null : reason ?? (remaining ? null : "Refresh the token registrations before retrying."));
+    setConfirmed(false);
+    setBusy(false);
+    pending.current = false;
   }
 
   if (!steps && !error) return <p role="status" className="panel p-5 text-small text-muted">Reading escrow registrations…</p>;
@@ -143,13 +156,18 @@ export function ChapterEscrowSetup({ sandbox, wallet, ready }: { sandbox: Chapte
   return <section className="panel grid gap-3 p-5 sm:p-6" aria-labelledby="chapter-escrow-title">
     <h3 id="chapter-escrow-title" className="text-h3 text-fg">Register the chapter escrow</h3>
     <p className="text-small text-muted">The escrow needs a storage registration on the voting and bounty tokens before it can hold either asset.</p>
-    {steps && <ul className="space-y-1 text-small text-muted">{steps.map(({ token, deposit }) => <li key={token} className="break-words">{token} · {chapterAmount(deposit, 24, "NEAR")}</li>)}</ul>}
-    {confirmed && network === "testnet" && <p className="text-small text-muted">Approve each remaining registration in your wallet. If it opens a new page, return here to finish the remaining registrations.</p>}
+    {steps && <RegistrationDeposits steps={steps} />}
+    {confirmed && <p className="text-small text-muted">Approve each remaining registration. Token contracts return any duplicate registration deposit directly to the paying wallet.</p>}
     {error && <p role="alert" className="text-small text-bad">{error}</p>}
     <div className="flex flex-wrap gap-2">
       {canRegister && steps?.length ? <Button variant="primary" size="lg" loading={busy}
         onClick={() => { if (confirmed) void register(); else setConfirmed(true); }}>{confirmed ? "Confirm registration" : "Register escrow"}</Button> : null}
-      <Button variant="outline" size="lg" disabled={busy} onClick={() => { setConfirmed(false); refresh((value) => value + 1); }}>Refresh registration</Button>
+      <Button variant="outline" size="lg" disabled={busy} onClick={() => {
+        setConfirmed(false);
+        setError(null);
+        setSteps(null);
+        refresh((value) => value + 1);
+      }}>Refresh registration</Button>
     </div>
   </section>;
 }

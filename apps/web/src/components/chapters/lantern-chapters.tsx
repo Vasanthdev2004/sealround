@@ -16,7 +16,7 @@ import {
 } from "@/lib/chapters/demo";
 import { readChapterArt } from "@/lib/chapters/art";
 import {
-  LANTERN_STORY, artistLabel, bountyRecipient, chapterAmount, newVoteSecret, parseLockAmount,
+  LANTERN_STORY, artistLabel, bountyRecipient, chapterAmount, latestChapterWinner, minimumChapterLock, newVoteSecret, parseLockAmount,
   parseRecoveryCode, readVoteSecret, recoveryCode, saveVoteSecret, voteCommitment,
   isLanternPilot, seriesFor, type ChapterRound, type ChapterSeries, type ChapterState, type ChapterVote, type Choice,
 } from "@/lib/chapters/model";
@@ -31,6 +31,7 @@ import { ChapterCreator } from "./chapter-creator";
 import { ChapterVerification } from "./chapter-verification";
 import { ChapterRevealReminder } from "./reveal-reminders";
 import { ChapterEscrowSetup, EnableChapters } from "./enable-chapters";
+import { StorySoFar } from "./story-so-far";
 
 const PHASE_LABEL: Record<ChapterRound["phase"], string> = {
   funding: "Waiting to open",
@@ -40,15 +41,15 @@ const PHASE_LABEL: Record<ChapterRound["phase"], string> = {
   finalized: "Finalized",
 };
 
-export function TokenChapters({ sale }: { sale: Sale }) {
+export function TokenChapters({ sale, balanceRevision = 0 }: { sale: Sale; balanceRevision?: number }) {
   const wallet = useWallet();
   if (sale.status !== "settled") return null;
-  return <ChaptersEntry key={`${sale.tokenAccount}:${wallet.account ?? "disconnected"}`} sale={sale} wallet={wallet} />;
+  return <ChaptersEntry key={`${sale.tokenAccount}:${wallet.account ?? "disconnected"}`} sale={sale} wallet={wallet} balanceRevision={balanceRevision} />;
 }
 
 type Wallet = ReturnType<typeof useWallet>;
 
-function ChaptersEntry({ sale, wallet }: { sale: Sale; wallet: Wallet }) {
+function ChaptersEntry({ sale, wallet, balanceRevision }: { sale: Sale; wallet: Wallet; balanceRevision: number }) {
   const series = useMemo(() => seriesFor(sale), [sale]);
   const legacy = useMemo(() => sandboxFor(sale, appConfig()), [sale]);
   const factory = useMemo(() => legacy ? null : chapterFactoryFor(sale, appConfig()), [legacy, sale]);
@@ -81,7 +82,7 @@ function ChaptersEntry({ sale, wallet }: { sale: Sale; wallet: Wallet }) {
   }, [factory, revision, sale, sandbox]);
 
   if (legacy || wallet.mode === "mock" || (sandbox && registered)) {
-    return <ChapterPanel sale={sale} series={series} sandbox={legacy ?? sandbox} wallet={wallet} />;
+    return <ChapterPanel sale={sale} series={series} sandbox={legacy ?? sandbox} wallet={wallet} balanceRevision={balanceRevision} />;
   }
   if (!factory) return null;
   return <section id="meme-chapters" aria-labelledby="chapters-title" className="scroll-mt-20 space-y-4">
@@ -106,7 +107,9 @@ function ChapterHeading({ title, brief, network }: { title: string; brief?: stri
   </header>;
 }
 
-function ChapterPanel({ sale, series, sandbox, wallet }: { sale: Sale; series: ChapterSeries; sandbox: ChapterSandbox | null; wallet: Wallet }) {
+function ChapterPanel({ sale, series, sandbox, wallet, balanceRevision }: {
+  sale: Sale; series: ChapterSeries; sandbox: ChapterSandbox | null; wallet: Wallet; balanceRevision: number;
+}) {
   const { account } = wallet;
   const [state, setState] = useState<ChapterState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -119,8 +122,9 @@ function ChapterPanel({ sale, series, sandbox, wallet }: { sale: Sale; series: C
     : `mock:${demoChapterContract(series)}`;
   const requestVersion = useRef(0);
 
-  function update(next: ChapterState) {
+  function update(next: ChapterState, createdRound?: number) {
     ++requestVersion.current;
+    if (createdRound !== undefined) selectRound(createdRound);
     setState(next);
     setLoadError(null);
   }
@@ -152,7 +156,7 @@ function ChapterPanel({ sale, series, sandbox, wallet }: { sale: Sale; series: C
       if (interval !== null) window.clearInterval(interval);
       unsubscribe?.();
     };
-  }, [account, revision, sandbox, series]);
+  }, [account, balanceRevision, revision, sandbox, series]);
 
   const round = state?.rounds.find((item) => item.round_id === (selected ?? Number(requested))) ?? state?.rounds.at(-1);
   return (
@@ -174,14 +178,12 @@ function ChapterPanel({ sale, series, sandbox, wallet }: { sale: Sale; series: C
         <EnableChapters sale={sale} series={series} wallet={wallet} factory={null} onEnabled={() => update(readDemoView(account, series))} />
       ) : (
         <div className="space-y-4">
-          <ChapterCreator series={series} state={state} sandbox={sandbox} wallet={wallet} onUpdate={(next) => {
-            if (next.rounds.length > state.rounds.length) selectRound(next.rounds.at(-1)!.round_id);
-            update(next);
-          }} />
+          <StorySoFar rounds={state.rounds} series={series} sandbox={sandbox} selectRound={selectRound} />
+          <ChapterCreator series={series} state={state} sandbox={sandbox} wallet={wallet} onUpdate={update} />
           {state.rounds.length > 1 && (
             <div className="mb-4">
               <Segmented label={`${series.tokenName} chapter`} value={String(round?.round_id)} onChange={(id) => selectRound(Number(id))}
-                options={state.rounds.map((r) => ({ value: String(r.round_id), label: `Chapter ${r.round_id}` }))} />
+                options={state.rounds.map((r) => ({ value: String(r.round_id), label: `Round ${r.round_id}` }))} />
             </div>
           )}
           {round && <Chapter key={round.round_id} round={round} state={state} series={series} wallet={wallet}
@@ -192,7 +194,7 @@ function ChapterPanel({ sale, series, sandbox, wallet }: { sale: Sale; series: C
   );
 }
 
-type VoteAction = Exclude<DemoAction, { kind: "enable" | "create" | "fund" | "submit_art" }>;
+type VoteAction = Exclude<DemoAction, { kind: "enable" | "create" | "fund" | "submit_art" | "buy_demo" }>;
 
 function Chapter({ round, state, series, wallet, sandbox, scope, onUpdate }: {
   round: ChapterRound;
@@ -217,11 +219,13 @@ function Chapter({ round, state, series, wallet, sandbox, scope, onUpdate }: {
   const vote = state.votes[id];
   const secret = vote && account ? readVoteSecret(scope, id, account, vote.commitment) : null;
   const amountInBase = parseLockAmount(amount, decimals);
+  const minLock = minimumChapterLock(round);
   const available = state.balance !== null ? BigInt(state.balance) : 0n;
   const owner = bountyRecipient(round);
-  const script = isLanternPilot(series) ? LANTERN_STORY[id - 1] : undefined;
+  const script = isLanternPilot(series) ? LANTERN_STORY.find(({ title }) => title === round.title) : undefined;
   const winner = round.winner !== null ? round.candidates[round.winner] : null;
-  const first = id === 2 ? state.rounds.find((prior) => prior.round_id === 1) : undefined;
+  const chapterNumber = state.rounds.filter((item) => item.round_id <= id && item.winner !== null).length;
+  const first = latestChapterWinner(state.rounds, id);
   const parent = first?.winner != null ? first.candidates[first.winner] : null;
   const isDemo = !sandbox;
   const canSign = !sandbox || canSignChapter(wallet, sandbox.network ?? "sandbox");
@@ -290,7 +294,7 @@ function Chapter({ round, state, series, wallet, sandbox, scope, onUpdate }: {
 
   async function lock(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!account || choice === null || amountInBase === null || amountInBase > available || busy) return;
+    if (!account || choice === null || amountInBase === null || amountInBase < minLock || amountInBase > available || busy) return;
     await submit(async () => {
       const voteSecret = newVoteSecret(choice);
       const commitment = await voteCommitment(sandbox?.contract ?? demoChapterContract(series), id, account, voteSecret);
@@ -314,11 +318,11 @@ function Chapter({ round, state, series, wallet, sandbox, scope, onUpdate }: {
     <div className="panel overflow-hidden">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-line p-5 sm:p-6">
         <div className="min-w-0">
-          <div className="text-label text-subtle">Chapter {id} of 2</div>
+          <div className="text-label text-subtle">Round {id}</div>
           <h3 className="mt-1 text-h2 text-fg">{round.title}</h3>
           {!round.submission_ids && script?.title === round.title && <p className="mt-1.5 text-small text-muted">{script.brief}</p>}
           {parent && round.parent_sha256 === parent.content_sha256 && <p className="mt-1.5 break-words text-small text-muted">
-            Continues <span className="text-fg">{parent.title}</span>, the winner of chapter 1.
+            Continues <span className="text-fg">{parent.title}</span>, the winner of round {first?.round_id}.
           </p>}
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -347,7 +351,7 @@ function Chapter({ round, state, series, wallet, sandbox, scope, onUpdate }: {
       </div>
 
       <div className="space-y-4 border-t border-line p-5 sm:p-6">
-        {round.phase === "finalized" && <ChapterResult round={round} balance={balance} quote={quote} />}
+        {round.phase === "finalized" && <ChapterResult round={round} chapterNumber={chapterNumber} balance={balance} quote={quote} />}
         {round.phase === "funding" && <p className="text-small text-muted">Voting starts once the sponsor funds the bounty and the round opens.</p>}
         {round.phase === "reveal" && !vote && <p className="text-small text-muted">Voters are revealing their sealed choices. Check back after the result is finalized.</p>}
         {!account && (round.phase === "commit" || round.phase === "reveal" || round.phase === "finalized" || round.phase === "awaiting_finalization") && (
@@ -358,10 +362,11 @@ function Chapter({ round, state, series, wallet, sandbox, scope, onUpdate }: {
         {canChoose && account && (
           <form onSubmit={(event) => void lock(event)} className="flex flex-col gap-4 sm:flex-row sm:items-start">
             <Field label="Tokens to lock" suffix={symbol} inputMode="decimal" maxLength={64} value={amount} onChange={(event) => setAmount(event.target.value)} disabled={busy}
-              error={amount && amountInBase === null ? `Enter a positive ${symbol} amount.` : amountInBase && amountInBase > available ? `This exceeds your available ${symbol}.` : undefined}
-              hint={`${balance(available.toString())} available${isDemo ? " in this chapter demo" : ""}. Your lock is returned after the chapter.`} />
+              error={amount && amountInBase === null ? `Enter a positive ${symbol} amount.` : amountInBase && amountInBase < minLock
+                ? `Lock at least ${balance(minLock.toString())}.` : amountInBase && amountInBase > available ? `This exceeds your available ${symbol}.` : undefined}
+              hint={`${balance(available.toString())} available. Minimum ${balance(minLock.toString())}.`} />
             <Button variant="primary" size="lg" className="sm:mt-6" type="submit" loading={busy} icon={<LockKeyhole className="size-4" aria-hidden />}
-              disabled={!amountInBase || amountInBase > available || choice === null || !canSign}>
+              disabled={!amountInBase || amountInBase < minLock || amountInBase > available || choice === null || !canSign}>
               Lock &amp; seal vote
             </Button>
           </form>
@@ -462,12 +467,14 @@ function VoteStatus({ vote, amount }: { vote: ChapterVote; amount: string }) {
   </p>;
 }
 
-function ChapterResult({ round, balance, quote }: { round: ChapterRound; balance: (value: string) => string; quote: string }) {
+function ChapterResult({ round, chapterNumber, balance, quote }: {
+  round: ChapterRound; chapterNumber: number; balance: (value: string) => string; quote: string;
+}) {
   const winner = round.winner !== null ? round.candidates[round.winner] : null;
   const reason = round.outcome === "tie" ? "The vote tied." : round.outcome === "unfunded" ? "The sponsor did not fund the bounty in time." : "Revealed votes did not reach quorum.";
   return (
     <div className="space-y-1.5">
-      <p className="text-small font-[510] text-fg">{winner ? `${winner.title} became chapter ${round.round_id}.` : `No panel selected. ${reason}`}</p>
+      <p className="text-small font-[510] text-fg">{winner ? `${winner.title} became chapter ${chapterNumber}.` : `No panel selected. ${reason}`}</p>
       {round.funded && <p className="text-small text-muted">
         {winner ? `${quote} artist bounty · ${artistLabel(winner.artist)}` : `${quote} sponsor refund`}{" · "}
         {round.bounty_state === "paid" ? "Paid" : round.bounty_state === "pending" ? "Transfer pending" : "Ready to claim"}

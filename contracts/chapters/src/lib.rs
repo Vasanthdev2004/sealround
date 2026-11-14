@@ -19,16 +19,19 @@ const MAX_TITLE_BYTES: usize = 96;
 const MAX_ROUND_NS: u64 = 90 * 24 * 60 * 60 * 1_000_000_000;
 const MAX_ART_BYTES: u32 = 48 * 1024;
 const MAX_SUBMISSIONS: usize = 8;
+// Bounded JSON account IDs plus the key and trie overhead.
+const ARTIST_ROSTER_BYTES: u128 = 768;
 // Reserve room for the largest metadata and both storage keys along with the artwork.
 const ART_OVERHEAD_BYTES: u128 = 512;
 // Reserve enough for the round, its payout record and every indexed vote.
 const ROUND_BYTES: u128 = 2_048;
 const VOTE_BYTES: u128 = 512;
-const FT_TRANSFER_GAS: Gas = Gas::from_tgas(15);
+const FT_TRANSFER_GAS: Gas = Gas::from_tgas(30);
 const CALLBACK_GAS: Gas = Gas::from_tgas(15);
-const REQUIRED_CLAIM_GAS: Gas = Gas::from_tgas(55);
+const REQUIRED_CLAIM_GAS: Gas = Gas::from_tgas(70);
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 const SUBMISSIONS_REQUIRED: &[u8] = b"factory:submissions-required";
+const LAST_WINNER: &[u8] = b"story:last-winner";
 
 #[ext_contract(ext_ft)]
 #[allow(dead_code, reason = "the macro generates the outgoing transfer call")]
@@ -82,6 +85,12 @@ struct RoundTerms {
     reveal_end: U64,
 }
 
+impl RoundTerms {
+    fn min_lock(&self) -> u128 {
+        self.quorum.0.div_ceil(u128::from(self.max_voters))
+    }
+}
+
 #[near(serializers = [borsh, json])]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -107,7 +116,7 @@ impl Payment {
         );
         require!(
             env::prepaid_gas() >= REQUIRED_CLAIM_GAS,
-            "Attach at least 55 TGas"
+            "Attach at least 70 TGas"
         );
         self.attempt = self
             .attempt
@@ -248,6 +257,7 @@ pub struct RoundView {
     phase: Phase,
     funded: bool,
     committed_count: u16,
+    min_lock: U128,
     locked: U128,
     revealed: U128,
     tallies: [U128; 2],
@@ -362,6 +372,13 @@ fn matches_image_signature(mime_type: &str, bytes: &[u8]) -> bool {
     }
 }
 
+fn artist_roster_key(round_id: u32) -> [u8; 5] {
+    let mut key = [0; 5];
+    key[0] = b'i';
+    key[1..].copy_from_slice(&round_id.to_le_bytes());
+    key
+}
+
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Chapters {
@@ -406,6 +423,7 @@ impl Chapters {
             token_id != quote_token_id,
             "Voting and quote tokens must be different"
         );
+        env::storage_write(LAST_WINNER, &[]);
         Self {
             curator,
             token_id,
@@ -429,12 +447,23 @@ impl Chapters {
             previous.outcome.is_some(),
             "Finalize the previous round first"
         );
-        let parent = previous.winner.map(|index| {
-            previous.terms.candidates[usize::from(index)]
-                .content_sha256
-                .clone()
-        });
-        (self.round_count + 1, parent)
+        (self.round_count + 1, self.last_winner())
+    }
+
+    fn last_winner(&self) -> Option<String> {
+        match env::storage_read(LAST_WINNER) {
+            Some(bytes) if bytes.is_empty() => None,
+            Some(bytes) => Some(String::from_utf8(bytes).expect("Invalid winning digest")),
+            // Escrows initialized before this cache used only the historical rounds.
+            None => (1..=self.round_count).rev().find_map(|id| {
+                let round = self.rounds.get(&id)?;
+                round.winner.map(|choice| {
+                    round.terms.candidates[usize::from(choice)]
+                        .content_sha256
+                        .clone()
+                })
+            }),
+        }
     }
 
     pub fn get_config(&self) -> ConfigView {
@@ -457,6 +486,7 @@ impl Chapters {
             phase: r.phase(env::block_timestamp()),
             funded: r.funded,
             committed_count: r.committed_count,
+            min_lock: U128(r.terms.min_lock()),
             locked: U128(r.locked),
             revealed: U128(r.revealed),
             tallies: r.tallies.map(U128),
@@ -536,6 +566,55 @@ impl Chapters {
             .map(|bytes| BASE64.encode(bytes))
     }
 
+    /// The curator's bounded list for the upcoming round.
+    pub fn get_artists(&self, round_id: u32) -> Vec<AccountId> {
+        env::storage_read(&artist_roster_key(round_id))
+            .map(|bytes| near_sdk::serde_json::from_slice(&bytes).expect("Invalid artist roster"))
+            .unwrap_or_default()
+    }
+
+    pub fn artist_roster_cost(&self, round_id: u32) -> U128 {
+        U128(if env::storage_has_key(&artist_roster_key(round_id)) {
+            0
+        } else {
+            ARTIST_ROSTER_BYTES * env::storage_byte_cost().as_yoctonear()
+        })
+    }
+
+    /// Already submitted entries keep their slots and identifiers.
+    #[payable]
+    pub fn set_artists(&mut self, round_id: u32, artists: Vec<AccountId>) {
+        require!(
+            env::predecessor_account_id() == self.curator,
+            "Only the curator can invite artists"
+        );
+        let (next_id, _) = self.next_round();
+        require!(round_id == next_id, "Invite artists for the next round");
+        require!(
+            (2..=MAX_SUBMISSIONS).contains(&artists.len()),
+            "Invite 2 to 8 artists"
+        );
+        require!(
+            artists
+                .iter()
+                .enumerate()
+                .all(|(index, artist)| !artists[..index].contains(artist)),
+            "Invite each artist once"
+        );
+        require!(
+            self.get_submissions(round_id)
+                .iter()
+                .all(|submission| artists.contains(&submission.candidate.artist)),
+            "Keep artists who have already submitted"
+        );
+        require!(
+            env::attached_deposit().as_yoctonear() == self.artist_roster_cost(round_id).0,
+            "Attach the exact artist roster storage cost"
+        );
+        let roster = near_sdk::serde_json::to_vec(&artists).expect("Artist roster JSON");
+        env::storage_write(&artist_roster_key(round_id), &roster);
+    }
+
     pub fn art_storage_cost(&self, byte_length: u32) -> U128 {
         require!(
             (1..=MAX_ART_BYTES).contains(&byte_length),
@@ -560,10 +639,6 @@ impl Chapters {
         let (next_id, parent) = self.next_round();
         require!(round_id == next_id, "Submit art for the next round");
         require!(
-            round_id == 1 || parent.is_some(),
-            "The previous round needs a winner"
-        );
-        require!(
             parent_sha256 == parent,
             "Artwork parent must match the previous winner"
         );
@@ -571,6 +646,10 @@ impl Chapters {
         require!(
             artist == env::signer_account_id(),
             "The artist must sign directly"
+        );
+        require!(
+            self.get_artists(round_id).contains(&artist),
+            "The curator must invite this artist"
         );
         require!(valid_title(&title), "Invalid artwork title");
 
@@ -685,10 +764,6 @@ impl Chapters {
         let submissions = self.get_submissions(round_id);
         if let Some(ids) = submission_ids {
             require!(ids[0] != ids[1], "Choose two different submissions");
-            require!(
-                round_id == 1 || parent_sha256.is_some(),
-                "The previous round needs a winner"
-            );
             for (id, candidate) in ids.into_iter().zip(&candidates) {
                 require!(
                     submissions.iter().any(|art| {
@@ -809,7 +884,14 @@ impl Chapters {
             } else if round.tallies[0] == round.tallies[1] {
                 Outcome::Tie
             } else {
-                round.winner = Some(u8::from(round.tallies[1] > round.tallies[0]));
+                let choice = u8::from(round.tallies[1] > round.tallies[0]);
+                round.winner = Some(choice);
+                env::storage_write(
+                    LAST_WINNER,
+                    round.terms.candidates[usize::from(choice)]
+                        .content_sha256
+                        .as_bytes(),
+                );
                 Outcome::Winner
             });
             emit(
@@ -979,6 +1061,7 @@ impl FungibleTokenReceiver for Chapters {
                 };
                 let key = (round_id, sender_id.clone());
                 if round.phase(now) != Phase::Commit
+                    || amount.0 < round.terms.min_lock()
                     || round.committed_count >= round.terms.max_voters
                     || self.votes.contains_key(&key)
                 {

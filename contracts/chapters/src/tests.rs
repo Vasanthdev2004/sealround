@@ -1,5 +1,6 @@
+use near_sdk::mock::MockAction;
 use near_sdk::serde_json;
-use near_sdk::test_utils::{VMContextBuilder, get_logs};
+use near_sdk::test_utils::{VMContextBuilder, get_created_receipts, get_logs};
 use near_sdk::{PromiseResult, RuntimeFeesConfig, test_vm_config, testing_env};
 
 use super::*;
@@ -196,6 +197,22 @@ fn refunds_rejected_transfers_and_never_double_counts_a_lock() {
 }
 
 #[test]
+fn minimum_lock_preserves_the_slot_for_an_eligible_vote() {
+    let mut chapters = setup();
+    let terms = &mut chapters.rounds.get_mut(&1).unwrap().terms;
+    terms.quorum = U128(11);
+    assert_eq!(chapters.get_round(1).unwrap().min_lock.0, 6);
+    fund(&mut chapters);
+    assert_eq!(commit(&mut chapters, VOTERS[0], 5, 0), 5);
+    assert!(chapters.get_vote(1, id(VOTERS[0])).is_none());
+    assert_eq!(chapters.get_round(1).unwrap().committed_count, 0);
+    assert_eq!(commit(&mut chapters, VOTERS[0], 6, 0), 0);
+    let round = chapters.get_round(1).unwrap();
+    assert_eq!(round.committed_count, 1);
+    assert_eq!(round.locked.0, 6);
+}
+
+#[test]
 fn winner_and_nonrevealing_holder_can_claim_while_later_rounds_run() {
     let mut chapters = setup();
     assert!(chapters.get_payout(1).is_none());
@@ -216,6 +233,7 @@ fn winner_and_nonrevealing_holder_can_claim_while_later_rounds_run() {
 
     actor(VOTERS[1], REVEAL_END + 2, 1);
     drop(chapters.withdraw_vote(1));
+    assert_payment_gas(TOKEN, "on_withdraw_vote");
     assert_eq!(
         chapters
             .get_vote(1, id(VOTERS[1]))
@@ -235,6 +253,7 @@ fn winner_and_nonrevealing_holder_can_claim_while_later_rounds_run() {
 
     actor(ARTISTS[0], REVEAL_END + 2, 1);
     drop(chapters.claim_bounty(1));
+    assert_payment_gas(QUOTE, "on_claim_bounty");
     let pending = chapters.get_payout(1).unwrap();
     assert_eq!(pending.state, PaymentState::Pending);
     assert_eq!(pending.paid_at, None);
@@ -256,6 +275,44 @@ fn winner_and_nonrevealing_holder_can_claim_while_later_rounds_run() {
     assert_eq!(
         chapters.get_round(2).unwrap().bounty_state,
         PaymentState::Unclaimed
+    );
+}
+
+fn assert_payment_gas(token: &str, callback_method: &str) {
+    let calls: Vec<_> = get_created_receipts()
+        .into_iter()
+        .flat_map(|receipt| {
+            receipt.actions.into_iter().filter_map(move |action| {
+                let MockAction::FunctionCallWeight {
+                    method_name,
+                    prepaid_gas,
+                    ..
+                } = action
+                else {
+                    return None;
+                };
+                Some((
+                    receipt.receiver_id.to_string(),
+                    String::from_utf8(method_name).unwrap(),
+                    prepaid_gas,
+                ))
+            })
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            (
+                token.to_owned(),
+                "ft_transfer".to_owned(),
+                Gas::from_tgas(30)
+            ),
+            (
+                CONTRACT.to_owned(),
+                callback_method.to_owned(),
+                Gas::from_tgas(15)
+            ),
+        ]
     );
 }
 
@@ -402,7 +459,26 @@ fn public_votes_page_in_commit_order_and_only_show_revealed_choices() {
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
+fn invite(chapters: &mut Chapters, round_id: u32, artists: Vec<AccountId>) {
+    let cost = chapters.artist_roster_cost(round_id).0;
+    actor(CURATOR, if round_id == 1 { 0 } else { REVEAL_END }, cost);
+    chapters.set_artists(round_id, artists);
+}
+
 fn artwork(
+    chapters: &mut Chapters,
+    round_id: u32,
+    artist: &str,
+    mark: u8,
+    parent: Option<&str>,
+) -> ArtSubmission {
+    if chapters.get_artists(round_id).is_empty() {
+        invite(chapters, round_id, ARTISTS.map(id).to_vec());
+    }
+    submit_artwork(chapters, round_id, artist, mark, parent)
+}
+
+fn submit_artwork(
     chapters: &mut Chapters,
     round_id: u32,
     artist: &str,
@@ -500,12 +576,52 @@ fn wrong_parent_is_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "The previous round needs a winner")]
-fn submissions_require_a_previous_winner() {
+fn another_attempt_can_start_without_a_previous_winner() {
     let mut chapters = setup();
     actor(VOTERS[0], REVEAL_END, 0);
     assert_eq!(chapters.finalize(1).outcome, Some(Outcome::Unfunded));
-    artwork(&mut chapters, 2, ARTISTS[0], 0, None);
+    let first = artwork(&mut chapters, 2, ARTISTS[0], 0, None);
+    let second = artwork(&mut chapters, 2, ARTISTS[1], 1, None);
+    assert_eq!(
+        create_with_art(
+            &mut chapters,
+            REVEAL_END,
+            2,
+            [first.candidate, second.candidate],
+            Some([1, 2])
+        ),
+        2
+    );
+    assert_eq!(
+        chapters.get_round(1).unwrap().outcome,
+        Some(Outcome::Unfunded)
+    );
+    assert!(chapters.get_round(2).unwrap().terms.parent_sha256.is_none());
+}
+
+#[test]
+fn another_attempt_after_a_no_winner_round_keeps_the_latest_winner_as_parent() {
+    let mut chapters = setup();
+    let winner = finalize_with_winner(&mut chapters);
+    assert_eq!(create(&mut chapters, REVEAL_END, 2), 2);
+    actor(VOTERS[0], REVEAL_END * 2, 0);
+    assert_eq!(chapters.finalize(2).outcome, Some(Outcome::Unfunded));
+    let first = artwork(&mut chapters, 3, ARTISTS[0], 0, Some(&winner));
+    let second = artwork(&mut chapters, 3, ARTISTS[1], 1, Some(&winner));
+    assert_eq!(
+        create_with_art(
+            &mut chapters,
+            REVEAL_END * 2,
+            2,
+            [first.candidate, second.candidate],
+            Some([1, 2])
+        ),
+        3
+    );
+    assert_eq!(
+        chapters.get_round(3).unwrap().terms.parent_sha256,
+        Some(winner)
+    );
 }
 
 #[test]
@@ -570,6 +686,7 @@ fn duplicate_bytes_are_rejected_across_artists() {
 #[should_panic(expected = "Artwork exceeds 49152 bytes")]
 fn over_limit_upload_is_rejected_before_decoding() {
     let mut chapters = empty();
+    invite(&mut chapters, 1, ARTISTS.map(id).to_vec());
     actor(ARTISTS[0], 0, 0);
     chapters.submit_art(
         1,
@@ -584,6 +701,7 @@ fn over_limit_upload_is_rejected_before_decoding() {
 #[should_panic(expected = "Attach the exact artwork storage cost")]
 fn artist_must_prepay_storage() {
     let mut chapters = empty();
+    invite(&mut chapters, 1, ARTISTS.map(id).to_vec());
     actor(ARTISTS[0], 0, 0);
     chapters.submit_art(
         1,
@@ -614,6 +732,7 @@ fn curator_cannot_replace_the_signed_artist_or_art_attributes() {
 #[should_panic(expected = "Artwork must match its JPEG, PNG or WebP type")]
 fn artwork_signature_must_match_the_claimed_type() {
     let mut chapters = empty();
+    invite(&mut chapters, 1, ARTISTS.map(id).to_vec());
     let cost = chapters.art_storage_cost(PNG_SIGNATURE.len() as u32).0;
     actor(ARTISTS[0], 0, cost);
     chapters.submit_art(
@@ -629,6 +748,7 @@ fn artwork_signature_must_match_the_claimed_type() {
 #[should_panic(expected = "The artist must sign directly")]
 fn delegated_submission_cannot_impersonate_an_artist() {
     let mut chapters = empty();
+    invite(&mut chapters, 1, ARTISTS.map(id).to_vec());
     let cost = chapters.art_storage_cost(PNG_SIGNATURE.len() as u32).0;
     testing_env!(
         context(ARTISTS[0], 0, cost)
@@ -645,12 +765,66 @@ fn delegated_submission_cannot_impersonate_an_artist() {
 }
 
 #[test]
-#[should_panic(expected = "Artwork submission limit reached")]
-fn bounds_per_round_submissions() {
+#[should_panic(expected = "Invite 2 to 8 artists")]
+fn artist_roster_bounds_the_number_of_submissions() {
     let mut chapters = empty();
-    for i in 0..=MAX_SUBMISSIONS as u8 {
-        artwork(&mut chapters, 1, &format!("artist-{i}.test.near"), i, None);
-    }
+    invite(
+        &mut chapters,
+        1,
+        (0..=MAX_SUBMISSIONS)
+            .map(|i| id(&format!("artist-{i}.test.near")))
+            .collect(),
+    );
+}
+
+#[test]
+#[should_panic(expected = "The curator must invite this artist")]
+fn uninvited_wallet_cannot_take_an_artist_slot() {
+    let mut chapters = empty();
+    invite(&mut chapters, 1, ARTISTS.map(id).to_vec());
+    submit_artwork(&mut chapters, 1, "uninvited.test.near", 0, None);
+}
+
+#[test]
+fn curator_replaces_unused_invitation_without_paying_for_storage_twice() {
+    let mut chapters = empty();
+    invite(&mut chapters, 1, ARTISTS.map(id).to_vec());
+    let first = artwork(&mut chapters, 1, ARTISTS[0], 0, None);
+    assert_eq!(chapters.artist_roster_cost(1).0, 0);
+    invite(
+        &mut chapters,
+        1,
+        vec![id(ARTISTS[0]), id("new-artist.test.near")],
+    );
+    let second = submit_artwork(&mut chapters, 1, "new-artist.test.near", 1, None);
+    assert_eq!([first.submission_id, second.submission_id], [1, 2]);
+}
+
+#[test]
+#[should_panic(expected = "Keep artists who have already submitted")]
+fn curator_cannot_discard_a_signed_entry_with_an_invitation_edit() {
+    let mut chapters = empty();
+    artwork(&mut chapters, 1, ARTISTS[0], 0, None);
+    invite(
+        &mut chapters,
+        1,
+        vec![id(ARTISTS[1]), id("new-artist.test.near")],
+    );
+}
+
+#[test]
+fn quotes_enough_storage_for_the_maximum_artist_roster() {
+    let mut chapters = empty();
+    let deposit = chapters.artist_roster_cost(1).0;
+    actor(CURATOR, 0, deposit);
+    let usage = env::storage_usage();
+    let artists = (0..MAX_SUBMISSIONS)
+        .map(|i| id(&format!("{i}{}", "x".repeat(63))))
+        .collect::<Vec<_>>();
+    chapters.set_artists(1, artists.clone());
+    let used_bytes = u128::from(env::storage_usage() - usage);
+    assert!(used_bytes * env::storage_byte_cost().as_yoctonear() <= deposit);
+    assert_eq!(chapters.get_artists(1), artists);
 }
 
 #[test]
@@ -660,6 +834,7 @@ fn quoted_art_storage_covers_the_largest_entry() {
     let mut bytes = vec![0; MAX_ART_BYTES as usize];
     bytes[..PNG_SIGNATURE.len()].copy_from_slice(PNG_SIGNATURE);
     let cost = chapters.art_storage_cost(MAX_ART_BYTES).0;
+    invite(&mut chapters, 2, vec![id(&"a".repeat(64)), id(ARTISTS[1])]);
     actor(&"a".repeat(64), REVEAL_END, cost);
     let usage = env::storage_usage();
     let art = chapters.submit_art(

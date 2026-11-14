@@ -5,7 +5,7 @@ import {
   applyDemo, canEnableDemoChapters, DEMO_CONTRACT, demoChapterContract, demoView, emptyDemo,
   listDemoChapterSales, readDemoProof, readDemoView, resetDemo, runDemo,
 } from "./demo";
-import { bountyRecipient, LANTERN_STORY, parseRecoveryCode, recoveryCode, voteCommitment, type ChapterSeries } from "./model";
+import { bountyRecipient, LANTERN_STORY, minimumChapterLock, newVoteSecret, nextChapterId, parseRecoveryCode, recoveryCode, voteCommitment, type ChapterSeries } from "./model";
 import { sandboxAction } from "./sandbox";
 
 const gold = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAACXBIWXMAAAABAAAAAQBPJcTWAAAAI0lEQVR4nGO8vCCagRTAQpJqhlENxAEWItXBwagGYgDJoQQA5gcCDJsebXUAAAAASUVORK5CYII=";
@@ -44,7 +44,7 @@ describe("Lantern chapters", () => {
     await expect(applyDemo(state, { kind: "create", terms: { ...selected, candidates: [b, a] } })).rejects.toThrow(/do not match/);
     state = await applyDemo(state, { kind: "create", terms: selected });
     const continuation = { ...upload, roundId: 2, imageBase64: red, parentSha256: a.content_sha256 };
-    await expect(applyDemo(state, continuation)).rejects.toThrow(/winning first panel/);
+    await expect(applyDemo(state, continuation)).rejects.toThrow(/submissions are closed/);
     state = await applyDemo(state, { kind: "fund", round: 1, account: alice });
     state = await applyDemo(state, { kind: "commit", round: 1, account: alice, amount: 5n * unit,
       commitment: await voteCommitment(DEMO_CONTRACT, 1, alice, choice0) });
@@ -52,9 +52,9 @@ describe("Lantern chapters", () => {
     state = await applyDemo(state, { kind: "reveal", round: 1, account: alice, secret: choice0 });
     state = await applyDemo(state, { kind: "end_reveal", round: 1 });
     state = await applyDemo(state, { kind: "finalize", round: 1 });
-    await expect(applyDemo(state, { ...continuation, parentSha256: b.content_sha256 })).rejects.toThrow(/winning first panel/);
+    await expect(applyDemo(state, { ...continuation, parentSha256: b.content_sha256 })).rejects.toThrow(/latest winning panel/);
     await expect(applyDemo(state, { ...continuation, imageBase64: gold })).rejects.toThrow(/new panel/);
-    await expect(applyDemo(state, { kind: "create", terms: terms(1) })).rejects.toThrow(/continue the winning first panel/);
+    await expect(applyDemo(state, { kind: "create", terms: terms(1) })).rejects.toThrow(/signed artist submissions/);
     state = await applyDemo(state, continuation);
     expect(demoView(state, null).submissions?.[2][0]).toMatchObject({ parent_sha256: a.content_sha256 });
     state = await applyDemo(state, { kind: "bounty", round: 1 });
@@ -75,6 +75,29 @@ describe("Lantern chapters", () => {
     expect(parseRecoveryCode("1:bad")).toBeNull();
     expect(await voteCommitment(contract, 1, alice, choice1)).not.toBe(commitment);
     expect(await voteCommitment(contract, 2, bob, choice1)).not.toBe(commitment);
+  });
+
+  it("generates 32 bytes from Web Crypto and fails closed without it", () => {
+    expect(newVoteSecret(1)).toMatchObject({ choice: 1, salt: /^[a-f0-9]{64}$/ });
+    vi.stubGlobal("crypto", undefined);
+    try { expect(() => newVoteSecret(0)).toThrow(/securely generate/); }
+    finally { vi.unstubAllGlobals(); }
+  });
+
+  it("enforces the minimum lock and allows a no-winner round to be retried", async () => {
+    const initial = terms(0);
+    let state = await applyDemo(emptyDemo(), { kind: "create", terms: initial });
+    state = await applyDemo(state, { kind: "fund", round: 1, account: alice });
+    const minimum = minimumChapterLock(initial);
+    expect(minimum).toBe(625_000_000_000_000_000n);
+    const commitment = await voteCommitment(DEMO_CONTRACT, 1, alice, choice0);
+    await expect(applyDemo(state, { kind: "commit", round: 1, account: alice, amount: minimum - 1n, commitment })).rejects.toThrow(/amount/);
+    state = await applyDemo(state, { kind: "end_commit", round: 1 });
+    state = await applyDemo(state, { kind: "end_reveal", round: 1 });
+    state = await applyDemo(state, { kind: "finalize", round: 1 });
+    expect(nextChapterId(demoView(state, null))).toBe(2);
+    state = await applyDemo(state, { kind: "create", terms: initial });
+    expect(demoView(state, null).rounds).toMatchObject([{ outcome: "no_quorum" }, { parent_sha256: null, round_id: 2 }]);
   });
 
   it("returns unrevealed locks even after round 2 opens and pays a winner once", async () => {
@@ -138,6 +161,23 @@ describe("per-token demo stories", () => {
       removeItem: (key: string) => entries.delete(key),
     });
   }
+
+  it("persists a simulated buy before story setup and scopes the balances to the buyer and token", async () => {
+    useStorage();
+    try {
+      const displayUnit = 10n ** BigInt(fairTest.decimals);
+      const buy = { kind: "buy_demo", account: alice, amount: 250n * displayUnit, cost: 2_000_000n } as const;
+      await runDemo(buy, fairTest);
+      expect(readDemoView(alice, fairTest)).toMatchObject({ balance: (350n * displayUnit).toString(), quoteBalance: "98000000" });
+      expect(readDemoView(bob, fairTest)).toMatchObject({ balance: (100n * displayUnit).toString(), quoteBalance: "100000000" });
+      expect(readDemoView(alice, custom).quoteBalance).toBe("100000000");
+      await expect(runDemo({ ...buy, cost: 99_000_000n }, fairTest)).rejects.toThrow(/balance/);
+      await runDemo(enable, fairTest);
+      expect(readDemoView(alice, fairTest).balance).toBe((350n * displayUnit).toString());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("authorizes the actual creator or the mock Fair Test seed role", async () => {
     expect(canEnableDemoChapters(fairTest, alice)).toBe(true);

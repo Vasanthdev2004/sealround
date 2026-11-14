@@ -1,0 +1,23 @@
+{
+  "schema": "sealround.mcp-sandbox-bid.v1",
+  "network": "sandbox",
+  "recordedAt": "2026-11-14T12:25:47.963Z",
+  "passedChecks": 91,
+  "saleId": "mcp-tee",
+  "accepted": {
+    "tool": "sealround_place_bid",
+    "transaction": "BmY8XmF1xp1TNjQFP8CMxWEHxrjai1JwbmD5QKzcJnyT",
+    "index": 0,
+    "depositTestUsdc": "5",
+    "sealedBytes": 246,
+    "gasPaidBy": "relayer"
+  },
+  "refused": {
+    "tool": "sealround_place_bid",
+    "maxDepositTestUsdc": "4.999999",
+    "attemptedDepositTestUsdc": "5",
+    "code": "over_budget",
+    "nothingSent": true,
+    "nonceAndBalanceUnchanged": true
+  }
+}

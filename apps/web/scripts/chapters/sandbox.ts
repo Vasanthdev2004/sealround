@@ -7,8 +7,9 @@ import { parseArgs } from "node:util";
 import { commitmentHex } from "@fairground/clearing";
 import { actions, teraToGas, type Account, type SerializedReturnValue } from "near-api-js";
 import { createRpc } from "../../src/lib/near/rpc";
+import { checkRheaSwap, quoteRhea, rheaSwapAction, RHEA_SANDBOX, type RheaChain, type RheaQuote } from "../../src/lib/near/rhea-swap";
 import { verifyPayoutReceipt } from "../../src/lib/chapters/payout-receipt";
-import type { SaleView } from "../../src/lib/near/views";
+import type { ResultView, SaleView } from "../../src/lib/near/views";
 import { Chain, REPO_DIR, WEB_DIR, sleep, type Named, type Validator } from "../e2e/chain";
 import { Report, type Checks } from "../e2e/report";
 
@@ -137,7 +138,7 @@ async function rejected(t: Checks, label: string, run: () => Promise<unknown>, r
   }
 }
 
-async function launchSale(chain: Chain, root: Account, sale: Named, usdc: Named, bidders: Named[], fairTest: boolean, creator: Account) {
+async function launchSale(chain: Chain, root: Account, sale: Named, usdc: Named, bidders: Named[], fairTest: boolean, creator: Account, dex?: string) {
   await sale.account.deployContract(readFileSync(path.join(RES, "fairground.wasm")));
   const sealerHash = readFileSync(path.join(REPO_DIR, "enclave", "res", "fairground_sealer.wasm.sha256"), "utf8").trim().split(/\s+/)[0];
   await call(sale.account, sale.id, "new", {
@@ -147,7 +148,7 @@ async function launchSale(chain: Chain, root: Account, sale: Named, usdc: Named,
     sealer_code_hash: sealerHash,
     sealer_secrets: null,
     allowed_quote_tokens: [usdc.id],
-    dex: null,
+    dex: dex ?? null,
   });
   const saleId = fairTest ? "fairt" : SALE_ID;
   const saleView = () => chain.view<SaleView>(sale.id, "get_sale", { sale_id: saleId });
@@ -158,7 +159,7 @@ async function launchSale(chain: Chain, root: Account, sale: Named, usdc: Named,
     token_name: fairTest ? "Fair Test" : "Lantern",
     token_symbol: fairTest ? "FAIRT" : "LNTN",
     decimals: 18,
-    total_supply: (5_000n * TOKEN).toString(),
+    total_supply: ((dex ? 6_000n : 5_000n) * TOKEN).toString(),
     sale_supply: (4_000n * TOKEN).toString(),
     floor_price: "1000",
     min_raise: USDC.toString(),
@@ -172,6 +173,7 @@ async function launchSale(chain: Chain, root: Account, sale: Named, usdc: Named,
     settle_timeout: (600n * SECOND).toString(),
     quote_token: usdc.id,
     description: "Local fixture for creator-led chapters.",
+    ...(dex && { liquidity: { raise_share_bps: 2000, pool_tokens: (1000n * TOKEN).toString(), fee_bps: 30 } }),
   };
   const storage = BigInt(await chain.view<string>(sale.id, "get_create_cost", { params }));
   await call(creator, sale.id, "create_sale", { params }, storage, 300);
@@ -193,12 +195,36 @@ async function launchSale(chain: Chain, root: Account, sale: Named, usdc: Named,
   await chain.advanceTo(BigInt(revealEnd));
   await call(root, sale.id, "clear_onchain", { sale_id: saleId }, 0n, 150);
   if ((await saleView()).status !== "settled") throw new Error("The fixture sale did not settle");
+  let poolId: number | null = null;
+  if (dex) {
+    await call(root, sale.id, "seed_liquidity", { sale_id: saleId }, 0n, 300);
+    const result = await chain.view<ResultView>(sale.id, "get_result", { sale_id: saleId });
+    if (result.liquidity?.status !== "seeded" || result.liquidity.dex !== dex || result.liquidity.pool_id === null) {
+      throw new Error(`The Rhea pool did not seed: ${result.liquidity?.status ?? "absent"} ${result.liquidity?.next_step ?? ""}`);
+    }
+    poolId = result.liquidity.pool_id;
+  }
   for (const bidder of bidders) await call(bidder.account, sale.id, "claim", { sale_id: saleId, bidder: bidder.id }, 0n, 150);
   await call(creator, sale.id, "claim_proceeds", { sale_id: saleId }, 0n, 150);
-  return token;
+  return { token, poolId };
 }
 
-async function buildFixture(wasm: Buffer, factoryWasm?: Buffer) {
+async function deploySandboxRhea(chain: Chain, root: Account) {
+  const pathToWasm = path.join(REPO_DIR, "contracts", "tests", "res", "ref_exchange.wasm");
+  if (!existsSync(pathToWasm)) throw new Error("Fetch the pinned Rhea test WASM with node scripts/fetch-rhea-wasm.mjs first.");
+  const wasm = readFileSync(pathToWasm);
+  const pinnedHash = "8918c505017ceb57646bdd863c34e4fe56e2edc7756963d6f4a1f38d6f9c34d2";
+  if (createHash("sha256").update(wasm).digest("hex") !== pinnedHash) throw new Error("Rhea test WASM did not match the pinned hash.");
+  const dex = await chain.createAccount(root, "dex", 20);
+  if (dex.id !== RHEA_SANDBOX) throw new Error("Expected the isolated local Rhea account.");
+  await dex.account.deployContract(wasm);
+  await call(dex.account, dex.id, "new", {
+    owner_id: root.accountId, boost_farm_id: root.accountId, burrowland_id: root.accountId, exchange_fee: 0, referral_fee: 0,
+  });
+  return dex.id;
+}
+
+async function buildFixture(wasm: Buffer, factoryWasm?: Buffer, withRhea = false) {
   const { chain, root } = await startSandbox();
   console.log(`Chapters sandbox RPC ${chain.rpcUrl}`);
   const sale = await chain.createAccount(root, "fairground", 30);
@@ -210,7 +236,13 @@ async function buildFixture(wasm: Buffer, factoryWasm?: Buffer) {
   const voters = [await chain.createAccount(root, "alice", 5), await chain.createAccount(root, "bobby", 5), await chain.createAccount(root, "carol", 5)] as const;
   await usdc.account.deployContract(readFileSync(path.join(RES, "mock_ft.wasm")));
   await call(usdc.account, usdc.id, "new", { name: "Test USDC", symbol: "USDC", decimals: 6 });
-  const token = await launchSale(chain, root, sale, usdc, [...voters], !!factoryWasm, factoryWasm ? sponsor.account : root);
+  const dex = withRhea ? await deploySandboxRhea(chain, root) : undefined;
+  const { token, poolId } = await launchSale(chain, root, sale, usdc, [...voters], !!factoryWasm, factoryWasm ? sponsor.account : root, dex);
+  const rhea: RheaChain | null = dex && poolId !== null ? {
+    exchange: dex, poolId, input: usdc.id, output: token, network: "sandbox", rpc: createRpc(chain.rpcUrl), rpcUrls: [chain.rpcUrl],
+  } : null;
+  const swapBuyer = rhea ? await chain.createAccount(root, "swap-buyer", 5) : null;
+  if (swapBuyer) await call(root, usdc.id, "mint", { account_id: swapBuyer.id, amount: USDC.toString() });
   let factory: Named | undefined;
   if (factoryWasm) {
     factory = await chain.createAccount(root, "chapters-factory", 45);
@@ -226,7 +258,7 @@ async function buildFixture(wasm: Buffer, factoryWasm?: Buffer) {
   await call(root, usdc.id, "mint", { account_id: sponsor.id, amount: (100n * USDC).toString() });
   // Mira starts unregistered on USDC so the test can prove a failed transfer is retryable.
   await register(root, usdc.id, sora.id);
-  return { chain, root, sale, usdc, chapters, sponsor, mira, sora, voters, token, factory };
+  return { chain, root, sale, usdc, chapters, sponsor, mira, sora, voters, token, factory, rhea, swapBuyer };
 }
 
 type Fixture = Omit<Awaited<ReturnType<typeof buildFixture>>, "chapters"> & { chapters: Pick<Named, "id"> };
@@ -298,6 +330,13 @@ async function artworkRequest(f: Fixture, roundId: number, index: number, parent
 
 async function submitChaptersArt(t: Checks, f: Fixture, roundId: number, title: string, parent: string | null): Promise<Chapter> {
   const [first, second] = await Promise.all([artworkRequest(f, roundId, 0, parent), artworkRequest(f, roundId, 1, parent)]);
+  const args = { round_id: roundId };
+  const rosterCost = BigInt(await f.chain.view<string>(f.chapters.id, "artist_roster_cost", args));
+  const artists = [f.mira.id, f.sora.id];
+  await call(f.sponsor.account, f.chapters.id, "set_artists", { ...args, artists }, rosterCost);
+  t.eq("curator publishes the invited artist wallets", await f.chain.view(f.chapters.id, "get_artists", args), artists);
+  await rejected(t, "artwork needs a curator invitation", () => call(f.voters[0].account, f.chapters.id, "submit_art", first.args, first.deposit),
+    "The curator must invite this artist");
   const mira = await call<Submission>(f.mira.account, f.chapters.id, "submit_art", first.args, first.deposit);
   await rejected(t, "same artist cannot reserve a second slot", () => call(f.mira.account, f.chapters.id, "submit_art", second.args, second.deposit), "already submitted");
   const sora = await call<Submission>(f.sora.account, f.chapters.id, "submit_art", second.args, second.deposit);
@@ -358,11 +397,11 @@ function finalize(f: Fixture, id: number) {
 }
 
 function withdraw(f: Fixture, id: number, voter: Named) {
-  return call<boolean>(voter.account, f.chapters.id, "withdraw_vote", { round_id: id }, 1n);
+  return call<boolean>(voter.account, f.chapters.id, "withdraw_vote", { round_id: id }, 1n, 70);
 }
 
 function claim(f: Fixture, id: number, beneficiary: Named) {
-  return call<boolean>(beneficiary.account, f.chapters.id, "claim_bounty", { round_id: id }, 1n);
+  return call<boolean>(beneficiary.account, f.chapters.id, "claim_bounty", { round_id: id }, 1n, 70);
 }
 
 async function claimWithHash(f: Fixture, id: number, beneficiary: Named) {
@@ -391,8 +430,34 @@ async function exercise(report: Report, f: Fixture, chapters: [Chapter, Chapter]
   await call(f.root, usdc.id, "mint", { account_id: bobby.id, amount: BOUNTY.toString() });
   const quoteSupply = await chain.ftSupply(usdc.id);
   const sandbox = { contract: f.chapters.id, token, quote: usdc.id, rpcUrl: chain.rpcUrl, rpc: createRpc(chain.rpcUrl) };
+  const rhea = f.rhea;
+  let acquired = 0n;
+  const swapBuyer = f.swapBuyer;
 
-  await report.scenario("one", "The first light: two sealed choices and an independent artist payout", [], async (t) => {
+  if (rhea && swapBuyer) await report.scenario("rhea", "Fair Test purchase via the pinned Rhea exchange", ["factory"], async (t) => {
+    const buyer = swapBuyer;
+    await register(f.root, token, buyer.id);
+    const amount = 100_000n;
+    const quote = await quoteRhea(rhea, amount);
+    t.ok("Rhea returns a positive single-pool quote", quote.minimum > 0n && quote.minimum <= quote.estimate);
+    const inputBalance = await quoteBalance(buyer);
+    const outputBalance = await tokenBalance(buyer);
+    const swap = async (reviewed: RheaQuote) => {
+      const { receiverId, methodName, args, gas, deposit } = rheaSwapAction(rhea, reviewed);
+      const raw = await buyer.account.signAndSendTransaction({ receiverId, actions: [actions.functionCall(methodName, args, gas, deposit)], waitUntil: "FINAL", throwOnFailure: false });
+      return checkRheaSwap(rhea, raw.transaction.hash, buyer.id, reviewed);
+    };
+    const stale = await swap({ ...quote, minimum: quote.estimate + 1n });
+    t.eq("an unattainable minimum produced a confirmed full refund", stale.status, "refunded");
+    t.eq("the refunded buy left both wallet balances unchanged", [await quoteBalance(buyer), await tokenBalance(buyer)], [inputBalance, outputBalance]);
+    const paid = await swap(await quoteRhea(rhea, amount));
+    t.ok("the finalized receipt proves sale tokens reached the buyer", paid.status === "bought", paid.status);
+    if (paid.status !== "bought") throw new Error(`Rhea receipt outcome was ${paid.status}`);
+    acquired = paid.amount;
+    t.eq("payment and actual output match the queried wallet balances", [await quoteBalance(buyer), await tokenBalance(buyer)], [inputBalance - amount, outputBalance + acquired]);
+  });
+
+  await report.scenario("one", "The first light: two sealed choices and an independent artist payout", rhea ? ["rhea"] : [], async (t) => {
     t.eq("holders claimed their tokens from the sale", initial, [1_000n * TOKEN, 1_000n * TOKEN, 1_000n * TOKEN]);
     const a = ballot(alice, 0, 75n * TOKEN);
     const b = ballot(bobby, 1, 25n * TOKEN);
@@ -419,14 +484,21 @@ async function exercise(report: Report, f: Fixture, chapters: [Chapter, Chapter]
     const wrongTokenStart = await quoteBalance(alice);
     await commit(f, id, { ...a, amount: 1n }, usdc.id);
     t.eq("USDC cannot become voting weight", [await quoteBalance(alice), await vote(f, id, alice)], [wrongTokenStart, null]);
+    await commit(f, id, { ...a, amount: (100n * TOKEN / 8n) - 1n });
+    t.eq("below-minimum lock returns the full token transfer and reserves no slot", [await tokenBalance(alice), await vote(f, id, alice)], [initial[0], null]);
     for (const ballot of [a, b, c]) await commit(f, id, ballot);
+    if (swapBuyer) {
+      const boughtVote = ballot(swapBuyer, 0, acquired);
+      await commit(f, id, boughtVote);
+      t.eq("the buyer can lock exactly the tokens delivered by Rhea", [(await vote(f, id, swapBuyer))?.amount, await tokenBalance(swapBuyer)], [acquired.toString(), 0n]);
+    }
     const aBalance = await tokenBalance(alice);
     await commit(f, id, a);
     t.eq("duplicate commit was refunded", [await tokenBalance(alice), (await vote(f, id, alice))?.amount], [aBalance, a.amount.toString()]);
     t.eq("commit exposes weight and the domain-bound hash only", await vote(f, id, alice), {
       amount: a.amount.toString(), commitment: voteHash(f, id, a), revealed_choice: null, withdrawal_state: "unclaimed",
     });
-    t.eq("the escrow holds every ballot amount exactly once", await tokenBalance(f.chapters), a.amount + b.amount + c.amount);
+    t.eq("the escrow holds every ballot amount exactly once", await tokenBalance(f.chapters), a.amount + b.amount + c.amount + acquired);
     t.eq("the tally stays empty through voting", (await round(f, id)).tallies, ["0", "0"]);
     await rejected(t, "lock withdrawal before finalization is refused", () => withdraw(f, id, alice), "Finalize the round first");
     t.eq("the original lock remains claimable", (await vote(f, id, alice))?.withdrawal_state, "unclaimed");
@@ -443,7 +515,7 @@ async function exercise(report: Report, f: Fixture, chapters: [Chapter, Chapter]
     t.eq("Mira wins at quorum despite Carol's unrevealed lock", [result.outcome, result.winner, result.revealed, result.tallies], ["winner", 0, (100n * TOKEN).toString(), [(75n * TOKEN).toString(), (25n * TOKEN).toString()]]);
     const publicVotes = [...await votesPage(f, id, 0, 2), ...await votesPage(f, id, 2, 2)];
     t.eq("public pages retain unique commit order and no salt", publicVotes.map((v) => [v.account_id, v.revealed_choice, Object.hasOwn(v, "salt")]),
-      [[alice.id, 0, false], [bobby.id, 1, false], [carol.id, null, false]]);
+      [[alice.id, 0, false], [bobby.id, 1, false], [carol.id, null, false], ...(swapBuyer ? [[swapBuyer.id, null, false]] : [])]);
     t.eq("tally reconstructed from public vote weights", [0, 1].map((choice) => publicVotes.filter((v) => v.revealed_choice === choice)
       .reduce((sum, v) => sum + BigInt(v.amount), 0n).toString()), result.tallies);
     t.eq("repeat finalize preserves the winner", (await finalize(f, id)).winner, 0);
@@ -470,6 +542,10 @@ async function exercise(report: Report, f: Fixture, chapters: [Chapter, Chapter]
     await register(f.root, token, carol.id);
     t.eq("holder can retry withdrawal after registration", await withdraw(f, id, carol), true);
     for (const voter of [alice, bobby]) await withdraw(f, id, voter);
+    if (swapBuyer) {
+      await withdraw(f, id, swapBuyer);
+      t.eq("the buyer's full acquired amount is withdrawable after voting", await tokenBalance(swapBuyer), acquired);
+    }
     t.eq("all holder principal returned, even without a reveal", await Promise.all(f.voters.map(tokenBalance)), initial);
     t.eq("round one left neither token nor quote balance in escrow", [await tokenBalance(f.chapters), await quoteBalance(f.chapters)], [0n, 0n]);
   });
@@ -582,7 +658,7 @@ async function serve(f: Fixture, chapters: [Chapter, Chapter], creator: boolean)
     NEXT_PUBLIC_APP_URL: "",
     NEXT_PUBLIC_CHAPTERS_CONTRACT: f.factory ? "" : f.chapters.id,
     NEXT_PUBLIC_CHAPTERS_FACTORY: f.factory?.id ?? "",
-    NEXT_PUBLIC_DEV_ACCOUNTS: (creator ? [f.sponsor, ...f.voters, f.mira, f.sora] : [...f.voters, f.mira, f.sora, f.sponsor])
+    NEXT_PUBLIC_DEV_ACCOUNTS: (creator ? [f.sponsor, ...f.voters, f.mira, f.sora, ...(f.swapBuyer ? [f.swapBuyer] : [])] : [...f.voters, f.mira, f.sora, f.sponsor])
       .map(({ id, secret }) => `${id}=${secret}`).join(","),
   };
   mkdirSync(RUN_DIR, { recursive: true });
@@ -609,8 +685,9 @@ async function serve(f: Fixture, chapters: [Chapter, Chapter], creator: boolean)
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { wasm: { type: "string" }, serve: { type: "boolean" }, creator: { type: "boolean" }, "fair-test": { type: "boolean" } } });
+  const { values } = parseArgs({ options: { wasm: { type: "string" }, serve: { type: "boolean" }, creator: { type: "boolean" }, "fair-test": { type: "boolean" }, rhea: { type: "boolean" } } });
   if (values.creator && !values.serve) throw new Error("Use --creator with --serve.");
+  if (values.rhea && !values["fair-test"]) throw new Error("Use --rhea with --fair-test.");
   const artifact = values.wasm ? path.resolve(REPO_DIR, values.wasm) : path.join(REPO_DIR, "target", "near", "sealround_chapters", "sealround_chapters.wasm");
   const wasm = readFileSync(artifact);
   if (wasm.subarray(0, 4).toString("hex") !== "0061736d") throw new Error(`Not a Wasm artifact: ${artifact}`);
@@ -620,7 +697,7 @@ async function main() {
     // The name is unique to this process, so cleanup can only remove our own sandbox.
     cleanup = true;
     const factoryWasm = values["fair-test"] ? readFileSync(path.join(REPO_DIR, "target", "near", "sealround_chapters_factory", "sealround_chapters_factory.wasm")) : undefined;
-    const fixture = await buildFixture(wasm, factoryWasm);
+    const fixture = await buildFixture(wasm, factoryWasm, values.rhea === true);
     if (values.serve) {
       await serve(fixture, chapters, values.creator === true || values["fair-test"] === true);
     } else {

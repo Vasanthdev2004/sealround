@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useMemo } from "react";
+import { use, useMemo, useState } from "react";
 import Link from "next/link";
 import { RotateCw } from "lucide-react";
 import { BurnLine } from "@/components/burn/burn-line";
@@ -22,6 +22,7 @@ import type { Sale, SaleResult } from "@/lib/types";
 import { holdersOf, tokenFigures } from "./figures";
 import { LaunchPanel } from "./launch-panel";
 import { LaunchProof } from "./launch-proof";
+import { RheaBuy } from "./rhea-buy";
 import { ShareToken } from "./share-token";
 import { TokenHeader } from "./token-header";
 import { TokenSkeleton } from "./token-skeleton";
@@ -142,6 +143,7 @@ function Frame({
 }
 
 function TokenHome({ sale, result }: { sale: Sale; result: SaleResult }) {
+  const [balanceRevision, setBalanceRevision] = useState(0);
   // Stable while the result is unchanged, so the timeline does not redo work.
   const fills = useMemo(() => effectiveFills(result), [result]);
   const holders = holdersOf(fills);
@@ -169,7 +171,9 @@ function TokenHome({ sale, result }: { sale: Sale; result: SaleResult }) {
         <BurnLine sale={sale} result={result} />
       </Frame>
 
-      <TokenChapters sale={sale} />
+      <RheaBuy sale={sale} result={result} onBought={() => setBalanceRevision((revision) => revision + 1)} />
+
+      <TokenChapters sale={sale} balanceRevision={balanceRevision} />
 
       <Reveal>
         <SupplyStory sale={sale} result={result} hideNoPool />

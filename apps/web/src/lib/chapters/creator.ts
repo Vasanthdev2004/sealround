@@ -2,9 +2,10 @@ import type { ActionSigner, FairgroundAction } from "@fairground/relayer-client"
 import { summarizeOutcome } from "@fairground/relayer-client";
 import { ACCOUNT_ID } from "../config";
 import { readChapterArt } from "./art";
-import { isLanternPilot, LANTERN_STORY, parseLockAmount, type ChapterCandidate, type ChapterRound, type ChapterSeries, type ChapterState, type ChapterSubmission } from "./model";
+import { isLanternPilot, latestChapterWinner, LANTERN_STORY, MAX_CHAPTER_ROUNDS, nextChapterId, parseLockAmount, type ChapterCandidate, type ChapterRound, type ChapterSeries, type ChapterState, type ChapterSubmission } from "./model";
 import { readSandbox, type ChapterSandbox } from "./sandbox";
 import { confirmChapterChange } from "./transaction";
+export { nextChapterId } from "./model";
 
 export type ChapterTerms = {
   title: string;
@@ -45,11 +46,11 @@ function integer(value: string, min: number, max: number, label: string): number
 
 export function chapterTerms(
   draft: ChapterDraft, id: number, decimals: number, chainTimeMs: number | null,
-  selected?: [ChapterSubmission, ChapterSubmission], series?: ChapterSeries, quoteDecimals = 6,
+  selected?: [ChapterSubmission, ChapterSubmission], series?: ChapterSeries, quoteDecimals = 6, storyIndex = id - 1,
 ): ChapterTerms {
-  const bundled = isLanternPilot(series) ? LANTERN_STORY[id - 1]?.candidates : undefined;
+  const bundled = isLanternPilot(series) ? LANTERN_STORY[storyIndex]?.candidates : undefined;
   const candidates = selected ?? bundled;
-  if (id !== 1 && id !== 2) throw new Error("This story supports two chapters.");
+  if (!Number.isInteger(id) || id < 1 || id > MAX_CHAPTER_ROUNDS) throw new Error("Invalid chapter round.");
   if (!candidates || candidates.length !== 2) throw new Error("Choose two artist submissions first.");
   const title = draft.title.trim();
   if (!title || new TextEncoder().encode(title).byteLength > 96) throw new Error("Enter a chapter title of at most 96 bytes.");
@@ -89,22 +90,35 @@ function sameCandidate(a: ChapterCandidate, b: ChapterCandidate): boolean {
   return a.title === b.title && a.artist === b.artist && a.content_sha256 === b.content_sha256;
 }
 
-export function nextChapterId(state: ChapterState): number | null {
-  const prior = state.rounds.at(-1);
-  if (!prior) return 1;
-  return prior.round_id === 1 && prior.phase === "finalized" && prior.winner !== null ? 2 : null;
-}
-
 export type ChapterReview = { id: number; terms: ChapterTerms; deposit: string | null; parentSha256?: string | null };
+
+export async function saveChapterArtists(
+  sandbox: ChapterSandbox, account: string, id: number, artists: string[], reviewedCost: string, activeSigner: () => ActionSigner,
+): Promise<ChapterState> {
+  const { rpc, contract } = sandbox;
+  if (artists.length < 2 || artists.length > 8 || new Set(artists).size !== artists.length || artists.some((id) => !ACCOUNT_ID.test(id))) {
+    throw new Error("Enter 2 to 8 distinct NEAR artist accounts.");
+  }
+  const fresh = await readSandbox(sandbox, account);
+  if (fresh.config?.curator !== account || nextChapterId(fresh) !== id) throw new Error("Connect the curator and refresh the next chapter.");
+  if (fresh.submissions?.[id]?.some(({ artist }) => !artists.includes(artist))) {
+    throw new Error("Keep every artist who already submitted artwork.");
+  }
+  const deposit = await rpc.view<string>(contract, "artist_roster_cost", { round_id: id });
+  if (deposit !== reviewedCost) throw new Error("Review the updated artist roster deposit before signing.");
+  return sendAndRead(sandbox, account, activeSigner, {
+    receiverId: contract, methodName: "set_artists", args: { round_id: id, artists }, gas: 45n * TGAS, deposit: BigInt(deposit),
+  }, (next) => next.artists?.roundId === id && next.artists.accounts.join("\n") === artists.join("\n"));
+}
 
 export async function reviewChapter(
   sandbox: ChapterSandbox | null, id: number, draft: ChapterDraft, decimals: number,
-  selected: [ChapterSubmission, ChapterSubmission] | undefined, parentSha256: string | null, series?: ChapterSeries,
+  selected: [ChapterSubmission, ChapterSubmission] | undefined, parentSha256: string | null, series?: ChapterSeries, storyIndex = id - 1,
 ): Promise<ChapterReview> {
-  if ((id > 1 && !parentSha256) || selected?.some((submission) => submission.parent_sha256 !== parentSha256)) {
-    throw new Error("Choose artwork tied to the first chapter’s winning panel.");
+  if (selected?.some((submission) => submission.parent_sha256 !== parentSha256)) {
+    throw new Error("Choose artwork tied to the previous winning panel.");
   }
-  const terms = chapterTerms(draft, id, decimals, sandbox ? await sandbox.rpc.headTimeMs() : null, selected, series, sandbox?.quoteDecimals);
+  const terms = chapterTerms(draft, id, decimals, sandbox ? await sandbox.rpc.headTimeMs() : null, selected, series, sandbox?.quoteDecimals, storyIndex);
   const reviewed = { ...terms, round_id: id, parent_sha256: parentSha256 };
   const [deposit] = await Promise.all([
     sandbox?.rpc.view<string>(sandbox.contract, "storage_cost", { max_voters: terms.max_voters }) ?? null,
@@ -130,7 +144,7 @@ export async function createChapter(
   const fresh = await readSandbox(sandbox, account);
   if (fresh.config?.curator !== account) throw new Error("Connect the curator account to create the chapter.");
   if (nextChapterId(fresh) !== id) throw new Error("Chapter availability changed. Read the chapter again before creating.");
-  const prior = fresh.rounds.at(-1);
+  const prior = latestChapterWinner(fresh.rounds);
   const currentParent = prior?.winner != null ? prior.candidates[prior.winner].content_sha256 : null;
   const submissions = fresh.submissions?.[id] ?? [];
   const picks = terms.submission_ids;

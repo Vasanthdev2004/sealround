@@ -4,7 +4,7 @@
     "title": "Sniper bot at the open",
     "attempt": "A bot bids as soon as the window opens, hoping to buy at a better price.",
     "outcome": "Every winner pays the clearing price. In nosnipe-11140458 the first and last bidders each paid 0.002 USDC per token.",
-    "tx": { "hash": "4XA47KqcjkkXfKW8TeUiqhoow7N5DuACx1Yx4aimt8tC", "network": "testnet" },
+    "tx": { "hash": "4XA47KqcjkkXfKW8TeUiqhoow7N5DuACx1Yx4aimt8tC", "network": "testnet", "signer": "sniper.itzbeast.testnet" },
     "test": "crates/clearing/tests/clear.rs::bot_and_human_pay_the_same_clearing_price"
   },
   {
@@ -12,7 +12,7 @@
     "title": "Copied ciphertext",
     "attempt": "A bidder submits a copy of another account’s sealed bid.",
     "outcome": "The enclave detects the account mismatch when it opens the bid. In a settled sale the contract voids the bid and returns the deposit less a 1% penalty.",
-    "tx": { "hash": "FJZMbbdKYRUaoSZbuAmCqU8NNgQX4t2pRA8BYPRfPGZL", "network": "testnet" },
+    "tx": { "hash": "FJZMbbdKYRUaoSZbuAmCqU8NNgQX4t2pRA8BYPRfPGZL", "network": "testnet", "signer": "copy.itzbeast.testnet" },
     "test": "apps/web/scripts/e2e/scenarios.ts::tee-clear"
   },
   {

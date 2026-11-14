@@ -6,7 +6,11 @@ import type { ChapterTerms } from "./creator";
 import {
   bountyRecipient,
   isLanternPilot,
+  latestChapterWinner,
   LANTERN_STORY,
+  MAX_CHAPTER_ROUNDS,
+  minimumChapterLock,
+  nextChapterId,
   validateChapterStory,
   voteCommitment,
   type ChapterOutcome,
@@ -31,7 +35,6 @@ const DEMO_CHANGE = "sealround:chapters:change";
 const DEMO_QUOTE_BALANCE = 100_000_000n;
 const DEMO_ACCOUNT = /^guest-[a-z0-9]+\.testnet$/;
 const PHASES = ["funding", "commit", "reveal", "awaiting_finalization", "finalized"] as const;
-const DEMO_MAX_ROUNDS = 2;
 const SEED_CREATORS = new Map([
   ["fairt", "fairground.testnet"], ["thistle", "meadow.testnet"], ["driftwood", "shoreline.testnet"],
   ["kiln", "kilnworks.testnet"], ["ashfall", "kilnworks.testnet"], ["moth", "nightshift.testnet"],
@@ -39,10 +42,13 @@ const SEED_CREATORS = new Map([
 
 type DemoRound = { terms: ChapterTerms; phase: (typeof PHASES)[number]; votes: Record<string, ChapterVote>; bountyPaid: boolean };
 type DemoSubmission = { submission: ChapterSubmission; imageBase64: string };
-export type DemoState = { curator: string | null; story?: ChapterStory; rounds: DemoRound[]; uploads: DemoSubmission[] };
+type DemoPurchase = { amount: string; spent: string };
+export type DemoState = { curator: string | null; story?: ChapterStory; rounds: DemoRound[]; uploads: DemoSubmission[];
+  purchases?: Record<string, DemoPurchase> };
 
 export type DemoAction =
   | ({ kind: "enable"; account: string } & ChapterStory)
+  | { kind: "buy_demo"; account: string; amount: bigint; cost: bigint }
   | { kind: "create"; terms: ChapterTerms; account?: string }
   | (SubmitArtAction & { account: string })
   | { kind: "fund"; round: number; account: string }
@@ -80,7 +86,8 @@ export function canEnableDemoChapters(series: ChapterSeries, account: string | n
   if (!account || isLanternPilot(series)) return false;
   if (account === series.creator) return true;
   const seedId = /^fairt-\d+$/.test(series.saleId) ? "fairt" : series.saleId;
-  return DEMO_ACCOUNT.test(account) && SEED_CREATORS.get(seedId) === series.creator
+  const seedCreator = /^judge-\d+$/.test(seedId) ? "judge.testnet" : SEED_CREATORS.get(seedId);
+  return DEMO_ACCOUNT.test(account) && seedCreator === series.creator
     && series.token === `${series.saleId}.fairground.testnet`;
 }
 
@@ -102,8 +109,8 @@ function sameCandidate(value: unknown, candidate: ChapterRound["candidates"][num
     && value.content_sha256 === candidate.content_sha256;
 }
 
-function checkedTerms(value: unknown, roundIndex: number, uploads: DemoSubmission[], series?: ChapterSeries): ChapterTerms {
-  const bundled = isLanternPilot(series) ? LANTERN_STORY[roundIndex]?.candidates : undefined;
+function checkedTerms(value: unknown, roundIndex: number, uploads: DemoSubmission[], series?: ChapterSeries, storyIndex = roundIndex): ChapterTerms {
+  const bundled = isLanternPilot(series) ? LANTERN_STORY[storyIndex]?.candidates : undefined;
   if (!checkedObject(value) || typeof value.title !== "string" || !value.title.trim()
       || new TextEncoder().encode(value.title).length > 96 || typeof value.sponsor !== "string"
       || !canActInDemo(value.sponsor, series) || typeof value.bounty !== "string" || !/^[1-9]\d{0,8}$/.test(value.bounty)
@@ -145,17 +152,18 @@ function checkedTerms(value: unknown, roundIndex: number, uploads: DemoSubmissio
 
 function checkedUploads(value: unknown, series?: ChapterSeries): DemoSubmission[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > MAX_ART_SUBMISSIONS * DEMO_MAX_ROUNDS) throw new Error("Invalid demo artwork list");
+  if (!Array.isArray(value) || value.length > MAX_ART_SUBMISSIONS * MAX_CHAPTER_ROUNDS) throw new Error("Invalid demo artwork list");
   const artists = new Set<string>();
-  const counts = [0, 0];
+  const counts = Array<number>(MAX_CHAPTER_ROUNDS).fill(0);
   return value.map((row: unknown) => {
     if (!checkedObject(row) || !checkedObject(row.submission) || typeof row.imageBase64 !== "string") throw new Error("Invalid demo artwork");
     const { round_id, submission_id, title, artist, mime_type, content_sha256, parent_sha256 } = row.submission;
-    if ((round_id !== 1 && round_id !== 2) || submission_id !== ++counts[round_id - 1] || submission_id > MAX_ART_SUBMISSIONS
+    if (typeof round_id !== "number" || !Number.isInteger(round_id) || round_id < 1 || round_id > MAX_CHAPTER_ROUNDS
+      || submission_id !== ++counts[round_id - 1] || submission_id > MAX_ART_SUBMISSIONS
       || typeof title !== "string" || !title.trim() || new TextEncoder().encode(title).length > 96
       || typeof artist !== "string" || !canActInDemo(artist, series) || !isArtMime(mime_type)
       || typeof content_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(content_sha256)
-      || (round_id === 1 ? parent_sha256 !== null : typeof parent_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(parent_sha256))) {
+      || (parent_sha256 !== null && (typeof parent_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(parent_sha256)))) {
       throw new Error("Invalid demo artwork metadata");
     }
     const artistKey = `${round_id}:${artist}`;
@@ -168,29 +176,46 @@ function checkedUploads(value: unknown, series?: ChapterSeries): DemoSubmission[
 /** Validate the versioned demo store before using its amounts or indexing a round. */
 function parseDemo(raw: string, series?: ChapterSeries): DemoState {
   const saved: unknown = JSON.parse(raw);
-  if (!checkedObject(saved) || !Array.isArray(saved.rounds) || saved.rounds.length > DEMO_MAX_ROUNDS) {
+  if (!checkedObject(saved) || !Array.isArray(saved.rounds) || saved.rounds.length > MAX_CHAPTER_ROUNDS) {
     throw new Error("Invalid demo rounds");
   }
   const curator = typeof saved.curator === "string" && canActInDemo(saved.curator, series) ? saved.curator : null;
   let story: ChapterStory | undefined;
-  if (!isLanternPilot(series)) {
+  if (!isLanternPilot(series) && (saved.story !== undefined || saved.rounds.length > 0 || curator !== null)) {
     if (!series || !canEnableDemoChapters(series, curator) || !checkedObject(saved.story)
       || typeof saved.story.title !== "string" || typeof saved.story.brief !== "string") throw new Error("Invalid demo story");
     story = validateChapterStory(saved.story.title, saved.story.brief);
   }
   const uploads = checkedUploads(saved.uploads, series);
+  if (!isLanternPilot(series) && !story && uploads.length) throw new Error("Invalid demo story.");
+  let purchases: DemoState["purchases"];
+  if (saved.purchases !== undefined) {
+    if (!checkedObject(saved.purchases)) throw new Error("Invalid demo purchases.");
+    const entries = Object.entries(saved.purchases).map(([account, value]): [string, DemoPurchase] => {
+      if (!canActInDemo(account, series) || !checkedObject(value)
+        || typeof value.amount !== "string" || !/^[1-9]\d{0,38}$/.test(value.amount) || BigInt(value.amount) > U128_MAX - demoVotingBalance(series)
+        || typeof value.spent !== "string" || !/^[1-9]\d{0,38}$/.test(value.spent) || BigInt(value.spent) > U128_MAX) {
+        throw new Error("Invalid demo purchase.");
+      }
+      return [account, { amount: value.amount, spent: value.spent }];
+    });
+    purchases = Object.fromEntries(entries);
+  }
   const initialVotingBalance = demoVotingBalance(series);
-  const rounds = saved.rounds.map((row: unknown, index): DemoRound => {
+  const rounds: DemoRound[] = [];
+  let wins = 0;
+  for (const [index, row] of saved.rounds.entries()) {
     if (!checkedObject(row) || !PHASES.some((phase) => phase === row.phase) || !checkedObject(row.votes) || typeof row.bountyPaid !== "boolean") {
       throw new Error("Invalid demo round");
     }
     const terms = isLanternPilot(series) && (row.terms === undefined || (checkedObject(row.terms) && row.terms.sponsor === LEGACY_SPONSOR))
-      ? preservedTerms(index) : checkedTerms(row.terms, index, uploads, series);
+      ? preservedTerms(wins) : checkedTerms(row.terms, index, uploads, series, wins);
     const entries = Object.entries(row.votes);
     if (entries.length > terms.max_voters) throw new Error("Too many demo votes");
     const votes = entries.map(([account, vote]): [string, ChapterVote] => {
       if (!canActInDemo(account, series) || !checkedObject(vote) ||
-          typeof vote.amount !== "string" || !/^[1-9]\d{0,38}$/.test(vote.amount) || BigInt(vote.amount) > initialVotingBalance ||
+          typeof vote.amount !== "string" || !/^[1-9]\d{0,38}$/.test(vote.amount)
+          || BigInt(vote.amount) > initialVotingBalance + BigInt(purchases?.[account]?.amount ?? "0") ||
           typeof vote.commitment !== "string" || !/^[a-f0-9]{64}$/.test(vote.commitment) ||
           (vote.revealed_choice !== null && vote.revealed_choice !== 0 && vote.revealed_choice !== 1) ||
           (vote.withdrawal_state !== "unclaimed" && vote.withdrawal_state !== "paid")) {
@@ -198,9 +223,11 @@ function parseDemo(raw: string, series?: ChapterSeries): DemoState {
       }
       return [account, { amount: vote.amount, commitment: vote.commitment, revealed_choice: vote.revealed_choice, withdrawal_state: vote.withdrawal_state }];
     });
-    return { terms, phase: row.phase as DemoRound["phase"], votes: Object.fromEntries(votes), bountyPaid: row.bountyPaid };
-  });
-  return { curator, story, rounds, uploads };
+    const round = { terms, phase: row.phase as DemoRound["phase"], votes: Object.fromEntries(votes), bountyPaid: row.bountyPaid };
+    rounds.push(round);
+    if (round.phase === "finalized" && demoWinner(round).winner !== null) wins++;
+  }
+  return { curator, story, rounds, uploads, purchases };
 }
 
 function readDemo(series?: ChapterSeries): DemoState {
@@ -212,38 +239,41 @@ function readDemo(series?: ChapterSeries): DemoState {
   }
 }
 
+function demoWinner(round: DemoRound) {
+  const tally = [0n, 0n];
+  let locked = 0n;
+  for (const vote of Object.values(round.votes)) {
+    locked += BigInt(vote.amount);
+    if (vote.revealed_choice !== null) tally[vote.revealed_choice] += BigInt(vote.amount);
+  }
+  const revealed = tally[0] + tally[1];
+  const outcome: ChapterOutcome | null = round.phase !== "finalized" ? null
+    : revealed < BigInt(round.terms.quorum) ? "no_quorum" : tally[0] === tally[1] ? "tie" : "winner";
+  const winner: Choice | null = outcome === "winner" ? (tally[0] > tally[1] ? 0 : 1) : null;
+  return { tally, locked, revealed, outcome, winner };
+}
+
 export function demoView(state: DemoState, account: string | null, series?: ChapterSeries): ChapterState {
   const votes: ChapterState["votes"] = {};
-  const submissions: NonNullable<ChapterState["submissions"]> = { 1: [], 2: [] };
-  for (const { submission } of state.uploads) submissions[submission.round_id].push(submission);
-  let balance = demoVotingBalance(series);
-  let quoteBalance = DEMO_QUOTE_BALANCE;
+  const submissions: NonNullable<ChapterState["submissions"]> = {};
+  for (const { submission } of state.uploads) (submissions[submission.round_id] ??= []).push(submission);
+  const purchase = account ? state.purchases?.[account] : undefined;
+  let balance = demoVotingBalance(series) + BigInt(purchase?.amount ?? "0");
+  let quoteBalance = DEMO_QUOTE_BALANCE - BigInt(purchase?.spent ?? "0");
   let parent_sha256: string | null = null;
   const rounds = state.rounds.map((round, index): ChapterRound => {
     const id = index + 1;
-    const tally = [0n, 0n];
-    let locked = 0n;
-    for (const vote of Object.values(round.votes)) {
-      locked += BigInt(vote.amount);
-      if (vote.revealed_choice !== null) tally[vote.revealed_choice] += BigInt(vote.amount);
-    }
+    const { tally, locked, revealed, outcome, winner } = demoWinner(round);
     const mine = account ? round.votes[account] : undefined;
     votes[id] = mine ?? null;
     if (mine && mine.withdrawal_state !== "paid") balance -= BigInt(mine.amount);
-    const revealed = tally[0] + tally[1];
-    let outcome: ChapterOutcome | null = null;
-    let winner: Choice | null = null;
-    if (round.phase === "finalized") {
-      outcome = revealed < BigInt(round.terms.quorum) ? "no_quorum" : tally[0] === tally[1] ? "tie" : "winner";
-      if (outcome === "winner") winner = tally[0] > tally[1] ? 0 : 1;
-    }
     const funded = round.phase !== "funding";
     if (funded && account === round.terms.sponsor && !(round.bountyPaid && winner === null)) {
       quoteBalance -= BigInt(round.terms.bounty);
     }
     if (round.bountyPaid && winner !== null && account === round.terms.candidates[winner].artist) quoteBalance += BigInt(round.terms.bounty);
     const parent = parent_sha256;
-    parent_sha256 = winner === null ? null : round.terms.candidates[winner].content_sha256;
+    if (winner !== null) parent_sha256 = round.terms.candidates[winner].content_sha256;
     return {
       round_id: id,
       ...round.terms,
@@ -251,6 +281,7 @@ export function demoView(state: DemoState, account: string | null, series?: Chap
       phase: round.phase,
       funded,
       committed_count: Object.keys(round.votes).length,
+      min_lock: minimumChapterLock(round.terms).toString(),
       locked: locked.toString(),
       revealed: revealed.toString(),
       tallies: [tally[0].toString(), tally[1].toString()],
@@ -277,14 +308,27 @@ export async function applyDemo(state: DemoState, action: DemoAction, series?: C
     next.curator = action.account;
     return next;
   }
+  if (action.kind === "buy_demo") {
+    const { account, amount, cost } = action;
+    if (!series || !canActInDemo(account, series) || amount <= 0n || cost <= 0n) throw new Error("Invalid simulated purchase.");
+    const prior = next.purchases?.[account];
+    const spent = BigInt(prior?.spent ?? "0") + cost;
+    const purchased = BigInt(prior?.amount ?? "0") + amount;
+    const available = BigInt(demoView(next, account, series).quoteBalance ?? "0");
+    if (cost > available || spent > U128_MAX || purchased > U128_MAX - demoVotingBalance(series)) {
+      throw new Error("This buy exceeds the simulated wallet balance.");
+    }
+    next.purchases = { ...next.purchases, [account]: { amount: purchased.toString(), spent: spent.toString() } };
+    return next;
+  }
   if (!pilot && !next.story) throw new Error("Enable chapters for this token before adding artwork or rounds.");
   if (action.kind === "submit_art") {
     const { roundId, account, title, mimeType, imageBase64, parentSha256 } = action;
-    const prior = demoView(next, null, series).rounds.at(-1);
-    if (roundId !== next.rounds.length + 1 || roundId > DEMO_MAX_ROUNDS) throw new Error("Artwork submissions are closed for this chapter.");
-    if (prior && prior.winner === null) throw new Error("Chapter two needs a winning first panel before artists can continue the story.");
+    const view = demoView(next, null, series);
+    const prior = latestChapterWinner(view.rounds);
+    if (roundId !== nextChapterId(view)) throw new Error("Artwork submissions are closed for this chapter.");
     const parent = prior?.winner != null ? prior.candidates[prior.winner].content_sha256 : null;
-    if (parentSha256 !== parent) throw new Error("Use the winning first panel as the reference for this chapter.");
+    if (parentSha256 !== parent) throw new Error("Use the latest winning panel as the reference for this chapter.");
     const existing = next.uploads.filter(({ submission }) => submission.round_id === roundId);
     if (existing.length >= MAX_ART_SUBMISSIONS) throw new Error("All eight artist submission slots are filled.");
     if (existing.some(({ submission }) => submission.artist === account)) throw new Error("This artist has already submitted artwork for the chapter.");
@@ -302,12 +346,13 @@ export async function applyDemo(state: DemoState, action: DemoAction, series?: C
     return next;
   }
   if (action.kind === "create") {
-    if (next.rounds.length >= DEMO_MAX_ROUNDS) throw new Error("Both chapters already exist.");
     if (next.rounds.length && next.rounds.at(-1)?.phase !== "finalized") throw new Error("Finalize the current chapter first.");
-    const prior = demoView(next, null, series).rounds.at(-1);
-    if (prior && prior.winner === null) throw new Error("Chapter two needs a winning first panel before it can open.");
-    const terms = checkedTerms(action.terms, next.rounds.length, next.uploads, series);
-    if (prior?.submission_ids && !terms.submission_ids) throw new Error("Choose two artist submissions that continue the winning first panel.");
+    const view = demoView(next, null, series);
+    if (nextChapterId(view) === null) throw new Error("This story has no rounds left.");
+    const terms = checkedTerms(action.terms, next.rounds.length, next.uploads, series, latestChapterWinner(view.rounds) ? 1 : 0);
+    if (view.rounds.some(({ submission_ids }) => !!submission_ids) && !terms.submission_ids) {
+      throw new Error("Choose two signed artist submissions for the next round.");
+    }
     const curator = pilot ? action.account ?? terms.sponsor : action.account;
     if (!curator || !canActInDemo(curator, series) || (next.curator && next.curator !== curator)) {
       throw new Error("Only the demo creator can set up another chapter.");
@@ -332,7 +377,7 @@ export async function applyDemo(state: DemoState, action: DemoAction, series?: C
       if (Object.hasOwn(round.votes, action.account)) throw new Error("This wallet already has a sealed vote.");
       if (Object.keys(round.votes).length >= round.terms.max_voters) throw new Error("This chapter is full.");
       const { balance } = demoView(next, action.account, series);
-      if (!canActInDemo(action.account, series) || action.amount <= 0n || action.amount > BigInt(balance ?? "0")) {
+      if (!canActInDemo(action.account, series) || action.amount < minimumChapterLock(round.terms) || action.amount > BigInt(balance ?? "0")) {
         throw new Error("Enter an amount within your demo token balance.");
       }
       round.votes[action.account] = { amount: action.amount.toString(), commitment: action.commitment, revealed_choice: null, withdrawal_state: "unclaimed" };

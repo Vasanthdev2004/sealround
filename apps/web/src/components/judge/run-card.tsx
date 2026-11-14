@@ -23,6 +23,9 @@ export function RunIntro({ onRun }: { onRun: () => void }) {
           Run demo
         </Button>
         <span className="text-small text-muted">About 35 seconds. No wallet, no funds.</span>
+        <a href="#be-the-bot" className="inline-flex min-h-11 items-center text-small font-[510] text-accent-bright hover:underline">
+          Be the bot
+        </a>
       </div>
       {/* From lg it sits on the block's bottom edge, level with the foot of the step list. */}
       <SimulatedNote className="anim-fade mt-5 max-w-[58ch] lg:mt-auto lg:pt-8 lg:pb-1">

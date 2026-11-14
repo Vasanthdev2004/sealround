@@ -1,11 +1,12 @@
 import type { ActionSigner, FairgroundAction } from "@fairground/relayer-client";
 import { summarizeOutcome } from "@fairground/relayer-client";
+import { U128_MAX } from "@fairground/clearing";
 import { ACCOUNT_ID, devSignerAllowed, type AppConfig } from "../config";
 import { createRpc, type NearRpc } from "../near/rpc";
 import { browserSigners } from "../near/signers";
 import type { Sale } from "../types";
 import { decodeArt } from "./art-bytes";
-import type { ChapterConfig, ChapterRound, ChapterState, ChapterStory, ChapterSubmission, ChapterVote, SubmitArtAction, VoteSecret } from "./model";
+import { MAX_CHAPTER_ROUNDS, nextChapterId, type ChapterConfig, type ChapterRound, type ChapterState, type ChapterStory, type ChapterSubmission, type ChapterVote, type SubmitArtAction, type VoteSecret } from "./model";
 import { savePayoutReceipt } from "./payout-receipt";
 import { chapterTransactionHash, confirmChapterChange } from "./transaction";
 import type { ChapterNetwork } from "./wallet";
@@ -76,20 +77,47 @@ export async function resolveChapterSandbox(sale: Sale, app: AppConfig): Promise
 
 const TGAS = 1_000_000_000_000n;
 
+export type EscrowRegistration = { token: string; deposit: string };
+export type ChapterSetupQuote = { setup: string; registrations: [EscrowRegistration, EscrowRegistration] };
+
+function storageAmount(value: unknown): value is string {
+  return typeof value === "string" && /^(0|[1-9]\d{0,38})$/.test(value) && BigInt(value) <= U128_MAX;
+}
+
+async function registrationDeposit(rpc: NearRpc, token: string): Promise<EscrowRegistration> {
+  const bounds = await rpc.view<{ min?: string } | null>(token, "storage_balance_bounds");
+  if (!storageAmount(bounds?.min)) throw new Error(`Could not read a valid storage deposit from ${token}.`);
+  return { token, deposit: bounds.min };
+}
+
+export async function chapterSetupQuote(factory: ChapterFactory, sale: Sale): Promise<ChapterSetupQuote> {
+  const { rpc, account } = factory;
+  const [setup, voting, payout] = await Promise.all([
+    rpc.view<string>(account, "enable_cost"),
+    registrationDeposit(rpc, sale.tokenAccount),
+    registrationDeposit(rpc, sale.config.quoteToken),
+  ]);
+  if (!storageAmount(setup) || setup === "0") throw new Error("The factory returned an invalid setup deposit.");
+  return { setup, registrations: [voting, payout] };
+}
+
 export async function enableSandboxChapters(
-  factory: ChapterFactory, sale: Sale, story: ChapterStory, reviewed: string, activeSigner: () => ActionSigner,
+  factory: ChapterFactory, sale: Sale, story: ChapterStory, reviewed: ChapterSetupQuote, activeSigner: () => ActionSigner,
 ) {
   const entry = await readChapterRegistration(factory, sale);
   if (entry?.phase === "enabled") return registeredSandbox(factory, entry);
   if (entry) throw new Error("The creator’s escrow deployment is still confirming. Read the current status first.");
-  const currentCost = await factory.rpc.view<string>(factory.account, "enable_cost");
-  if (reviewed !== currentCost) throw new Error("Review the updated setup deposit before signing.");
+  const current = await chapterSetupQuote(factory, sale);
+  if (reviewed.setup !== current.setup || current.registrations.some(({ token, deposit }, index) =>
+    token !== reviewed.registrations[index].token || deposit !== reviewed.registrations[index].deposit)) {
+    throw new Error("The setup or token registration deposits changed. Review the story again before signing.");
+  }
   const signer = activeSigner();
   let failure: unknown;
   try {
     const result = await signer.sendTransaction({
       receiverId: factory.account, methodName: "enable_chapters", gas: 160n * TGAS,
-      deposit: BigInt(currentCost), args: { sale_id: sale.id, ...story },
+      deposit: BigInt(current.setup), args: { sale_id: sale.id, ...story },
     });
     const outcome = summarizeOutcome(result, factory.account);
     failure = outcome.failures[0]?.error;
@@ -108,13 +136,17 @@ export async function enableSandboxChapters(
   throw new Error("Chapters setup is awaiting confirmation. Check the current status before signing again.");
 }
 
-export type EscrowRegistration = { token: string; deposit: string };
+async function hasStorageRegistration(rpc: NearRpc, token: string, account: string) {
+  const balance = await rpc.view<{ total?: string; available?: string } | null>(token, "storage_balance_of", { account_id: account });
+  if (balance === null) return false;
+  if (!storageAmount(balance?.total) || !storageAmount(balance.available) || BigInt(balance.available) > BigInt(balance.total)) {
+    throw new Error(`Could not read a valid storage registration from ${token}.`);
+  }
+  return true;
+}
 
 async function pendingRegistration(rpc: NearRpc, token: string, account: string): Promise<EscrowRegistration | null> {
-  if (await rpc.view<unknown>(token, "storage_balance_of", { account_id: account })) return null;
-  const deposit = (await rpc.view<{ min: string }>(token, "storage_balance_bounds")).min;
-  if (typeof deposit !== "string" || !/^\d{1,39}$/.test(deposit)) throw new Error("The token returned an invalid storage deposit.");
-  return { token, deposit };
+  return await hasStorageRegistration(rpc, token, account) ? null : registrationDeposit(rpc, token);
 }
 
 export async function chapterEscrowRegistration(sandbox: ChapterSandbox): Promise<EscrowRegistration[]> {
@@ -150,7 +182,7 @@ async function registerChapterAccount(sandbox: ChapterSandbox, step: EscrowRegis
     detail = summarizeOutcome(result, contract).failures[0]?.error;
   } catch (error) { detail = error; }
   const result = await confirmChapterChange(sandbox.network ?? "sandbox", async () =>
-    (await rpc.view<unknown>(step.token, "storage_balance_of", { account_id: account })) ? true : null, detail);
+    (await hasStorageRegistration(rpc, step.token, account)) ? true : null, detail);
   if (!result) throw new Error("Token registration did not confirm. Review the remaining registration before retrying.");
 }
 
@@ -164,23 +196,38 @@ export async function readSandbox(sandbox: ChapterSandbox, account: string | nul
   if (config.token_id !== token || config.quote_token_id !== quote || (sandbox.curator && config.curator !== sandbox.curator)) {
     throw new Error("This Chapters contract belongs to a different token or payout asset.");
   }
-  if (!Number.isInteger(count) || count < 0 || count > 2) throw new Error("The app supports two chapters per story.");
-  const rows = await Promise.all(Array.from({ length: Math.min(count + 1, 2) }, async (_, index) => {
-    const round_id = index + 1;
-    const exists = round_id <= count;
-    const [round, vote, submissions] = await Promise.all([
-      exists ? rpc.view<ChapterRound | null>(contract, "get_round", { round_id }) : null,
-      exists && account ? rpc.view<ChapterVote | null>(contract, "get_vote", { round_id, account_id: account }) : null,
-      rpc.view<ChapterSubmission[]>(contract, "get_submissions", { round_id }),
+  if (!Number.isInteger(count) || count < 0 || count > MAX_CHAPTER_ROUNDS) throw new Error("The network returned an invalid chapter count.");
+  const state: ChapterState = { config, story: sandbox.story, rounds: [], votes: {}, balance, submissions: {} };
+  // Older rounds are still needed for claims and public proofs after a no-winner round.
+  for (let start = 1; start <= count; start += 3) {
+    const rows = await Promise.all(Array.from({ length: Math.min(3, count - start + 1) }, async (_, index) => {
+      const round_id = start + index;
+      const [round, vote] = await Promise.all([
+        rpc.view<ChapterRound | null>(contract, "get_round", { round_id }),
+        account ? rpc.view<ChapterVote | null>(contract, "get_vote", { round_id, account_id: account }) : null,
+      ]);
+      if (round?.round_id !== round_id) throw new Error("The network did not return the expected chapter.");
+      return { round, vote };
+    }));
+    for (const { round, vote } of rows) {
+      state.rounds.push(round);
+      state.votes[round.round_id] = vote;
+    }
+  }
+  const next = nextChapterId(state);
+  if (next !== null) {
+    const [submissions, artists] = await Promise.all([
+      rpc.view<ChapterSubmission[]>(contract, "get_submissions", { round_id: next }),
+      rpc.view<string[]>(contract, "get_artists", { round_id: next }).catch((error: unknown) => {
+        // An older immutable escrow can be viewed using its original submission rules.
+        if (error instanceof Error && /method.*not found|methodnotfound/i.test(error.message)) return undefined;
+        throw error;
+      }),
     ]);
-    if (exists && round?.round_id !== round_id) throw new Error("The network did not return the expected chapter.");
-    return { round_id, round, vote, submissions };
-  }));
-  return {
-    config, story: sandbox.story, rounds: rows.flatMap(({ round }) => round ? [round] : []), balance,
-    votes: Object.fromEntries(rows.filter(({ round }) => round).map(({ round_id, vote }) => [round_id, vote])),
-    submissions: Object.fromEntries(rows.map(({ round_id, submissions }) => [round_id, submissions])),
-  };
+    state.submissions![next] = submissions;
+    if (artists) state.artists = { roundId: next, accounts: artists };
+  }
+  return state;
 }
 
 type ChainAction =
@@ -227,6 +274,11 @@ export async function runSandbox(
       args: { round_id: roundId, title, mime_type: mimeType, image_base64: imageBase64, parent_sha256: parentSha256 },
     };
   } else {
+    if (action.kind === "commit") {
+      const round = await sandbox.rpc.view<ChapterRound | null>(sandbox.contract, "get_round", { round_id: roundId });
+      if (!round || round.round_id !== roundId || round.phase !== "commit") throw new Error("Voting is closed for this round.");
+      if (round.min_lock && action.amount < BigInt(round.min_lock)) throw new Error("The lock is below the round’s minimum.");
+    }
     transaction = sandboxAction(sandbox, roundId, action);
   }
   if (action.kind === "bounty" && sandbox.network === "testnet"

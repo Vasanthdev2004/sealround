@@ -8,6 +8,7 @@ import {
   Globe,
   KeyRound,
   Layers,
+  ListChecks,
   Lock,
   Play,
   Ruler,
@@ -76,6 +77,9 @@ function Hero() {
         <div className="anim-blur mt-8 flex flex-wrap justify-center gap-3" style={{ "--i": 4 } as React.CSSProperties}>
           <ButtonLink href={appHref()} variant="primary" size="lg">
             Launch app <ArrowRight className="size-4" aria-hidden />
+          </ButtonLink>
+          <ButtonLink href={appHref("/judges")} size="lg" icon={<ListChecks className="size-4" aria-hidden />}>
+            Check us in 5 minutes
           </ButtonLink>
           {/* Judge mode needs the simulated chain; on a real contract the live testnet sales are the demo. */}
           {isNearMode() ? (

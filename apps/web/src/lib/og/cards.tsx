@@ -489,6 +489,39 @@ export function SaleCardImage({ card }: { card: SaleCard }) {
   );
 }
 
+export function ChapterCardImage({ token, title, round, percentage, source, art }: {
+  token: string; title: string; round: number; percentage: string; source: string; art: string | null;
+}) {
+  return (
+    <Canvas>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <Logo size={30} />
+        <div style={{ color: C.muted, fontSize: 22 }}>{source}</div>
+      </div>
+      <div style={{ display: "flex", flex: 1, alignItems: "center", gap: 34, marginTop: 34 }}>
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, gap: 18 }}>
+          <div style={{ color: C.muted, fontSize: 25 }}>{`${token} · Round ${round}`}</div>
+          <div style={{ color: C.fg, fontSize: 48, lineHeight: 1.12, letterSpacing: -1.2, fontWeight: 500, overflow: "hidden", maxHeight: 165 }}>
+            {title}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, borderTop: `1px solid ${C.lineStrong}`, paddingTop: 14 }}>
+            <div style={{ color: C.accentBright, fontSize: 80, lineHeight: 1.05, letterSpacing: -3.5, fontWeight: 500 }}>{percentage}</div>
+            <div style={{ color: C.muted, fontSize: 26 }}>of locked tokens</div>
+          </div>
+        </div>
+        {art && (
+          <div style={{ display: "flex", width: 490, height: 365, overflow: "hidden", borderRadius: 16, border: `1px solid ${C.lineStrong}`, background: C.elev }}>
+            {/* next/og consumes a verified local raster data URI. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={art} alt={title} width={490} height={365} style={{ objectFit: "contain" }} />
+          </div>
+        )}
+      </div>
+      <div style={{ color: C.subtle, fontSize: 22, borderTop: `1px solid ${C.line}`, paddingTop: 16 }}>Meme Chapters</div>
+    </Canvas>
+  );
+}
+
 // ---------- rendering ----------
 
 export function renderCard(element: ReactElement, fonts: OgFont[] | undefined): ImageResponse {

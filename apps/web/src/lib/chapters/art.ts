@@ -46,7 +46,8 @@ export async function readChapterArt(
     return readSubmittedArt(submission, sandbox, series);
   }
   if (!isLanternPilot(series)) throw new Error("This chapter has no published artist submission.");
-  const art = LANTERN_STORY[round.round_id - 1]?.candidates.find(({ title, artist }) => title === candidate.title && artist === candidate.artist);
+  const art = LANTERN_STORY.flatMap(({ candidates }) => candidates).find(({ title, artist }) =>
+    title === candidate.title && artist === candidate.artist);
   if (!art) throw new Error("The chapter artwork is unavailable.");
   const response = await fetchImpl(art.image, { signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error("The chapter artwork could not be loaded.");
