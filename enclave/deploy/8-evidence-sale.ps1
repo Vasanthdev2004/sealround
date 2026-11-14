@@ -130,7 +130,7 @@ param(
     # NEAR attached to create_sale; empty = get_create_cost plus 0.05, rounded up.
     [string]$Deposit = '',
     # NEAR each new bidder account starts with.
-    [string]$FundNear = '0.03',
+    [string]$FundNear = '0.13',
     # The snipers' head polling in the last seconds before the open.
     [ValidateRange(100, 10000)][int]$PollMs = 1000,
     # Reveals and claims run this many bots at once.
@@ -175,9 +175,9 @@ if ($Snipers -gt $Bidders) { throw "-Snipers $Snipers is more than -Bidders $Bid
 if ($FloorPrice -notmatch '^\d+(\.\d{1,6})?$') { throw '-FloorPrice is USDC per whole token with at most 6 decimals, such as 0.001.' }
 $script:FloorUnits = [long]([decimal]::Parse($FloorPrice, $script:Inv) * 1000000)
 if ($script:FloorUnits -lt 1) { throw '-FloorPrice must be at least 0.000001.' }
-if ($FundNear -notmatch '^\d+(\.\d+)?$') { throw '-FundNear is a NEAR amount such as 0.03.' }
+if ($FundNear -notmatch '^\d+(\.\d+)?$') { throw '-FundNear is a NEAR amount such as 0.13.' }
 $script:Fund = [decimal]::Parse($FundNear, $script:Inv)
-if ($script:Fund -lt 0.005 -or $script:Fund -gt 1) { throw '-FundNear must be between 0.005 and 1 NEAR (a bidder needs about 0.002 for its account and 0.01 free for a 100 TGas call).' }
+if ($script:Fund -lt 0.005 -or $script:Fund -gt 1) { throw '-FundNear must be between 0.005 and 1 NEAR (a bidder needs about 0.002 for its account and about 0.101 free for a 100 TGas call).' }
 if ($Deposit -and $Deposit -notmatch '^\d+(\.\d+)?$') { throw '-Deposit is a NEAR amount such as 3 or 2.5.' }
 if (-not $TokenName.Trim() -or $TokenName.Length -gt 64) { throw '-TokenName must be 1 to 64 characters.' }
 if ($TokenSymbol -cnotmatch '^[A-Z0-9]{1,16}$') { throw '-TokenSymbol must be 1 to 16 capital letters or digits.' }
@@ -755,7 +755,19 @@ function Start-Bot {
 function ConvertFrom-BotOutput {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    $text = [IO.File]::ReadAllText($Path)
+    # A bot's child process (pnpm, then node) can still hold the redirected
+    # output file for a moment after the process we started exits. Read it
+    # with sharing allowed and try again for up to 10 s while it is locked.
+    $text = $null
+    for ($try = 1; $null -eq $text; $try++) {
+        try {
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+            try { $text = (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+        } catch [IO.IOException] {
+            if ($try -ge 40) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+    }
     $at = $text.IndexOf('{')
     if ($at -lt 0) { return $null }
     try { $text.Substring($at) | ConvertFrom-Json } catch { $null }
@@ -1257,8 +1269,11 @@ function Get-BidderState {
     }
     $state
 }
-# A bidder with less free NEAR than this gets a top-up to -FundNear: a 100 TGas bid needs 0.01 free.
-$script:LowNear = [decimal]0.015
+# A bidder with less free NEAR than this gets a top-up to -FundNear. Before it
+# accepts a transaction, NEAR reserves its gas at a worst-case price: a 100 TGas
+# bid or claim needs about 0.101 NEAR free on testnet (it burns far less, about
+# 0.003). The swarm accounts made with the old 0.03 default failed every bid.
+$script:LowNear = [decimal]0.11
 function Get-TopUp { param($State) [Math]::Ceiling(($script:Fund - $State.Available) * 100) / 100 }
 
 function Get-OwnerCommandLine {
@@ -1344,12 +1359,12 @@ function Show-DryRun {
     $gas = [decimal]0.001 * $calls
     $closeAttach = [decimal]0
     if ($Mode -eq 'Tee') { $closeAttach = [decimal]0.05 }
-    $peak = $attach + $fundSum + $topUpSum + $registerSum + $gas + $closeAttach + [decimal]0.03
+    $peak = $attach + $fundSum + $topUpSum + $registerSum + $gas + $closeAttach + [decimal]0.31
     $slotsBack = $perSlot * [Math]::Max(0, $script:MaxBidsValue - $crowd.Count)
     Write-Host (Fmt 'create_sale costs {0} NEAR (get_create_cost; {1} NEAR per bid slot); attach {2} (the rest comes back at once or from OutLayer)' (Format-Near $cost) (Format-Near $perSlot) (Format-Near $attach))
     Write-Host (Fmt '  about {0} NEAR of it comes back at claim_proceeds: {1} unused slots{2}; the token account''s storage (about 1.7) does not' (Format-Near ($slotsBack + $(if ($Pool -eq 'on') { [decimal]0.015 } else { [decimal]0 }))) ([Math]::Max(0, $script:MaxBidsValue - $crowd.Count)) $(if ($Pool -eq 'on') { ' and most of the 0.015 pool reserve' } else { '' }))
     Write-Host (Fmt 'accounts: {0} new x {1} = {2}; {3} top-up(s) = {4}; {5} USDC registration(s) x 0.00125 = {6}; {7} mint(s)' $newAccounts.Count (Format-Near $script:Fund) (Format-Near $fundSum) $topUps.Count (Format-Near $topUpSum) $registers.Count (Format-Near $registerSum) $mints.Count)
-    Write-Host (Fmt 'owner gas for about {0} calls: up to {1}; close_sale attaches {2} (OutLayer returns what it does not charge); 0.03 free for a 300 TGas call' $calls (Format-Near $gas) (Format-Near $closeAttach))
+    Write-Host (Fmt 'owner gas for about {0} calls: up to {1}; close_sale attaches {2} (OutLayer returns what it does not charge); about 0.31 free for a 300 TGas call (reserved at a worst-case gas price)' $calls (Format-Near $gas) (Format-Near $closeAttach))
     $owner = Get-NearAccount -RpcUrl $script:ReadRpcs -Account $Account
     $free = [decimal]0
     if ($owner) { $free = ([decimal]::Parse([string]$owner.amount, $script:Inv) - [decimal]$owner.storage_usage * [decimal]::Parse('10000000000000000000')) / $script:Yocto }

@@ -148,24 +148,68 @@ class RpcFailure extends Error {
   override readonly name = "RpcFailure";
 }
 
+/**
+ * Waits after a rate-limited answer, about 31 s in all. Public testnet RPCs
+ * limit per IP, and a crowd of bots on one machine shares that limit.
+ */
+const RATE_LIMIT_WAITS_MS = [1_000, 2_000, 4_000, 8_000, 8_000, 8_000];
+const RATE_LIMIT_TEXT = /rate.?limit|too many requests|-429/i;
+
 /** One JSON-RPC call for what the app's reader (near/rpc.ts) does not cover: status, accounts, keys, blocks, transactions. */
 async function rpcCall<T>(url: string, method: string, params: unknown): Promise<T> {
-  let body: { result?: T & { error?: unknown }; error?: unknown };
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "live-bot", method, params }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    body = (await res.json()) as typeof body;
-  } catch (e) {
-    throw new BotError("rpc_unreachable", `Could not reach the NEAR RPC at ${url} (${errorText(e)}).`, 1);
+  let body!: { result?: T & { error?: unknown }; error?: unknown };
+  for (let attempt = 0; ; attempt++) {
+    let limited = false;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "live-bot", method, params }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const text = await res.text();
+      // A limit can come as HTTP 429, as a plain-text body or as a JSON-RPC error.
+      if (res.status === 429 || (!text.trimStart().startsWith("{") && RATE_LIMIT_TEXT.test(text))) limited = true;
+      else body = JSON.parse(text) as typeof body;
+    } catch (e) {
+      throw new BotError("rpc_unreachable", `Could not reach the NEAR RPC at ${url} (${errorText(e)}).`, 1);
+    }
+    if (!limited && body.error && RATE_LIMIT_TEXT.test(JSON.stringify(body.error))) limited = true;
+    if (!limited) break;
+    if (attempt >= RATE_LIMIT_WAITS_MS.length) {
+      throw new BotError("rpc_unreachable", `The NEAR RPC at ${url} kept rate limiting ${method} for about 30 s.`, 1);
+    }
+    const wait = RATE_LIMIT_WAITS_MS[attempt];
+    await sleep(wait + Math.random() * wait * 0.5);
   }
   if (body.error) throw new RpcFailure(`${method}: ${JSON.stringify(body.error).slice(0, 300)}`);
   // Older nodes report a failed query inside the result.
   if (body.result && typeof body.result.error === "string") throw new RpcFailure(`${method}: ${body.result.error.slice(0, 300)}`);
   return body.result as T;
+}
+
+/**
+ * near-api-js retries an HTTP 429, but FastNear answers a rate limit with
+ * HTTP 200 and a JSON-RPC error (-429), which it throws at once. This provider
+ * waits and sends the same request again. Sending the same signed transaction
+ * twice is safe: it has one hash and one nonce, so it lands at most once.
+ */
+function patientProvider(url: string): JsonRpcProvider {
+  const provider = new JsonRpcProvider({ url });
+  const send = provider.sendJsonRpc.bind(provider) as (method: string, params: unknown) => Promise<unknown>;
+  const patient = async (method: string, params: unknown): Promise<unknown> => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await send(method, params);
+      } catch (e) {
+        if (attempt >= RATE_LIMIT_WAITS_MS.length || !RATE_LIMIT_TEXT.test(errorText(e))) throw e;
+        const wait = RATE_LIMIT_WAITS_MS[attempt];
+        await sleep(wait + Math.random() * wait * 0.5);
+      }
+    }
+  };
+  provider.sendJsonRpc = patient as typeof provider.sendJsonRpc;
+  return provider;
 }
 
 export type Head = { height: number; timeNs: bigint };
@@ -265,7 +309,8 @@ export async function connect(opts: BotOptions, need: {
   if (!(await accountExists(opts.rpcUrl, opts.contractId))) {
     throw new BotError("contract_not_found", `There is no account ${opts.contractId} on ${opts.network} (chain "${chainId}"). Wrong --network or --contract?`);
   }
-  const rpc = createRpc(opts.rpcUrl);
+  // Up to 4 more rounds after a rate limit (0.8, 2.4, 7.2, 21.6 s, plus jitter).
+  const rpc = createRpc(opts.rpcUrl, { retries: 4, retryDelayMs: 800 });
   try {
     await rpc.view<unknown>(opts.contractId, "get_config");
   } catch (e) {
@@ -319,7 +364,7 @@ export async function connect(opts: BotOptions, need: {
         `The key from ${opts.keySource} is a function-call key of ${opts.accountId}. A bid is an ft_transfer_call with 1 yoctoNEAR attached, which needs a full-access key.`,
       );
     }
-    signer = keyPairSigner({ accountId: opts.accountId, keyPair, provider: new JsonRpcProvider({ url: opts.rpcUrl }) });
+    signer = keyPairSigner({ accountId: opts.accountId, keyPair, provider: patientProvider(opts.rpcUrl) });
   }
 
   // 5. The app's client, built the way the app builds it from its NEXT_PUBLIC_* values, signing as the bot.
@@ -356,8 +401,9 @@ export async function connect(opts: BotOptions, need: {
 
 const freshSale = async (s: Session) => (await s.rpc.view<SaleView | null>(s.opts.contractId, "get_sale", { sale_id: s.opts.saleId }))!;
 const bidOf = (s: Session, bidder: string) => s.rpc.view<BidView | null>(s.opts.contractId, "get_bid", { sale_id: s.opts.saleId, bidder });
+// NEP-141 answers "0" for an unknown account, so a failed read is an error, never a zero balance.
 const ftBalance = async (s: Session, token: string, accountId: string) =>
-  BigInt((await s.rpc.view<string | null>(token, "ft_balance_of", { account_id: accountId }).catch(() => "0")) ?? "0");
+  BigInt((await s.rpc.view<string | null>(token, "ft_balance_of", { account_id: accountId })) ?? "0");
 
 /** Place one bid in an open enclave sale using the web client's sealing and signing path. */
 export async function budgetedBid(s: Session, budgetInput: string) {
