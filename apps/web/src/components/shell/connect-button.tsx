@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 import { errorInfo, getClient } from "@/lib/client";
 import { shortAccount, usdcStr } from "@/lib/format";
 import { useBalances } from "@/lib/hooks";
-import { TESTNET_APP_URL } from "@/lib/site";
+import { TESTNET_CONNECT_URL } from "@/lib/site";
 import { DEMO_FAUCET_USDC, useWallet } from "@/lib/wallet";
 
 /** The enabled menu items inside the account menu, in order. */
@@ -105,6 +105,73 @@ export function ConnectButton() {
     e.preventDefault();
     items[next].focus();
   };
+
+  if (!account && !near) {
+    // The simulated demo: a real wallet lives on the testnet app, the demo wallet here.
+    const choice =
+      "flex w-full items-start gap-2.5 rounded-[8px] px-2.5 py-2.5 text-left transition-colors hover:bg-wash focus-visible:bg-wash";
+    return (
+      <div className="relative min-w-0" ref={ref}>
+        <Button
+          ref={triggerRef}
+          variant="primary"
+          size="sm"
+          onClick={() => setOpen((o) => !o)}
+          loading={connecting}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          className="max-w-full max-lg:min-h-11 max-sm:px-2"
+        >
+          <span className="truncate">Connect</span>
+          <ChevronDown
+            className={cn("size-3.5 shrink-0 transition-transform duration-200 max-[359px]:hidden", open && "rotate-180")}
+            aria-hidden
+          />
+        </Button>
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              role="menu"
+              aria-label="Connect"
+              onKeyDown={onMenuKey}
+              initial={{ opacity: 0, y: -8, scale: 0.94 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.96, transition: { duration: 0.12 } }}
+              transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
+              style={{ transformOrigin: "top right" }}
+              className="layer-float fixed inset-x-4 top-[60px] z-40 p-1.5 sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-80"
+            >
+              <a role="menuitem" tabIndex={-1} href={TESTNET_CONNECT_URL} className={choice}>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-small font-[510] text-fg">Real NEAR wallet</span>
+                  <span className="mt-0.5 block text-label text-muted">
+                    Meteor, Intear, Ledger and more, on NEAR testnet. Opens the testnet app.
+                  </span>
+                </span>
+                <ArrowUpRight className="mt-0.5 size-4 shrink-0 text-accent-bright" aria-hidden />
+              </a>
+              <button
+                role="menuitem"
+                tabIndex={-1}
+                className={choice}
+                onClick={() => {
+                  setOpen(false);
+                  void connect();
+                }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-small font-[510] text-fg">Demo wallet</span>
+                  <span className="mt-0.5 block text-label text-muted">
+                    Simulated, with 100 test USDC. Runs judge mode and the demo sales in this browser.
+                  </span>
+                </span>
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
 
   if (!account) {
     return (
@@ -235,7 +302,7 @@ export function ConnectButton() {
               </button>
             ))}
             {!near && (
-              <a role="menuitem" tabIndex={-1} href={TESTNET_APP_URL} className={item}>
+              <a role="menuitem" tabIndex={-1} href={TESTNET_CONNECT_URL} className={item}>
                 Use a real wallet on testnet
                 <ArrowUpRight className="ml-auto size-3.5" aria-hidden />
               </a>

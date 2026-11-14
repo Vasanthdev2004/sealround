@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 import { getClient } from "@/lib/client";
 import { isNearMode } from "@/lib/config";
 import { networkName } from "@/lib/format";
-import { TESTNET_APP_URL } from "@/lib/site";
+import { TESTNET_CONNECT_URL } from "@/lib/site";
 import { DEMO_FAUCET_USDC, useWallet } from "@/lib/wallet";
 import { Button } from "@/components/ui/button";
 import { MotionProvider } from "@/components/visual/motion-provider";
@@ -255,7 +255,7 @@ export function DemoNotice() {
       <span className="max-sm:hidden">This demo runs on a simulated chain with a demo wallet. </span>
       <span className="sm:hidden">Simulated demo. </span>
       <a
-        href={TESTNET_APP_URL}
+        href={TESTNET_CONNECT_URL}
         className="inline-flex items-center gap-1 font-[510] text-accent-bright underline-offset-2 hover:underline"
       >
         <span className="max-sm:hidden">Use a real NEAR wallet on testnet</span>

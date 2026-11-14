@@ -355,6 +355,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
   }, [nearMode, connectDev]);
 
+  // The simulated demo's "Real NEAR wallet" link arrives with ?connect=wallet:
+  // open the wallet picker once, after a restored session has had a moment to
+  // come back. The parameter is dropped when the picker opens, so a reload
+  // does not open it again.
+  useEffect(() => {
+    if (!nearMode || new URLSearchParams(window.location.search).get("connect") !== "wallet") return;
+    const timer = setTimeout(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("connect");
+      window.history.replaceState(window.history.state, "", url);
+      if (!near.account && !near.connecting) void connect();
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [nearMode, connect]);
+
   const disconnect = useCallback(() => {
     if (!nearMode) {
       write(KEY, null);

@@ -23,3 +23,6 @@ export const REPO_URL = "https://github.com/Vasanthdev2004/sealround";
  * simulated demo links here, because its own wallet is a demo account.
  */
 export const TESTNET_APP_URL = "https://sealround-testnet.vercel.app";
+
+/** The testnet app's sales board, opening the wallet picker on arrival. */
+export const TESTNET_CONNECT_URL = `${TESTNET_APP_URL}/sales?connect=wallet`;
