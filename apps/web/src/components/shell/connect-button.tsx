@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, ChevronDown, Loader2 } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Loader2 } from "lucide-react";
 import { useGasMode } from "@/components/sale-common/relay";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { errorInfo, getClient } from "@/lib/client";
 import { shortAccount, usdcStr } from "@/lib/format";
 import { useBalances } from "@/lib/hooks";
+import { TESTNET_APP_URL } from "@/lib/site";
 import { DEMO_FAUCET_USDC, useWallet } from "@/lib/wallet";
 
 /** The enabled menu items inside the account menu, in order. */
@@ -233,6 +234,12 @@ export function ConnectButton() {
                 </span>
               </button>
             ))}
+            {!near && (
+              <a role="menuitem" tabIndex={-1} href={TESTNET_APP_URL} className={item}>
+                Use a real wallet on testnet
+                <ArrowUpRight className="ml-auto size-3.5" aria-hidden />
+              </a>
+            )}
             <button
               role="menuitem"
               tabIndex={-1}

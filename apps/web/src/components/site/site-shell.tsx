@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
-import { Logo } from "@/components/shell/app-shell";
+import { DemoNotice, Logo } from "@/components/shell/app-shell";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { MotionProvider } from "@/components/visual/motion-provider";
 import { SpotlightTracker } from "@/components/visual/spotlight";
@@ -28,6 +28,7 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <div className="flex min-h-dvh flex-col">
+        <DemoNotice />
         <header className="material sticky top-0 z-30 border-b border-line">
           <div className="mx-auto flex h-14 max-w-[1240px] items-center gap-4 px-4 sm:px-6 lg:px-8">
             <Logo href="/" label="Sealround home" />

@@ -4,11 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Menu, X } from "lucide-react";
+import { ArrowUpRight, Menu, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { getClient } from "@/lib/client";
 import { isNearMode } from "@/lib/config";
 import { networkName } from "@/lib/format";
+import { TESTNET_APP_URL } from "@/lib/site";
 import { DEMO_FAUCET_USDC, useWallet } from "@/lib/wallet";
 import { Button } from "@/components/ui/button";
 import { MotionProvider } from "@/components/visual/motion-provider";
@@ -243,6 +244,28 @@ function MainnetNotice() {
   );
 }
 
+/**
+ * The simulated demo's wallet is a demo account. Say so above everything and
+ * link the testnet app, where a real NEAR wallet connects.
+ */
+export function DemoNotice() {
+  if (isNearMode()) return null;
+  return (
+    <p className="border-b border-line bg-elev px-4 py-2 text-center text-label text-muted">
+      <span className="max-sm:hidden">This demo runs on a simulated chain with a demo wallet. </span>
+      <span className="sm:hidden">Simulated demo. </span>
+      <a
+        href={TESTNET_APP_URL}
+        className="inline-flex items-center gap-1 font-[510] text-accent-bright underline-offset-2 hover:underline"
+      >
+        <span className="max-sm:hidden">Use a real NEAR wallet on testnet</span>
+        <span className="sm:hidden">Real wallet on testnet</span>
+        <ArrowUpRight className="size-3.5" aria-hidden />
+      </a>
+    </p>
+  );
+}
+
 function NetworkPill() {
   const near = isNearMode();
   const network = networkName();
@@ -362,6 +385,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </a>
       <div className="flex min-h-dvh flex-col">
         <MainnetNotice />
+        <DemoNotice />
         <header className="material sticky top-0 z-30 border-b border-line">
           <div className="mx-auto flex h-14 max-w-[1240px] items-center gap-2 px-4 max-[359px]:gap-1 max-[359px]:px-3 sm:gap-4 sm:px-6 xl:gap-6 xl:px-8">
             <Logo className="max-[359px]:gap-1.5" />

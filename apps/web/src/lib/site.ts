@@ -17,3 +17,9 @@ export function appHref(path: string = APP_HOME): string {
 
 /** The public source repository. */
 export const REPO_URL = "https://github.com/Vasanthdev2004/sealround";
+
+/**
+ * The hosted app in NEAR mode on testnet, where real wallets connect. The
+ * simulated demo links here, because its own wallet is a demo account.
+ */
+export const TESTNET_APP_URL = "https://sealround-testnet.vercel.app";
