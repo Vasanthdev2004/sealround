@@ -361,6 +361,21 @@ describe("verifySaleRuns", () => {
     expect(net.calls).toContain("GET /public/jobs?project=itzbeast.testnet%2Ffairground-sealer&limit=100&offset=0");
   });
 
+  it("finds an older sale's runs in the job list after later sales add more jobs than the candidate cap", async () => {
+    const keyJob = (jobs as { transaction_hash: string | null; created_at: string }[]).find((j) => j.transaction_hash === TX.key)!;
+    // Nine later jobs inside the key run's seven-day window, from other sales. Newest first, they would fill the cap of 8.
+    const later = Array.from({ length: 9 }, (_, i) => ({
+      ...keyJob,
+      job_id: 900_000 + i,
+      transaction_hash: `Later${i}TxHash1111111111111111111111111111111`,
+      created_at: new Date(Date.parse(keyJob.created_at) + (i + 1) * 3_600_000 * 20).toISOString(),
+    }));
+    const net = network({ jobs: [...later.reverse(), ...jobs] });
+    const { verification } = await verifySaleRuns(base(net.fetchImpl, { views: sale() }));
+    expect(verification.key).toMatchObject({ found: true, txSource: "outlayer_jobs", txHash: TX.key });
+    expect(verification.clear).toMatchObject({ found: true, txSource: "outlayer_jobs", txHash: TX.clear });
+  });
+
   it("uses this browser's log before the job list", async () => {
     const net = network({ jobs: [] });
     const { verification } = await verifySaleRuns(

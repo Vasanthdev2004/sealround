@@ -179,15 +179,18 @@ export async function scanForRunTx(rpc: JsonRpc, t: RunTarget, requestBlock: num
 }
 
 /**
- * OutLayer's job list for the sealer project, newest first, within a time
- * window; each candidate confirmed by reading its transaction.
+ * OutLayer's job list for the sealer project, within a time window; each
+ * candidate confirmed by reading its transaction. Candidates are tried
+ * closest to `window.at` first (when the run should have happened: the sale's
+ * creation or its close), else newest first. Ordering by time alone would let
+ * later sales' jobs push an older sale's run past the candidate cap.
  */
 export async function jobsForRunTx(
   api: string,
   rpc: JsonRpc,
   t: RunTarget,
   project: string,
-  window: { from: number; to: number },
+  window: { from: number; to: number; at?: number },
   fetchImpl: typeof fetch = globalFetch,
   limits: { pageSize?: number; pages?: number; candidates?: number } = {},
 ): Promise<FoundTx | null> {
@@ -203,8 +206,10 @@ export async function jobsForRunTx(
     if (jobs.length < pageSize || oldest < window.from) break;
   }
   const seen = new Set<string>();
+  const at = window.at;
+  const rank = (j: OutLayerJob) => (at === undefined ? -Date.parse(j.created_at) : Math.abs(Date.parse(j.created_at) - at));
   const unique = candidates
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .sort((a, b) => rank(a) - rank(b))
     .filter((j) => !seen.has(j.transaction_hash!) && !!seen.add(j.transaction_hash!))
     .slice(0, limits.candidates ?? 8);
   for (const j of unique) {
@@ -353,8 +358,8 @@ export async function verifySaleRuns(
         const closed = nsToMs(sale.closed_at) ?? created;
         const window =
           kind === "key"
-            ? { from: created - 10 * MINUTE, to: created + 7 * DAY }
-            : { from: closed - 10 * MINUTE, to: closed + (nsToMs(sale.settle_timeout) ?? 0) + DAY };
+            ? { from: created - 10 * MINUTE, to: created + 7 * DAY, at: created }
+            : { from: closed - 10 * MINUTE, to: closed + (nsToMs(sale.settle_timeout) ?? 0) + DAY, at: closed };
         tx = await jobsForRunTx(net.api, rpc, target, project, window, fetchImpl);
       }
     } catch (e) {
