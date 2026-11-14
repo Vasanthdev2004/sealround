@@ -8,6 +8,7 @@ import { Tag } from "@/components/ui/badge";
 import { Countdown } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
 import { ChainLogo } from "@/components/ui/chain-logo";
+import { ChainPicker } from "@/components/sale/chain-picker";
 import { Field, Segmented } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,7 +18,6 @@ import { cn } from "@/lib/cn";
 import { duration, networkName, usdcStr } from "@/lib/format";
 import { useLatestFunding } from "@/lib/funding";
 import {
-  ORIGINS,
   SLIPPAGE_BPS,
   canSimulateSwaps,
   ensureDeliverable,
@@ -47,15 +47,6 @@ const QUICK: Record<OriginId, string[]> = {
   "btc-btc": ["0.0002", "0.0005", "0.001"],
 };
 
-const CHAINS = ORIGINS.map((o) => ({
-  value: o.id,
-  label: (
-    <span className="inline-flex items-center gap-1.5">
-      <ChainLogo chain={o.blockchain} />
-      {o.chain}
-    </span>
-  ),
-}));
 const OUTCOMES: { value: "ok" | "fail"; label: string }[] = [
   { value: "ok", label: "USDC arrives" },
   { value: "fail", label: "Refunded" },
@@ -188,23 +179,28 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
             <div id="fund-origin-label" className={GROUP_LABEL}>
               Pay with
             </div>
-            <Segmented
+            <ChainPicker
               value={originId}
               onChange={(id) => {
                 if (starting || id === originId) return;
                 setOriginId(id);
                 if (liveEnabled) setRefundTo("");
               }}
-              options={CHAINS}
+              disabled={starting}
               labelledBy="fund-origin-label"
-              className={CHIPS}
+              className="mt-2"
             />
           </div>
 
           <div>
             <Field
               label={`Amount in ${origin.symbol} on ${origin.chain}`}
-              suffix={origin.symbol}
+              suffix={
+                <span className="inline-flex items-center gap-1.5">
+                  <ChainLogo chain={origin.blockchain} className="size-3.5" />
+                  {origin.symbol}
+                </span>
+              }
               inputMode="decimal"
               autoComplete="off"
               placeholder={origin.placeholder}
@@ -220,7 +216,7 @@ export function FundPanel({ sale, account, hasBid }: { sale: Sale; account: stri
                 ) : undefined
               }
             />
-            <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Quick amounts">
+            <div className="mt-2 grid grid-cols-3 gap-1.5" role="group" aria-label="Quick amounts">
               {QUICK[originId].map((v) => {
                 const active = amount.trim() === v;
                 return (
