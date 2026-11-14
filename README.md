@@ -8,7 +8,7 @@
 
 **[Live demo](https://sealround-demo.vercel.app)** &nbsp;·&nbsp; **[Judge checklist](https://sealround-demo.vercel.app/judges)** &nbsp;·&nbsp; **[Testnet results](#7-testnet-results)** &nbsp;·&nbsp; **[Verify a sale](#verify-a-sale-yourself)** &nbsp;·&nbsp; **[Claims](#claims-and-how-to-check-them)**
 
-<!-- Video: add the 90-second launch video link here once it is uploaded. -->
+▶ **[Watch the 90-second launch video](https://x.com/BuildWithBeast/status/2121632139133534449)**
 
 <sub>Memecoins With Mechanics &nbsp;·&nbsp; also entered in Privacy & Private AI and Unstoppable DeFi</sub>
 
