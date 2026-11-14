@@ -52,7 +52,8 @@ export function Launch() {
           </Sequence>
         );
       })}
-      <Audio src={staticFile("audio/score.wav")} />
+      {/* "Inspired" by Kevin MacLeod (incompetech.com), CC BY 4.0. Credited on the end card. */}
+      <Audio src={staticFile("audio/music.wav")} />
     </AbsoluteFill>
   );
 }

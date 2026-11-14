@@ -58,8 +58,11 @@ export function End() {
         <Note text={"sealround-demo.vercel.app/judges"} start={84} size={32} color={T.ink} mono />
         <Note text={"github.com/Vasanthdev2004/fairground"} start={92} size={28} mono />
       </div>
-      <div style={{ position: "absolute", left: 0, right: 0, bottom: 70, display: "flex", justifyContent: "center" }}>
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 84, display: "flex", justifyContent: "center" }}>
         <Note text={"Built on NEAR  ·  OutLayer TEE  ·  Rhea"} start={110} size={24} />
+      </div>
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 40, display: "flex", justifyContent: "center" }}>
+        <Note text={"Music: “Inspired” by Kevin MacLeod (incompetech.com), licensed under CC BY 4.0"} start={110} size={18} />
       </div>
     </AbsoluteFill>
   );

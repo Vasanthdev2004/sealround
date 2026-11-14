@@ -7,7 +7,8 @@ The 1:28 launch video, built with [Remotion](https://www.remotion.dev/) (React r
 | `src/timeline.json` | 120 BPM, 44 bars (2 s each), one scene per row. The music and the picture both read it, so cuts land on the beat. |
 | `src/scenes/*.tsx` | Problem, product, proof and close scenes. |
 | `src/verify-swarm.ts` | The real output of `verify-sale` on `swarm-11141341`, shown in the terminal scene. |
-| `scripts/score.mjs` | The score: synthesized from scratch in Node (pads, bass, drums, plucks, bells, risers, impacts). No samples, so no licence questions. |
+| `public/audio/music.wav` | Music: "Inspired" by Kevin MacLeod ([incompetech.com](https://incompetech.com)), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credited on the end card. Not in git; the build steps below fetch it. |
+| `scripts/score.mjs` | An earlier synthesized score, no longer used. |
 | `scripts/shots.mjs` | Screenshots of the app in testnet mode (read-only). |
 
 ## Build it
@@ -15,7 +16,8 @@ The 1:28 launch video, built with [Remotion](https://www.remotion.dev/) (React r
 ```sh
 cd video
 npm install
-node scripts/score.mjs            # public/audio/score.wav
+curl -L -o Inspired.mp3 "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Inspired.mp3"
+ffmpeg -i Inspired.mp3 -t 88 -af "afade=t=in:st=0:d=1.2,afade=t=out:st=83.5:d=4.5,loudnorm=I=-15:TP=-1.5:LRA=11" -ar 48000 -c:a pcm_s16le public/audio/music.wav
 # Screens: run the web app in testnet mode on :3007 (apps/web/.env.example, contract
 # sealround.itzbeast.testnet), then:
 node scripts/shots.mjs            # public/shots/*.png
