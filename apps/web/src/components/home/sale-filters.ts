@@ -17,6 +17,17 @@ export function matchesFilter(filter: SaleFilter, status: SaleStatus): boolean {
   return !f?.statuses || f.statuses.includes(status);
 }
 
+export function parseSaleFilter(value: string | null): SaleFilter {
+  return FILTERS.find((filter) => filter.value === value)?.value ?? "all";
+}
+
+/** Search public identity only; sealed terms are never part of discovery. */
+export function matchesSearch(sale: Sale, query: string): boolean {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const identity = `${sale.id} ${sale.config.tokenName} ${sale.config.tokenSymbol} ${sale.creator}`.toLowerCase();
+  return words.every((word) => identity.includes(word));
+}
+
 /** Copy for an empty filter. */
 export const EMPTY_COPY: Record<SaleFilter, { title: string; body: string }> = {
   all: {

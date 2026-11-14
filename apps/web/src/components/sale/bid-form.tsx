@@ -16,7 +16,7 @@ import { Field } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
 import { errorInfo, getClient, type ErrorInfo } from "@/lib/client";
 import { canonicalBid, randomHex, sealBid } from "@/lib/crypto";
-import { priceStr, shortHash, usdcStr } from "@/lib/format";
+import { networkName, priceStr, shortHash, usdcStr } from "@/lib/format";
 import type { BidPlaintext, BidRecord, PaidReason, Sale } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { BidPreview } from "./bid-preview";
@@ -187,6 +187,8 @@ function BidInputs({
   const c = sale.config;
   const commit = c.revealMode === "commit_reveal";
   const closed = sale.status !== "open";
+  const capacity = sale.maxBids ?? c.maxBids;
+  const full = capacity !== undefined && sale.bidCount >= capacity;
   const [price, setPrice] = useState("");
   const [spend, setSpend] = useState("");
   const [deposit, setDeposit] = useState("");
@@ -251,9 +253,10 @@ function BidInputs({
       await connect();
       return;
     }
+    if (busy || checking || inDoubt || closed || full) return;
     setAttempted(true);
+    if (!ok || p.value === null || s.value === null || d.value === null) return;
     setError(null);
-    if (checking || inDoubt || !ok || p.value === null || s.value === null || d.value === null) return;
     const dep = d.value;
     const terms = { maxPrice: p.value, maxSpend: s.value };
     const base = { deposit: dep, txHash: null, bidder: account, relay: null, cipher: null } as const;
@@ -285,7 +288,6 @@ function BidInputs({
           max_price: terms.maxPrice.toString(),
           max_spend: terms.maxSpend.toString(),
           salt: rec.secret?.salt ?? "",
-          savedAt: Date.now(),
         });
         const commitment = rec.secret?.commitment ?? "";
         onSeal((st) => st && { ...st, phase: "cipher", cipher: commitment });
@@ -317,7 +319,6 @@ function BidInputs({
         max_price: pt.max_price,
         max_spend: pt.max_spend,
         salt: pt.salt,
-        savedAt: Date.now(),
       });
       onSeal((st) => st && { ...st, phase: "done", txHash: rec.txHash, relay: rec.relay ?? null });
     } catch (err) {
@@ -333,41 +334,6 @@ function BidInputs({
     <form onSubmit={submit} noValidate aria-busy={checking || undefined}>
       <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
         <div className="flex flex-col gap-5">
-          <div>
-            <Field
-              label="Max price"
-              suffix="USDC / token"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder={plain(c.floorPrice * 2n)}
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              error={priceErr && (attempted || price) ? priceErr : undefined}
-              hint={
-                capped
-                  ? `Above this sale's max price. It counts as ${priceStr(c.maxPrice!)} USDC.`
-                  : commit
-                    ? "Hidden until you reveal it after the close."
-                    : "Never shown to anyone, even after the sale."
-              }
-            />
-            <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Max price presets">
-              {pricePresets.map((x) => (
-                <Preset
-                  key={x.label}
-                  active={p.value === x.value}
-                  onClick={() => setPrice(plain(x.value))}
-                  label={`${x.label === "Floor" ? "Floor" : x.label === "Max" ? "Sale max" : `${x.label} floor`}: ${priceStr(x.value)} USDC`}
-                >
-                  {x.label}
-                  {x.label !== "Floor" && x.label !== "Max" && <span className="sr-only">floor,</span>}
-                  <span className="num font-normal text-muted">{priceStr(x.value)}</span>
-                  <span className="sr-only">USDC</span>
-                </Preset>
-              ))}
-            </div>
-          </div>
-
           <div>
             <Field
               label="Max spend"
@@ -398,6 +364,41 @@ function BidInputs({
             </div>
           </div>
 
+          <div>
+            <Field
+              label="Max price"
+              suffix="USDC / token"
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder={plain(c.floorPrice * 2n)}
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              error={priceErr && (attempted || price) ? priceErr : undefined}
+              hint={
+                capped
+                  ? `Above this sale's max price. It counts as ${priceStr(c.maxPrice!)} USDC.`
+                  : commit
+                    ? "Hidden until you reveal it after the close."
+                    : "Encrypted for the sealer. Your maximum is not published by the sale."
+              }
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Max price presets">
+              {pricePresets.map((x) => (
+                <Preset
+                  key={x.label}
+                  active={p.value === x.value}
+                  onClick={() => setPrice(plain(x.value))}
+                  label={`${x.label === "Floor" ? "Floor" : x.label === "Max" ? "Sale max" : `${x.label} floor`}: ${priceStr(x.value)} USDC`}
+                >
+                  {x.label}
+                  {x.label !== "Floor" && x.label !== "Max" && <span className="sr-only">floor,</span>}
+                  <span className="num font-normal text-muted">{priceStr(x.value)}</span>
+                  <span className="sr-only">USDC</span>
+                </Preset>
+              ))}
+            </div>
+          </div>
+
           <Field
             label="Deposit"
             labelAside={
@@ -418,7 +419,7 @@ function BidInputs({
             hint={
               depositTouched ? (
                 <>
-                  Public. Above your max spend, it hides the spend.{" "}
+                  Public. A larger deposit reveals less about your spending limit.{" "}
                   <button
                     type="button"
                     onClick={() => {
@@ -431,7 +432,7 @@ function BidInputs({
                   </button>
                 </>
               ) : (
-                "Public. Follows your max spend. Raise it to hide the spend."
+                "Public. Matches your max spend by default. You can deposit more to conceal the exact limit."
               )
             }
           />
@@ -448,7 +449,13 @@ function BidInputs({
       </div>
 
       <div className="mt-5 flex flex-col gap-4 border-t border-line pt-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 text-small">
+          <p className="text-muted">{mode === "mock" ? "Simulated bid" : `NEAR ${networkName()}`} <span aria-hidden>·</span> <span className="text-fg">{c.tokenSymbol}</span></p>
+          <p className="text-muted">Public deposit <span className="num ml-2 text-fg">{d.value !== null && !depositErr ? `${usdcStr(d.value)} USDC` : "—"}</span></p>
+        </div>
+        {ok && <p className="text-label text-muted">Your deposit stays locked until settlement. You spend at most <span className="num text-fg">{usdcStr(s.value!)} USDC</span> at a price no higher than <span className="num text-fg">{priceStr(c.maxPrice !== null && p.value! > c.maxPrice ? c.maxPrice : p.value!)} USDC</span> per token. {commit ? "You must return to reveal your bid." : "The attested sealer opens your limits after the close."}</p>}
         <ActionError info={error} what="bid" />
+        {full && !busy && <p role="status" className="text-small text-muted">All {capacity} bid slots are taken. This sale cannot accept another bid.</p>}
         {closed && !error && !busy && (
           <p className="text-small text-muted">The bid window has closed. No more bids can be placed.</p>
         )}
@@ -459,7 +466,7 @@ function BidInputs({
               variant="primary"
               size="lg"
               loading={busy}
-              disabled={checking || inDoubt || (attempted && !ok) || (closed && !busy)}
+              disabled={checking || inDoubt || (attempted && !ok) || ((closed || full) && !busy)}
               className="shrink-0 max-sm:w-full"
             >
               {checking
@@ -476,7 +483,7 @@ function BidInputs({
               variant="primary"
               size="lg"
               loading={connecting}
-              disabled={closed}
+              disabled={closed || full}
               icon={<Wallet className="size-4" strokeWidth={1.75} />}
               className="shrink-0 max-sm:w-full"
             >

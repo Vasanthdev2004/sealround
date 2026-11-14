@@ -102,7 +102,7 @@ function BarNav({ items, path }: { items: ReturnType<typeof navItems>; path: str
   return (
     <nav aria-label="Main" className="hidden min-w-0 lg:block">
       <ul className="flex items-center xl:gap-1" onPointerLeave={() => setHover(null)}>
-        {items.map((n) => {
+        {items.filter((n) => n.primary || (path !== null && n.match(path))).map((n) => {
           const active = path !== null && n.match(path);
           return (
             <li key={n.href} className="relative">
@@ -214,8 +214,14 @@ function ShellFooter({ className }: { className?: string }) {
           : "Sealround is unaudited. In this demo the chain is simulated in your browser."}{" "}
         Built on NEAR, OutLayer TEE and NEAR Intents.
       </p>
-      {/* There is demo data to wipe only on the simulated chain. */}
-      {!near && <ResetDemo />}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2">
+        <nav aria-label="Resources" className="flex flex-wrap gap-x-4 gap-y-2">
+          {navItems().filter((item) => !item.primary).map((item) => (
+            <Link key={item.href} href={item.href} className="inline-flex min-h-8 items-center text-muted transition-colors hover:text-fg">{item.label}</Link>
+          ))}
+        </nav>
+        {!near && <ResetDemo />}
+      </div>
     </div>
   );
 }

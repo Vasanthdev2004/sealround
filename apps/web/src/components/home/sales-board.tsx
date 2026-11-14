@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+import { Bookmark, Search } from "lucide-react";
 import { SimulatedNote } from "@/components/ui/bits";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/field";
@@ -13,8 +15,9 @@ import type { Sale } from "@/lib/types";
 import { CountersSkeleton, FeaturedSkeleton, SaleTableSkeleton } from "./board-skeleton";
 import { FairLeaderboard } from "./fair-leaderboard";
 import { FeaturedSale } from "./featured-sale";
-import { EMPTY_COPY, FILTERS, matchesFilter, sortSales, type SaleFilter } from "./sale-filters";
+import { EMPTY_COPY, FILTERS, matchesFilter, matchesSearch, parseSaleFilter, sortSales } from "./sale-filters";
 import { SaleRow, SaleTableHead } from "./sale-row";
+import { useSavedSales } from "./saved-sales";
 
 /**
  * Everything on the home page that reads live data: the featured sale, the
@@ -24,10 +27,21 @@ import { SaleRow, SaleTableHead } from "./sale-row";
 export function SalesBoard() {
   const { data: sales, loading, error, refetch } = useSales();
   const now = useNow(1000);
-  const [filter, setFilter] = useState<SaleFilter>("all");
+  const params = useSearchParams();
+  const filter = parseSaleFilter(params.get("status"));
+  const search = (params.get("q") ?? "").slice(0, 120);
+  const savedOnly = params.get("saved") === "1";
+  const saved = useSavedSales();
+  function updateParam(key: string, value: string) {
+    const next = new URL(window.location.href);
+    if (value) next.searchParams.set(key, value);
+    else next.searchParams.delete(key);
+    window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
+  }
+  const setFilter = (value: string) => updateParam("status", value === "all" ? "" : value);
 
   const sorted = useMemo(() => (sales ? sortSales(sales) : []), [sales]);
-  const visible = sorted.filter((s) => matchesFilter(filter, s.status));
+  const visible = sorted.filter((s) => matchesFilter(filter, s.status) && matchesSearch(s, search) && (!savedOnly || saved.ids.includes(s.id)));
   const options = FILTERS.map((f) => ({
     value: f.value,
     label: f.label,
@@ -47,9 +61,22 @@ export function SalesBoard() {
       )}
 
       <section aria-labelledby="sales-heading" className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <label className="inset flex min-h-11 min-w-0 flex-1 items-center gap-3 border-control px-3 focus-within:border-accent">
+            <Search className="size-4 shrink-0 text-subtle" aria-hidden />
+            <span className="sr-only">Search sales</span>
+            <input type="search" value={search} onChange={(event) => updateParam("q", event.target.value)} maxLength={120}
+              placeholder="Search token, symbol or creator"
+              className="min-w-0 flex-1 bg-transparent py-2 text-small text-fg outline-none placeholder:text-subtle" />
+          </label>
+          <Button variant={savedOnly ? "tactile" : "outline"} aria-pressed={savedOnly} onClick={() => updateParam("saved", savedOnly ? "" : "1")}>
+            <Bookmark className="size-4" aria-hidden /> Saved <span className="num text-muted">{saved.ids.length}</span>
+          </Button>
+          <ButtonLink href="/activity" variant="ghost">My activity</ButtonLink>
+        </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 id="sales-heading" className="text-h2 text-fg">
-            Sales
+            {savedOnly ? "Saved sales" : "All sales"}
           </h2>
           {/* One scrolling row on phones, wrapping from sm. Padding keeps focus rings unclipped. */}
           <div className="-mx-4 -my-1 overflow-x-auto px-4 py-1 [scrollbar-width:none] max-sm:[mask-image:linear-gradient(90deg,transparent,#000_14px,#000_calc(100%-28px),transparent)] sm:mx-0 sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden">
@@ -76,8 +103,8 @@ export function SalesBoard() {
           <SaleTableSkeleton />
         ) : visible.length === 0 ? (
           <Empty
-            title={EMPTY_COPY[filter].title}
-            body={EMPTY_COPY[filter].body}
+            title={search || savedOnly ? "No matching sales" : EMPTY_COPY[filter].title}
+            body={search || savedOnly ? "Try another search or status. Use the bookmark beside a sale to save it in this browser." : EMPTY_COPY[filter].body}
             action={
               <div className="flex flex-wrap justify-center gap-2">
                 {!isNearMode() && (
@@ -85,8 +112,12 @@ export function SalesBoard() {
                     Run the demo
                   </ButtonLink>
                 )}
-                {filter !== "all" && (
-                  <Button size="sm" variant="ghost" onClick={() => setFilter("all")}>
+                {(filter !== "all" || search || savedOnly) && (
+                  <Button size="sm" variant="ghost" onClick={() => {
+                    const next = new URL(window.location.href);
+                    ["status", "q", "saved"].forEach((key) => next.searchParams.delete(key));
+                    window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
+                  }}>
                     Show all sales
                   </Button>
                 )}
@@ -101,6 +132,7 @@ export function SalesBoard() {
             ))}
           </div>
         )}
+        {sales && <p className="text-label text-subtle" role="status">{visible.length} of {sales.length} sales{savedOnly ? ". Bookmarks stay in this browser." : ""}</p>}
       </section>
 
       {(sales || !error) && <FairLeaderboard sales={sales} />}

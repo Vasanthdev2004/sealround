@@ -6,6 +6,7 @@ import { SimulatedNote } from "@/components/ui/bits";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/panel";
 import { KV } from "@/components/ui/stat";
+import { appConfig } from "@/lib/config";
 import { networkName, shortAccount } from "@/lib/format";
 import { Note } from "./form-kit";
 import { CreateSteps } from "./progress";
@@ -65,6 +66,7 @@ export function Review({
   const description = draft.description.trim();
   const busy = submitting || created;
   const pool = !!derived.pool;
+  const config = appConfig();
 
   return (
     <div className="flex flex-col gap-8 lg:gap-10">
@@ -81,7 +83,7 @@ export function Review({
         </Button>
         <PageHeader
           title="Review the rules"
-          description="Nothing can be changed once the sale is created."
+          description="Supply, allocations, prices, timing and liquidity terms lock at creation. Check them before signing."
           aside={<CreateSteps at={created ? 3 : submitting ? 2 : 1} busy={submitting} />}
         />
       </div>
@@ -95,7 +97,7 @@ export function Review({
             <DraftToken draft={draft} detail />
             {description && <p className="mt-3 max-w-[68ch] text-small break-words text-muted">{description}</p>}
           </div>
-          <TermsLedger draft={draft} derived={derived} dex={dex} onEdit={busy ? undefined : onEdit} />
+          <TermsLedger draft={draft} derived={derived} dex={dex} mode={mode} onEdit={busy ? undefined : onEdit} />
         </section>
 
         <section
@@ -133,6 +135,12 @@ export function Review({
               className="[&>dd]:min-w-0 [&>dd]:[overflow-wrap:anywhere] [&>dt]:shrink-0"
               v={account ? shortAccount(account, 26) : "Not connected"}
             />
+            {config.mode === "near" && <KV
+              k="Contract"
+              mono={false}
+              className="[&>dd]:min-w-0 [&>dd]:[overflow-wrap:anywhere] [&>dt]:shrink-0"
+              v={config.near.contractId}
+            />}
           </dl>
 
           {warnings.length > 0 && (
@@ -187,7 +195,7 @@ export function Review({
           {/* What happens next, said once: it changes as the create call moves on. */}
           <p aria-live="polite" className="text-label text-subtle empty:hidden">
             {created
-              ? "Sale created. Its page opens next."
+              ? "Sale created. Your launch workspace opens next."
               : submitting
                 ? near
                   ? "Confirm in your wallet, then keep this tab open until the sale appears."
@@ -197,9 +205,9 @@ export function Review({
                     ? "The sale is created from your NEAR account, which pays for it and receives the raise."
                     : "The sale is created from your account. Connect opens a simulated one, no wallet needed."
                   : near
-                    ? `Bids open at least 2 minutes after you confirm, once the token is deployed${
-                        tee ? " and the sale key is made" : ""
-                      }. The window keeps its length.`
+                    ? `At submission, an opening less than 2 minutes away moves later. The window keeps its length. Bidding also waits for the token${
+                        tee ? " and sale key" : ""
+                      } setup to finish.`
                     : null}
           </p>
 
@@ -208,6 +216,9 @@ export function Review({
               Simulated chain: the token account and the transaction are simulated, and no NEAR is charged.
             </SimulatedNote>
           )}
+          <p className="border-t border-line pt-4 text-label text-muted">
+            Next: track setup and settlement, share your sale, and follow payouts from your launch workspace.
+          </p>
         </section>
       </div>
     </div>

@@ -40,7 +40,7 @@ export function SummaryCard({
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <DraftToken draft={draft} />
-        <SummaryTerms draft={draft} derived={derived} className="mt-4 border-t border-line" />
+      <SummaryTerms draft={draft} derived={derived} mode={mode} className="mt-4 border-t border-line" />
         <CostRow mode={mode} tee={draft.revealMode === "tee"} className="border-t border-line" />
       </div>
 

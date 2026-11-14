@@ -8,13 +8,6 @@ import { saleLookup } from "./sale-lookup";
 
 type Props = { params: Promise<{ id: string }> };
 
-/**
- * The page reads its id, and in NEAR mode asks the contract for the sale,
- * before it answers, so the answer can be a real 404 (see the Page comment).
- * That blocks the response on the id and that one read.
- */
-export const instant = false;
-
 /** "$LNTN on Sealround" with its launch price in NEAR mode (read on the server); the fixed text in mock mode. */
 export function generateMetadata({ params }: Props): Promise<Metadata> {
   return tokenMetadata(params, {

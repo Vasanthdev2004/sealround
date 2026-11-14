@@ -15,6 +15,7 @@ import { DocumentTitle, useBalances, useBids, useClientQuery, useMyBid, useSale 
 import type { Sale } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { BidForm } from "./bid-form";
+import { SaveSale } from "@/components/home/save-sale";
 import { BidTable } from "./bid-table";
 import { DemandPanel } from "./demand-panel";
 import { FundPanel } from "./fund-panel";
@@ -116,7 +117,15 @@ function SaleLoaded({ sale }: { sale: Sale }) {
       {/* The same words as the server's title (lib/og/sale-card.ts saleMeta). */}
       <DocumentTitle title={`${sale.config.tokenName} (${sale.config.tokenSymbol})`} />
       {/* The status panel carries the page's one "simulated" line, so the header does not. */}
-      <SaleHeader sale={sale} simulatedNote={false} />
+      <SaleHeader sale={sale} simulatedNote={false} actions={<SaveSale id={sale.id} name={sale.config.tokenName} />} />
+      <nav aria-label="Sale sections" className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 border-y border-line py-2">
+        {!done && <ButtonLink href={sale.status === "open" || bidSent ? "#bid" : "#sale-progress"} size="sm" variant="ghost">{myBid.data ? "Your bid" : sale.status === "open" ? "Place a bid" : "Sale progress"}</ButtonLink>}
+        <ButtonLink href="#funds" size="sm" variant="ghost">Your funds</ButtonLink>
+        <ButtonLink href="#sale-rules" size="sm" variant="ghost">Sale rules</ButtonLink>
+        <ButtonLink href={`/verify/${encodeURIComponent(sale.id)}`} size="sm" variant="ghost">Verify this sale</ButtonLink>
+        <ButtonLink href="/activity" size="sm" variant="ghost">My activity</ButtonLink>
+        {done && <ButtonLink href={`/sale/${encodeURIComponent(sale.id)}/result`} size="sm" variant="primary">Result and claims</ButtonLink>}
+      </nav>
 
       {/*
         Desktop: the main column (status, demand, bid form, then the bids and
@@ -125,7 +134,7 @@ function SaleLoaded({ sale }: { sale: Sale }) {
         form. SaleSkeleton mirrors this grid.
       */}
       <div className="mt-5 grid gap-4 sm:mt-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[auto_1fr] xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-1">
+        <div id="sale-progress" className="flex min-w-0 scroll-mt-20 flex-col gap-4 lg:col-start-1 lg:row-start-1">
           <StatusPanel
             sale={sale}
             account={account}
@@ -133,8 +142,6 @@ function SaleLoaded({ sale }: { sale: Sale }) {
             myBid={myBid.data ?? null}
             bids={bids.data}
           />
-          {/* The live sale as an event: public demand only. Frozen from the close. */}
-          {sale.status !== "upcoming" && <DemandPanel sale={sale} bids={bids} result={result.data ?? null} />}
           {(sale.status === "open" || bidSent) && (
             <BidForm
               sale={sale}
@@ -145,6 +152,8 @@ function SaleLoaded({ sale }: { sale: Sale }) {
               onSend={() => setBidSent(true)}
             />
           )}
+          {/* Public participation follows the personal decision on small screens. */}
+          {sale.status !== "upcoming" && <DemandPanel sale={sale} bids={bids} result={result.data ?? null} />}
         </div>
 
         <aside
@@ -155,6 +164,7 @@ function SaleLoaded({ sale }: { sale: Sale }) {
           {(sale.status === "open" || sale.status === "upcoming") && (
             <FundPanel sale={sale} account={account} hasBid={!!myBid.data} />
           )}
+          <div id="funds" className="scroll-mt-20">
           <WheresMyMoney
             sale={sale}
             account={account}
@@ -163,7 +173,8 @@ function SaleLoaded({ sale }: { sale: Sale }) {
             funding={funding}
             usdcBalance={usdc}
           />
-          <RulesPanel sale={sale} />
+          </div>
+          <div id="sale-rules" className="scroll-mt-20"><RulesPanel sale={sale} /></div>
         </aside>
 
         <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-2">

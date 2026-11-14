@@ -25,9 +25,9 @@ const EVT = "fairground:mybid";
 
 export const localBidKey = (saleId: string, account: string) => `${PREFIX}${saleId}:${account}`;
 
-export function saveLocalBid(saleId: string, account: string, bid: LocalBid) {
+export function saveLocalBid(saleId: string, account: string, bid: Omit<LocalBid, "savedAt">) {
   try {
-    localStorage.setItem(localBidKey(saleId, account), JSON.stringify(bid));
+    localStorage.setItem(localBidKey(saleId, account), JSON.stringify({ ...bid, savedAt: Date.now() }));
   } catch {
     /* storage blocked: the bid is still placed, we just cannot remember the price */
   }

@@ -64,14 +64,14 @@ const tokens = (x: bigint | undefined, bps?: bigint) =>
   );
 
 /** When the window opens and closes, in words or exact local times. */
-function windowTimes(draft: Draft, derived: Derived) {
+function windowTimes(draft: Draft, derived: Derived, mode: "mock" | "near" = "mock") {
   const dur = derived.values.durationMs;
   const start = derived.values.startAt;
   const scheduled = draft.startMode !== "now";
   return {
     /** Dates are figures; "At creation" is words. */
     figures: scheduled,
-    opens: !scheduled ? "At creation" : typeof start === "number" ? dateTime(start) : DASH,
+    opens: !scheduled ? (mode === "near" ? "After setup; 2 min lead requested" : "At creation") : typeof start === "number" ? dateTime(start) : DASH,
     length: dur !== undefined ? windowLabel(dur) : DASH,
     closes:
       dur === undefined
@@ -101,9 +101,9 @@ export function TokenMark({ draft, className }: { draft: Draft; className?: stri
 const ROW = "[&>dd]:min-w-0 [&>dd]:[overflow-wrap:anywhere] [&>dt]:shrink-0";
 
 /** The terms that decide a sale, as a short ledger for the summary card. */
-export function SummaryTerms({ draft, derived, className }: { draft: Draft; derived: Derived; className?: string }) {
+export function SummaryTerms({ draft, derived, mode = "mock", className }: { draft: Draft; derived: Derived; mode?: "mock" | "near"; className?: string }) {
   const v = derived.values;
-  const w = windowTimes(draft, derived);
+  const w = windowTimes(draft, derived, mode);
   const deposit =
     v.minDeposit !== undefined && v.maxDeposit !== undefined ? (
       <>
@@ -180,17 +180,19 @@ export function TermsLedger({
   draft,
   derived,
   dex = null,
+  mode = "mock",
   onEdit,
 }: {
   draft: Draft;
   derived: Derived;
   /** The launch pool exchange, named in the pool group. */
   dex?: string | null;
+  mode?: "mock" | "near";
   onEdit?: (k: EditTarget) => void;
 }) {
   const v = derived.values;
   const s = derived.shares;
-  const w = windowTimes(draft, derived);
+  const w = windowTimes(draft, derived, mode);
   const commit = draft.revealMode === "commit_reveal";
   const pool = derived.pool;
   const fee = POOL_FEE_PRESETS.find((p) => p.value === draft.poolFee)?.label ?? DASH;
@@ -247,7 +249,7 @@ export function TermsLedger({
             <Row k="Void bids" v="Lose 1 % of the deposit" mono={false} />
             <Row k="Unsold tokens" v="Burned" mono={false} />
             <Row k="Settle timeout" v="2 hours, then refunds" mono={false} />
-            <Row k="Admin key" v="None" mono={false} />
+            <Row k="Token admin key" v="None" mono={false} />
           </Group>
         </div>
       </div>

@@ -4,13 +4,13 @@ const STEPS = [
   {
     n: "1",
     title: "The rules lock",
-    body: "Supply, floor price, minimum raise, window and caps are fixed at launch. There is no admin key.",
-    href: "/how#steps",
+    body: "Supply, prices, window and caps are fixed at launch. Inspect the contract's code and keys before bidding.",
+    href: "/verify",
   },
   {
     n: "2",
     title: "You seal a bid",
-    body: "Your max price and max spend are encrypted in your browser. Only your deposit is public.",
+    body: "In a sealed sale, your limits are encrypted in your browser. Your account, deposit and bid time remain public.",
     href: "/how#visibility",
   },
   {

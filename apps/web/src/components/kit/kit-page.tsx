@@ -21,6 +21,7 @@ import { KitPosts } from "./kit-posts";
 import { KitSkeleton } from "./kit-skeleton";
 import type { KitWhere } from "./kit-text";
 import { KitTimes } from "./kit-times";
+import { LaunchOperations } from "./operations";
 
 /**
  * The creator's launch kit (`/sale/[id]/kit`): everything to post to bring
@@ -38,7 +39,7 @@ export function KitPage({ params }: { params: Promise<{ id: string }> }) {
   if (sale.error && !sale.data) {
     return (
       <div className="py-6">
-        <DocumentTitle title="Launch kit" />
+        <DocumentTitle title="Launch workspace" />
         <Empty
           className="py-16"
           size="lg"
@@ -77,7 +78,7 @@ function KitLoaded({ sale }: { sale: Sale }) {
 
   return (
     <div>
-      <DocumentTitle title={`Launch kit: ${c.tokenName}`} />
+      <DocumentTitle title={`Launch workspace: ${c.tokenName}`} />
       <header>
         <Link
           href={salePath}
@@ -89,7 +90,7 @@ function KitLoaded({ sale }: { sale: Sale }) {
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
             <div className="flex min-w-0 items-center gap-3 sm:gap-4">
               <HeaderMark sale={sale} />
-              <h1 className="min-w-0 text-h1 break-words text-fg">Your launch kit</h1>
+              <h1 className="min-w-0 text-h1 break-words text-fg">Launch workspace</h1>
             </div>
             <SaleStatusBadge status={sale.status} size="lg" />
           </div>
@@ -118,6 +119,8 @@ function KitLoaded({ sale }: { sale: Sale }) {
         )}
       </header>
 
+      <LaunchOperations sale={sale} now={now} />
+
       {phase === "final" ? (
         <SaleOver sale={sale} />
       ) : (
@@ -137,20 +140,20 @@ function KitLoaded({ sale }: { sale: Sale }) {
   );
 }
 
-/** A settled or failed sale: nothing left to promote, so the way to its result and its token page. */
+/** Public destinations to share once the sale has a final result. Operations above track unfinished payouts. */
 function SaleOver({ sale }: { sale: Sale }) {
   const settled = sale.status === "settled";
   const id = encodeURIComponent(sale.id);
   return (
     <Panel className="mt-6 sm:mt-8" bodyClassName="px-5 py-8 sm:px-8">
-      <h2 className="text-h2 text-fg">This sale is over</h2>
+      <h2 className="text-h2 text-fg">Share the outcome</h2>
       <p className="mt-2 max-w-[58ch] text-body text-muted">
         {settled
           ? "It settled: every winner paid one clearing price. The result shows that price and every fill; the token page shows where the supply went."
           : "It did not clear, so every valid bid gets its deposit back. The result says why."}
       </p>
       <div className="mt-5 flex flex-wrap items-center gap-2">
-        <ButtonLink href={`/sale/${id}/result`} variant="primary" className="max-sm:h-11">
+        <ButtonLink href={`/sale/${id}/result`} variant="outline" className="max-sm:h-11">
           See the result
         </ButtonLink>
         <ButtonLink href={`/token/${id}`} variant="outline" className="max-sm:h-11">

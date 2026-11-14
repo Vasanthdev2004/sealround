@@ -20,7 +20,7 @@ export function HomeHero() {
           Sales
         </h1>
         <p className="mt-2 max-w-[52ch] text-small text-muted">
-          Bids stay sealed until each sale closes. Every winner pays the same clearing price.
+          Find a launch, set your limits and follow your bid through to the result.
         </p>
       </div>
       <div className="anim-rise flex shrink-0 flex-wrap items-center gap-2" style={{ "--i": 1 } as React.CSSProperties}>

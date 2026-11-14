@@ -70,8 +70,8 @@ function Hero() {
           </span>
         </h1>
         <p className="anim-blur mt-6 max-w-[48ch] text-lead text-muted" style={{ "--i": 3 } as React.CSSProperties}>
-          Bots can&apos;t snipe what they can&apos;t see. Every bid stays encrypted until the sale closes, an enclave
-          opens them all at once, and every winner pays the same clearing price.
+          Set your spending limit and maximum price privately. After the sale closes, an attested enclave
+          clears the bids at one price. Follow your allocation, refund and the evidence behind the result.
         </p>
         <div className="anim-blur mt-8 flex flex-wrap justify-center gap-3" style={{ "--i": 4 } as React.CSSProperties}>
           <ButtonLink href={appHref()} variant="primary" size="lg">
@@ -128,9 +128,9 @@ const LAUNCH_TYPES: { name: string; visible: Mark; speed: Mark; onePrice: Mark; 
   {
     name: "Sealround",
     visible: "no",
-    speed: "no",
+    speed: "yes",
     onePrice: "yes",
-    how: "It can't: there is nothing to read and nothing to race",
+    how: "Private limits and one clearing price; limited slots can still reward early entry",
     us: true,
   },
 ];
@@ -151,8 +151,8 @@ function Compare() {
   return (
     <section className={`${wrap} mt-28 sm:mt-36`}>
       <SectionTitle
-        title="Not another launchpad. The fair mode for one."
-        lead="Every common way to launch a token rewards whoever is fastest or whoever reads the other bids. Sealround removes both, and any launch can run on it."
+        title="Private limits. A shared clearing price."
+        lead="Compare how each mechanism uses price, timing and public information. Sealround hides bid limits during bidding and applies one price to admitted winners. A full sale can still favor earlier arrivals."
       />
       {/* Phones: one block per launch type. The table below takes over from 768px. */}
       <Reveal className="panel mt-10 divide-y divide-line overflow-hidden md:hidden">
@@ -264,7 +264,7 @@ function Problem() {
     <section className={`${wrap} mt-28 sm:mt-36`}>
       <SectionTitle
         title="We aimed sniper bots at three kinds of launch."
-        lead={`The same crowd of 200 people and 5 sniper bots went through each one, ${arena.runs} times. On a sealed, single-price sale, being first is worth nothing.`}
+        lead={`The same crowd of 200 people and 5 sniper bots went through each one, ${arena.runs} times. Admitted winners pay one clearing price. Capacity limits can still exclude late bidders; explore that tradeoff in the Arena.`}
       >
         <ButtonLink href={appHref("/arena")} variant="ghost">
           Open the Bot Arena <ArrowRight className="size-4" aria-hidden />
@@ -503,7 +503,7 @@ function FinalCta() {
       <Reveal className="cta-card relative overflow-hidden rounded-stage border border-line px-6 py-14 text-center sm:px-12 sm:py-20">
         <div className="hero-backdrop" aria-hidden />
         <div className="relative">
-          <h2 className="mx-auto max-w-[18ch] text-h1 text-fg">Bots can&apos;t snipe what they can&apos;t see.</h2>
+          <h2 className="mx-auto max-w-[18ch] text-h1 text-fg">Set your limits. Inspect the outcome.</h2>
           <p className="mx-auto mt-4 max-w-[46ch] text-lead text-muted">
             {isNearMode()
               ? "Bid in an open sale with a NEAR wallet, or check a finished one yourself."

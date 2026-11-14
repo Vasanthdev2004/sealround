@@ -6,7 +6,7 @@ import { dateTime } from "@/lib/format";
 import { FormSection, Label, PresetLabel, SectionNotices, type SectionProps } from "./form-kit";
 import { DURATION_PRESETS, suggestedStart, windowLabel, type DurationPreset, type StartMode } from "./model";
 
-export function WindowSection({ draft, set, error, touch, derived, status }: SectionProps) {
+export function WindowSection({ draft, set, error, touch, derived, status, mode = "mock" }: SectionProps & { mode?: "mock" | "near" }) {
   const { values, notices } = derived;
   const dur = values.durationMs;
   const start = values.startAt;
@@ -23,7 +23,8 @@ export function WindowSection({ draft, set, error, touch, derived, status }: Sec
     if (draft.startMode === "now") {
       summary = (
         <>
-          Bids open when you create the sale and close <span className="num text-fg">{windowLabel(dur)}</span> later.
+          {mode === "near" ? "Bids open after setup, with a 2-minute lead requested, and close " : "Bids open when you create the sale and close "}
+          <span className="num text-fg">{windowLabel(dur)}</span> later.
         </>
       );
     } else if (typeof start === "number") {
@@ -51,7 +52,7 @@ export function WindowSection({ draft, set, error, touch, derived, status }: Sec
           value={draft.startMode}
           onChange={onStartMode}
           options={[
-            { value: "now", label: "When I create it" },
+            { value: "now", label: mode === "near" ? "After setup" : "When I create it" },
             { value: "scheduled", label: "At a set time" },
           ]}
         />
@@ -97,6 +98,9 @@ export function WindowSection({ draft, set, error, touch, derived, status }: Sec
       )}
 
       {summary && <p className="text-small text-muted">{summary}</p>}
+      {mode === "near" && draft.startMode === "scheduled" && <p className="text-label text-subtle">
+        If this start is less than 2 minutes away at submission, both times move later by the same amount. Setup must finish before bidding opens.
+      </p>}
 
       <SectionNotices notices={notices} section="window" />
     </FormSection>

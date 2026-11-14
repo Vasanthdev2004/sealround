@@ -10,9 +10,9 @@ import { SpotlightTracker } from "@/components/visual/spotlight";
 import { REPO_URL, appHref } from "@/lib/site";
 
 const LINKS = [
+  { href: appHref("/sales"), label: "Sales" },
+  { href: appHref("/verify"), label: "Verify a launch" },
   { href: appHref("/how"), label: "How it works" },
-  { href: appHref("/arena"), label: "Bot Arena" },
-  { href: appHref("/judge"), label: "Judge mode" },
 ];
 
 /** The landing page's frame: a slim translucent bar, the page, and a footer with every way in. */
@@ -80,6 +80,8 @@ function SiteFooter() {
       links: [
         { href: appHref(), label: "Sales" },
         { href: appHref("/create"), label: "Launch a sale" },
+        { href: appHref("/activity"), label: "Your activity" },
+        { href: appHref("/verify"), label: "Verify a launch" },
         { href: appHref("/judge"), label: "Judge mode" },
         { href: appHref("/arena"), label: "Bot Arena" },
       ],

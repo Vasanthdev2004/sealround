@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
 import { SaleStatusBadge, Tag } from "@/components/ui/badge";
 import { Countdown } from "@/components/ui/bits";
 import { Price } from "@/components/ui/price";
@@ -12,6 +11,7 @@ import { usdcStr } from "@/lib/format";
 import { useClientQuery } from "@/lib/hooks";
 import type { Sale, SaleResult } from "@/lib/types";
 import { isDone, saleHref, salePrice, saleTiming, tokenHref } from "./sale-state";
+import { SaveSale } from "./save-sale";
 
 /**
  * A settled sale whose launch pool is seeded: its token trades. The board
@@ -34,7 +34,7 @@ export function TradingTag({ result }: { result?: SaleResult | null }) {
  * timing below `sm` (the row then shows the status and relevant deadline under the name).
  */
 export const SALE_COLUMNS =
-  "grid grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_16px] items-center gap-x-3 px-4 sm:grid-cols-[minmax(0,1.7fr)_116px_minmax(0,1.3fr)_minmax(0,1fr)_16px] sm:px-5 lg:grid-cols-[minmax(0,1.7fr)_136px_minmax(0,1.35fr)_88px_128px_minmax(0,1.05fr)_16px]";
+  "grid grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_36px] items-center gap-x-3 px-4 sm:grid-cols-[minmax(0,1.7fr)_116px_minmax(0,1.3fr)_minmax(0,1fr)_36px] sm:px-5 lg:grid-cols-[minmax(0,1.7fr)_136px_minmax(0,1.35fr)_88px_128px_minmax(0,1.05fr)_36px]";
 
 export function SaleTableHead() {
   return (
@@ -120,7 +120,10 @@ function Row({ sale, now, result }: { sale: Sale; now: number; result?: SaleResu
         </span>
       </span>
 
-      <span className="num text-right text-small text-fg max-lg:hidden">{sale.bidCount.toLocaleString("en-US")}</span>
+      <span className="num text-right text-small text-fg max-lg:hidden">
+        {sale.bidCount.toLocaleString("en-US")}
+        {(sale.maxBids ?? c.maxBids) !== undefined && <span className="block text-label text-subtle">of {sale.maxBids ?? c.maxBids} slots</span>}
+      </span>
 
       <span className="num text-right text-small text-fg max-lg:hidden">
         {usdcStr(sale.totalDeposits)}
@@ -134,11 +137,7 @@ function Row({ sale, now, result }: { sale: Sale; now: number; result?: SaleResu
         <span className="block text-label text-subtle">{price.note ?? price.label}</span>
       </span>
 
-      <ChevronRight
-        className="size-4 justify-self-end text-subtle transition-[color,translate] duration-[120ms] group-hover:translate-x-0.5 group-hover:text-fg"
-        strokeWidth={1.75}
-        aria-hidden
-      />
+      <SaveSale id={sale.id} name={c.tokenName} compact />
     </div>
   );
 }

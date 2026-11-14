@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/panel";
 import { getClient } from "@/lib/client";
+import { appConfig } from "@/lib/config";
 import { validateConfig } from "@/lib/client/mock";
 import { useClientQuery } from "@/lib/hooks";
 import { focusEl, scrollToEl } from "@/lib/scroll";
 import { useWallet } from "@/lib/wallet";
 import { AllocationSection } from "./allocation-section";
+import { DraftBar } from "./draft-bar";
+import { createDraftStore, draftScope } from "./draft-storage";
 import { Insights } from "./insights";
 import { LimitsSection } from "./limits-section";
 import { FixedRules, ModeSection } from "./mode-section";
@@ -25,7 +28,6 @@ import { TokenSection } from "./token-section";
 import { WindowSection } from "./window-section";
 import { FormSection, Note, type SectionProps } from "./form-kit";
 import {
-  DEFAULT_DRAFT,
   FIELD_ORDER,
   SECTION_OF,
   buildConfig,
@@ -123,7 +125,12 @@ export function CreateSale() {
   // The read failed every time: say so where the Launch pool section would be.
   const dexError = dexQ.data === undefined ? dexQ.error : null;
 
-  const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT);
+  const [draftStore] = useState(() => createDraftStore(draftScope(appConfig()), () => window.localStorage));
+  const draftSnapshot = useSyncExternalStore(draftStore.subscribe, draftStore.getSnapshot, draftStore.getServerSnapshot);
+  const draft = draftSnapshot.draft;
+  const setDraft = draftStore.update;
+  const config = appConfig();
+  const scopeLabel = config.mode === "mock" ? "Simulated demo" : `${config.near.network} · ${config.near.contractId}`;
   // Time of the last edit. Null until then, so nothing reads the clock while prerendering.
   const [now, setNow] = useState<number | null>(null);
   const [touched, setTouched] = useState<Partial<Record<FieldKey, true>>>({});
@@ -247,6 +254,7 @@ export function CreateSale() {
       const sale = await client.createSale(account, config, meta);
       // Stay in the pending state until the sale page takes over.
       setCreated(true);
+      draftStore.forget();
       router.push(`/sale/${sale.id}/kit`);
     } catch (e) {
       setSubmitError(message(e));
@@ -281,9 +289,17 @@ export function CreateSale() {
     <div className="flex flex-col gap-8 lg:gap-10">
       <PageHeader
         title="Launch a sale"
-        description="Every rule you set here locks when the sale is created."
+        description="Set your token and sale rules, review the exact terms, then open your launch workspace."
         aside={<CreateSteps at={0} />}
       />
+
+      <DraftBar snapshot={draftSnapshot} scopeLabel={scopeLabel} onDiscard={() => {
+        draftStore.discard();
+        setTouched({});
+        setAttempted(false);
+        setReviewError(null);
+        setNow(Date.now());
+      }} />
 
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start xl:gap-14">
         <div className="flex min-w-0 flex-col gap-10 sm:gap-12">
@@ -292,7 +308,7 @@ export function CreateSale() {
           <TokenSection {...sectionProps} status={statuses.token} />
           <AllocationSection {...sectionProps} status={statuses.allocation} />
           <PriceSection {...sectionProps} status={statuses.price} />
-          <WindowSection {...sectionProps} status={statuses.window} />
+          <WindowSection {...sectionProps} status={statuses.window} mode={mode} />
           <LimitsSection {...sectionProps} status={statuses.limits} />
           <Insights derived={derived} />
           <ModeSection {...sectionProps} status={statuses.mode} />
