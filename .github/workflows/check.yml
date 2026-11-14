@@ -3,7 +3,7 @@
 # - `check` runs the repo's own check script, scripts/check.mjs, on Linux: the
 #   Rust workspace and enclave job native tests, the five Vitest suites,
 #   TypeScript for every package and the web ESLint (13 checks). It is the
-#   same command a screener runs by hand (`pnpm check`, README
+#   same command a reviewer runs by hand (`pnpm check`, README
 #   "Prerequisites").
 # - `proofs` re-checks the committed OutLayer proof bundles offline with
 #   OutLayer's verifier.

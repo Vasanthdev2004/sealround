@@ -18,8 +18,11 @@ import arena from "@/data/arena-results.json";
 import { BurnCounter } from "@/components/burn/burn-counter";
 import { ButtonLink } from "@/components/ui/button";
 import { Reveal } from "@/components/visual/reveal";
+import { isNearMode } from "@/lib/config";
 import { REPO_URL, appHref } from "@/lib/site";
 import { BidField } from "./bid-field";
+import { LIVE_SNIPER } from "./live-evidence";
+import { LiveStrip } from "./live-strip";
 import { ArenaBars, ChecksDemo, SwapRoute, type ArenaMetric } from "./proof";
 import { EnclaveVisual, LedgerVisual, OnePriceVisual, SealVisual } from "./step-visuals";
 
@@ -74,9 +77,16 @@ function Hero() {
           <ButtonLink href={appHref()} variant="primary" size="lg">
             Launch app <ArrowRight className="size-4" aria-hidden />
           </ButtonLink>
-          <ButtonLink href={appHref("/judge")} size="lg" icon={<Play className="size-4" aria-hidden />}>
-            Watch a sale clear
-          </ButtonLink>
+          {/* Judge mode needs the simulated chain; on a real contract the live testnet sales are the demo. */}
+          {isNearMode() ? (
+            <ButtonLink href="#live" size="lg" icon={<ShieldCheck className="size-4" aria-hidden />}>
+              Check a live sale
+            </ButtonLink>
+          ) : (
+            <ButtonLink href={appHref("/judge")} size="lg" icon={<Play className="size-4" aria-hidden />}>
+              Watch a sale clear
+            </ButtonLink>
+          )}
         </div>
       </div>
       <div className={`${wrap} relative mt-14 sm:mt-16`}>
@@ -268,10 +278,12 @@ function Problem() {
         Rerun them with <code className="font-mono text-[12px]">pnpm arena</code>.
       </p>
       <Reveal className="mt-6 flex flex-col gap-1 border-l-2 border-accent pl-4 sm:flex-row sm:items-baseline sm:gap-3">
-        <span className="num shrink-0 text-num-sm text-fg">0.8 s</span>
+        <span className="num shrink-0 text-num-sm text-fg">{LIVE_SNIPER.sniperAfterOpen}</span>
         <p className="max-w-[72ch] text-small text-muted">
-          We also ran a real sniper bot against a sale on a local NEAR chain. It bid 0.8 seconds after the window
-          opened and paid exactly the clearing price, the same as everyone else.
+          We also ran a real sniper bot against a sale on NEAR testnet ({LIVE_SNIPER.sale}). It bid{" "}
+          {LIVE_SNIPER.sniperAfterOpen} after the window opened and paid {LIVE_SNIPER.price} USDC per token, the
+          clearing price. A bidder who came in {LIVE_SNIPER.lateAfterOpen} after the open, near the end of the{" "}
+          {LIVE_SNIPER.windowSeconds / 60}-minute window, paid the same.
         </p>
       </Reveal>
     </section>
@@ -301,15 +313,15 @@ function Steps() {
     {
       n: 4,
       title: "Every winner pays one price",
-      body: "The clearing price is the highest price at which demand covers the supply. Bots and people pay exactly that.",
+      body: "The clearing price is the highest price at which demand covers the supply. Bots and people pay exactly that, and the tokens nobody bought burn.",
       visual: <OnePriceVisual />,
     },
   ];
   return (
     <section className={`${wrap} mt-28 sm:mt-36`} id="how">
       <SectionTitle
-        title="How a sale works"
-        lead="Four steps, the same for everyone. The rules are locked when the sale is created, and there is no admin key."
+        title="How a sale works: the Reveal"
+        lead="Every launch ends the same way: a countdown, the enclave opens every sealed bid at once, one price for all, and what demand did not take burns. The rules lock when the sale is created; the contract has no admin method."
       />
       <div className="mt-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {steps.map((s, i) => (
@@ -341,8 +353,8 @@ function Unique() {
     },
     {
       icon: KeyRound,
-      title: "No admin key, refunds built in",
-      body: "The rules lock when the sale is created. If clearing fails or the enclave times out, every deposit can be taken back.",
+      title: "No admin method, refunds built in",
+      body: "The contract has no owner and no method that changes a sale, so the rules lock when it is created. If clearing fails or the enclave times out, every deposit can be taken back.",
     },
     {
       icon: Layers,
@@ -397,6 +409,7 @@ function Verify() {
           <ChecksDemo />
         </Reveal>
       </div>
+      <LiveStrip />
     </section>
   );
 }
@@ -407,7 +420,7 @@ function Burns() {
     <section className={`${wrap} mt-28 sm:mt-36`}>
       <SectionTitle
         title="Demand sets the supply."
-        lead="Every winner pays the clearing price, and every token the bids did not take burns when the creator is paid. The supply that is left is the supply the community asked for."
+        lead="The crowd's sealed bids set the price and the supply. Every winner pays the clearing price, and every token the bids did not take burns when the creator is paid, so the supply that is left is the supply the community asked for."
       />
       <Reveal className="mt-10">
         <BurnCounter />
@@ -423,8 +436,10 @@ function Launch() {
     ["Floor price", "0.001 USDC"],
     ["Minimum raise", "50 USDC"],
     ["Bid window", "30 minutes"],
+    ["Launch pool", "20% of the raise, at the clearing price"],
+    ["LP shares", "Held by the sale contract"],
     ["Unsold tokens", "Burned"],
-    ["Admin key", "None"],
+    ["Admin method", "None"],
   ];
   return (
     <section className={`${wrap} mt-28 sm:mt-36`}>
@@ -435,6 +450,11 @@ function Launch() {
           <p className="mt-2 max-w-[46ch] text-small text-muted">
             Run a sale on its own, or offer it as the fair mode on a launchpad. The token is minted once with a fixed
             supply, unsold tokens are burned, and every rule locks at launch.
+          </p>
+          <p className="mt-2 max-w-[46ch] text-small text-muted">
+            Add a launch pool and, after the sale, part of the raise and a token reserve open a Rhea pool at exactly the
+            clearing price. The LP shares stay with the sale contract, which has no method that moves them: once its
+            deploy key is deleted, nobody can pull the liquidity.
           </p>
           <dl className="mt-6 divide-y divide-line border-y border-line">
             {rules.map(([k, v]) => (
@@ -469,7 +489,7 @@ function Launch() {
           </div>
           <div className="mt-auto pt-6">
             <SwapRoute />
-            <p className="mt-2 text-label text-subtle">Live swaps run on mainnet only. The demo previews the route.</p>
+            <p className="mt-2 text-label text-subtle">Live swaps run on mainnet only. Elsewhere the app previews the route.</p>
           </div>
         </Reveal>
       </div>
@@ -485,7 +505,9 @@ function FinalCta() {
         <div className="relative">
           <h2 className="mx-auto max-w-[18ch] text-h1 text-fg">Bots can&apos;t snipe what they can&apos;t see.</h2>
           <p className="mx-auto mt-4 max-w-[46ch] text-lead text-muted">
-            Run a full sale on the simulated chain in your browser. Nothing to install, no wallet needed.
+            {isNearMode()
+              ? "Bid in an open sale with a NEAR wallet, or check a finished one yourself."
+              : "Run a full sale on the simulated chain in your browser. Nothing to install, no wallet needed."}
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <ButtonLink href={appHref()} variant="primary" size="lg">

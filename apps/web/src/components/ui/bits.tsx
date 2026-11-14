@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowUpRight, Check, Circle, Loader2, X } from "lucide-react";
+import { LIVE_CONTRACT, explorerAddress } from "@/components/site/live-evidence";
 import { Tag } from "@/components/ui/badge";
 import { palette } from "@/lib/palette";
 import { cn } from "@/lib/cn";
@@ -203,11 +204,30 @@ export function CheckRow({
   );
 }
 
+/** An inline link in quiet text to a page off the app (the block explorer). */
+export function QuietLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-muted underline decoration-line-strong underline-offset-2 transition-colors [overflow-wrap:anywhere] hover:text-fg"
+    >
+      {children}
+    </a>
+  );
+}
+
 /** Quiet disclosure for views that show simulated data. */
 export function SimulatedNote({ children, className }: { children?: React.ReactNode; className?: string }) {
   return (
     <p className={cn("text-label text-subtle", className)}>
-      {children ?? "Simulated on a mock chain until the contract is on testnet. Encryption and clearing math are real."}
+      {children ?? (
+        <>
+          Simulated on a mock chain in your browser. Encryption and clearing math are real. The contract also runs on
+          NEAR testnet, with settled sales: <QuietLink href={explorerAddress(LIVE_CONTRACT)}>{LIVE_CONTRACT}</QuietLink>.
+        </>
+      )}
     </p>
   );
 }

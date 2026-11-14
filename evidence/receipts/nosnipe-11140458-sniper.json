@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "kind": "snipe",
+  "network": "testnet",
+  "contract": "sealround.itzbeast.testnet",
+  "saleId": "nosnipe-11140458",
+  "bidder": "sniper.itzbeast.testnet",
+  "mode": "tee",
+  "deposit": "5000000",
+  "maxPrice": "4000",
+  "maxSpend": "5000000",
+  "salt": "4392fab171aaa48a9498135a38bcc9e3",
+  "payloadSha256": "c3a49c54ea77f221e1cb54546c4cabd44306363d66c31e07de10834a4eb3036d",
+  "savedAt": "2026-11-14T05:03:14.874Z",
+  "txHash": "4XA47KqcjkkXfKW8TeUiqhoow7N5DuACx1Yx4aimt8tC",
+  "index": 0,
+  "placedAtNs": "1794632665388990307",
+  "landedAfterMs": 3620.990307
+}

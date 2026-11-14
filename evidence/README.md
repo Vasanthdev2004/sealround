@@ -7,6 +7,14 @@ Files a reader can re-check without trusting us.
 - `outlayer/`: proof bundles for every OutLayer run of those sales, checked
   with OutLayer's own open-source verifier, `outlayer-verify`. This file
   explains them.
+- `receipts/nosnipe-11140458-sniper.json`: the live sniper bot's own receipt
+  for its bid in `nosnipe-11140458` (max price 0.004 USDC, max spend 5 USDC,
+  the salt and the sha256 of the sealed bytes it sent; no key). The sale is
+  settled, so these terms are no longer secret. `verify-sale --bid-secret`
+  uses it to check that bid's fill against the rule from its own terms:
+  `pnpm --filter web verify-sale --contract sealround.itzbeast.testnet --sale nosnipe-11140458 --bid-secret ../../evidence/receipts/nosnipe-11140458-sniper.json`
+  prints "Your bid got what the rule gives at this price" (2,500 tokens for
+  5 USDC at 0.002).
 
 ## OutLayer runs: the Intel signature chain
 

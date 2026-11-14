@@ -287,3 +287,131 @@ function Write-Preamble {
     if ($Extra) { $lines += $Extra }
     $lines
 }
+
+# --- Read-only RPC with retries, and captured near CLI output (8-evidence-sale.ps1) ---
+
+<#
+One JSON-RPC request. Public testnet RPC nodes answer HTTP 429 (rate limit),
+fail on their side (5xx) or time out under load, so this waits and tries the
+next URL in -RpcUrl (or the same one again), up to -Tries times. A JSON-RPC
+error inside an HTTP 200 answer is returned as is, not retried. Never signs.
+#>
+function Invoke-NearRpc {
+    param(
+        [Parameter(Mandatory)][string[]]$RpcUrl,
+        [Parameter(Mandatory)][string]$Method,
+        [Parameter(Mandatory)]$Params,
+        [ValidateRange(1, 30)][int]$Tries = 8
+    )
+    $body = [ordered]@{ jsonrpc = '2.0'; id = 'fairground'; method = $Method; params = $Params } | ConvertTo-Json -Depth 10 -Compress
+    $urls = @($RpcUrl)
+    for ($try = 0; ; $try++) {
+        $url = $urls[$try % $urls.Count]
+        try {
+            return Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body $body -TimeoutSec 30
+        } catch {
+            $status = 0
+            $ex = $_.Exception
+            if ($ex.PSObject.Properties['Response'] -and $ex.Response) {
+                try { $status = [int]$ex.Response.StatusCode } catch { $status = 0 }
+            }
+            # 4xx other than 429 will not change on a retry.
+            if ($status -ge 400 -and $status -lt 500 -and $status -ne 429) { throw }
+            if ($try + 1 -ge $Tries) { throw }
+            $wait = [Math]::Min(20, 2 * ($try + 1))
+            Write-Host ("RPC {0} did not answer {1} ({2}); trying again in {3} s" -f $url, $Method, $(if ($status) { "HTTP $status" } else { $ex.Message }), $wait) -ForegroundColor DarkGray
+            Start-Sleep -Seconds $wait
+        }
+    }
+}
+
+<# Invoke-NearView over Invoke-NearRpc: the same result, with retries and several URLs. #>
+function Invoke-NearViewRetry {
+    param(
+        [Parameter(Mandatory)][string[]]$RpcUrl,
+        [Parameter(Mandatory)][string]$Account,
+        [Parameter(Mandatory)][string]$Method,
+        [Parameter(Mandatory)][string]$ArgsJson
+    )
+    $params = [ordered]@{
+        request_type = 'call_function'; finality = 'final'
+        account_id = $Account; method_name = $Method
+        args_base64 = [Convert]::ToBase64String($script:Utf8NoBom.GetBytes($ArgsJson))
+    }
+    $response = Invoke-NearRpc -RpcUrl $RpcUrl -Method 'query' -Params $params
+    if ($response.PSObject.Properties['error'] -and $response.error) {
+        throw "RPC error from $Account.$Method`: $($response.error | ConvertTo-Json -Compress -Depth 10)"
+    }
+    if ($response.result.PSObject.Properties['error'] -and $response.result.error) {
+        throw "$Account.$Method failed: $($response.result.error)"
+    }
+    $bytes = [byte[]]@($response.result.result)
+    $script:Utf8NoBom.GetString($bytes) | ConvertFrom-Json
+}
+
+<# An account's state (amount, locked, storage_usage), or $null when the account does not exist. #>
+function Get-NearAccount {
+    param([Parameter(Mandatory)][string[]]$RpcUrl, [Parameter(Mandatory)][string]$Account)
+    $response = Invoke-NearRpc -RpcUrl $RpcUrl -Method 'query' -Params ([ordered]@{ request_type = 'view_account'; finality = 'final'; account_id = $Account })
+    if ($response.PSObject.Properties['error'] -and $response.error) {
+        $text = $response.error | ConvertTo-Json -Compress -Depth 10
+        if ($text -match 'UNKNOWN_ACCOUNT|does not exist') { return $null }
+        throw "view_account $Account`: $text"
+    }
+    $response.result
+}
+
+<#
+The account's access keys and the block they were read at: Keys is an array
+(empty for a locked contract), Block the block height. Read at final.
+#>
+function Get-AccessKeyList {
+    param([Parameter(Mandatory)][string[]]$RpcUrl, [Parameter(Mandatory)][string]$Account)
+    $response = Invoke-NearRpc -RpcUrl $RpcUrl -Method 'query' -Params ([ordered]@{ request_type = 'view_access_key_list'; finality = 'final'; account_id = $Account })
+    if ($response.PSObject.Properties['error'] -and $response.error) {
+        throw "view_access_key_list $Account`: $($response.error | ConvertTo-Json -Compress -Depth 10)"
+    }
+    $keys = @()
+    foreach ($k in @($response.result.keys)) {
+        if ($null -eq $k) { continue }
+        $permission = $k.access_key.permission
+        $keys += [pscustomobject]@{
+            public_key = [string]$k.public_key
+            permission = $(if ($permission -is [string]) { $permission } else { 'FunctionCall' })
+        }
+    }
+    [pscustomobject]@{ Keys = $keys; Block = [long]$response.result.block_height }
+}
+
+<#
+Runs a native command (near CLI) the way Invoke-Plan does, echoes each output
+line as it arrives, and returns the lines and the exit code, so the caller
+can read the transaction hash near CLI prints. Native stderr lines arrive as
+error records when merged; with $ErrorActionPreference = 'Stop' Windows
+PowerShell 5.1 would stop at the first one, so it is 'Continue' in here.
+#>
+function Invoke-NativeCaptured {
+    param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string[]]$Arguments)
+    if (-not (Get-Command $Exe -ErrorAction SilentlyContinue)) { throw "'$Exe' is not on PATH. See enclave\README.md, Prerequisites." }
+    $ErrorActionPreference = 'Continue'
+    $lines = New-Object System.Collections.Generic.List[string]
+    $stepArgs = @($Arguments)
+    & $Exe @stepArgs 2>&1 | ForEach-Object {
+        $text = [string]$_
+        if ($_ -is [System.Management.Automation.ErrorRecord]) { $text = $_.Exception.Message }
+        Write-Host $text
+        $lines.Add($text)
+    }
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = $lines.ToArray() }
+}
+
+<# The transaction hash in near CLI's output ("Transaction ID: <hash>"), or $null. #>
+function Get-NearTxHash {
+    param([string[]]$Lines)
+    $text = (@($Lines) -join "`n") -replace '\x1b\[[0-9;]*m', ''
+    $m = [regex]::Match($text, 'Transaction ID:\s*([1-9A-HJ-NP-Za-km-z]{43,44})')
+    if ($m.Success) { return $m.Groups[1].Value }
+    $m = [regex]::Match($text, '/(?:txns|transactions)/([1-9A-HJ-NP-Za-km-z]{43,44})')
+    if ($m.Success) { return $m.Groups[1].Value }
+    $null
+}

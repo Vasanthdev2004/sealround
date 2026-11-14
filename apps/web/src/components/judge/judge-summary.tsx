@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { CheckRow, SimulatedNote, type CheckState } from "@/components/ui/bits";
+import { explorerAddress, newestLiveSale, tokenAccount } from "@/components/site/live-evidence";
+import { CheckRow, QuietLink, SimulatedNote, type CheckState } from "@/components/ui/bits";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Stat, StatRow } from "@/components/ui/stat";
@@ -116,6 +117,7 @@ export function JudgeSummary({
   const mine = account ? effectiveFills(r).find((f) => f.bidder === account) : undefined;
 
   const yours = <YourBid mine={mine} settled={settled} sym={c.tokenSymbol} decimals={c.decimals} />;
+  const live = newestLiveSale();
 
   return (
     <section className="panel overflow-hidden" aria-labelledby="summary-title">
@@ -226,7 +228,10 @@ export function JudgeSummary({
           />
         </StatRow>
 
-        <SimulatedNote className="mt-4" />
+        <SimulatedNote className="mt-4">
+          This run was simulated in your browser; bid encryption and the clearing math are real. The same mechanic ran
+          on NEAR testnet in sale <QuietLink href={explorerAddress(tokenAccount(live))}>{live.sale}</QuietLink>.
+        </SimulatedNote>
       </div>
     </section>
   );

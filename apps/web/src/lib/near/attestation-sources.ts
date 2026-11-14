@@ -23,7 +23,13 @@
  * days, so history calls fall back to a public archival node.
  */
 
-import type { AttestedRun, MissingRun, RunKind, RunTxSource, SaleVerification } from "../types";
+import { sha256Bytes, toHex } from "@fairground/clearing";
+import { PINNED_CONTRACT_SHA256 } from "../../components/deploy/chain";
+import type { AttestedRun, MissingRun, RunKind, RunTxSource } from "../types";
+import { jsonRpc, viewCall, type JsonRpc } from "../verify/rpc";
+import { chainChecks, readChain, type ChainRead } from "../verify/sources";
+import type { FullVerification } from "../verify/types";
+import type { BidTerms } from "../verify/your-bid";
 import {
   calledMethod,
   findSealerRun,
@@ -36,8 +42,10 @@ import {
   verifyRun,
   type OutLayerAttestation,
   type RpcTransaction,
+  type SealerAnswer,
   type TxStatus,
 } from "./attestation";
+import type { ResultView, SaleView } from "./views";
 
 export type OutLayerNetwork = "testnet" | "mainnet";
 
@@ -58,66 +66,8 @@ export const OUTLAYER_NETWORKS: Record<OutLayerNetwork, { api: string; register:
 /** Looked up per call on the global object: a detached `window.fetch` throws "Illegal invocation" in some browsers. */
 const globalFetch: typeof fetch = (input, init) => globalThis.fetch(input, init);
 
-const utf8 = new TextEncoder();
-function toBase64(text: string): string {
-  let s = "";
-  utf8.encode(text).forEach((b) => (s += String.fromCharCode(b)));
-  return btoa(s);
-}
-
-// ---------- JSON-RPC with an archival fallback ----------
-
-export type JsonRpc = <T>(method: string, params: unknown) => Promise<T>;
-
-/**
- * JSON-RPC over fetch. Tries each URL in turn and moves to the next when a
- * node fails or refuses (unreachable, rate limited, or the block or
- * transaction is pruned there). Throws the last error.
- */
-export function jsonRpc(urls: string[], opts: { fetch?: typeof fetch; timeoutMs?: number } = {}): JsonRpc {
-  const fetchImpl = opts.fetch ?? globalFetch;
-  const timeoutMs = opts.timeoutMs ?? 20_000;
-  let id = 1;
-  return async <T>(method: string, params: unknown): Promise<T> => {
-    let last: unknown = new Error("no RPC URL");
-    for (const url of urls) {
-      try {
-        const res = await fetchImpl(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: id++, method, params }),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        if (!res.ok) throw new Error(`${method}: HTTP ${res.status}`);
-        const reply = (await res.json()) as { result?: T; error?: { cause?: { name?: string }; name?: string; data?: unknown; message?: string } };
-        if (reply.error) {
-          const e = reply.error;
-          const detail = typeof e.data === "string" ? e.data : (e.message ?? "");
-          throw new Error(`${method}: ${e.cause?.name ?? e.name ?? "error"} ${detail}`.trim());
-        }
-        if (reply.result === undefined) throw new Error(`${method}: empty answer`);
-        return reply.result;
-      } catch (e) {
-        last = e;
-      }
-    }
-    throw last instanceof Error ? last : new Error(String(last));
-  };
-}
-
-/** A view call (finality final), its JSON result parsed. */
-export async function viewCall<T>(rpc: JsonRpc, account: string, method: string, args: Record<string, unknown>): Promise<T> {
-  const r = await rpc<{ result?: number[]; error?: string }>("query", {
-    request_type: "call_function",
-    finality: "final",
-    account_id: account,
-    method_name: method,
-    args_base64: toBase64(JSON.stringify(args)),
-  });
-  if (typeof r.error === "string") throw new Error(`${account}.${method}: ${r.error.slice(0, 200)}`);
-  const text = new TextDecoder().decode(Uint8Array.from(r.result ?? []));
-  return (text === "" ? null : JSON.parse(text)) as T;
-}
+// JSON-RPC with an archival fallback lives in verify/rpc.ts; re-exported for the scripts that import it from here.
+export { jsonRpc, viewCall, type JsonRpc };
 
 // ---------- OutLayer's public API ----------
 
@@ -166,18 +116,21 @@ type BlockView = {
 };
 type ChunkView = { transactions: RpcTransaction[] };
 
-/** Runs `fn` over `items`, at most `limit` at a time, in order of the results. */
-async function mapLimit<A, B>(items: A[], limit: number, fn: (a: A) => Promise<B>): Promise<B[]> {
-  const out: B[] = new Array(items.length);
+/**
+ * Runs `fn` over `items`, at most `limit` at a time, and stops starting new
+ * ones once one gives a result that is not null. Returns that result, or null.
+ */
+async function firstOf<A, B>(items: A[], limit: number, fn: (a: A) => Promise<B | null>): Promise<B | null> {
   let next = 0;
+  let hit: B | null = null;
   const worker = async () => {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await fn(items[i]);
+    while (hit === null && next < items.length) {
+      const got = await fn(items[next++]);
+      if (got !== null && hit === null) hit = got;
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return out;
+  return hit;
 }
 
 export function readTx(rpc: JsonRpc, hash: string, signer: string): Promise<TxStatus> {
@@ -213,14 +166,13 @@ export async function scanForRunTx(rpc: JsonRpc, t: RunTarget, requestBlock: num
     }
     // A chunk repeated from an earlier block (a missed chunk) holds no new transactions.
     const fresh = block.chunks.filter((c) => c.height_included === block.header.height);
-    const chunks = await mapLimit(fresh, 4, (c) => rpc<ChunkView>("chunk", { chunk_id: c.chunk_hash }).catch(() => null));
-    for (const chunk of chunks) {
-      for (const tx of chunk?.transactions ?? []) {
-        if (txCallsSale(tx, t.contractId, RUN_METHODS[t.kind], t.saleId)) {
-          return { hash: tx.hash, signer: tx.signer_id, source: "block_scan", scannedBlock: height };
-        }
-      }
-    }
+    // Two chunks at a time, and no more once the transaction is found: each read counts against the node's rate limit.
+    const hit = await firstOf(fresh, 2, async (c) => {
+      const chunk = await rpc<ChunkView>("chunk", { chunk_id: c.chunk_hash }).catch(() => null);
+      const tx = chunk?.transactions.find((x) => txCallsSale(x, t.contractId, RUN_METHODS[t.kind], t.saleId));
+      return tx ? ({ hash: tx.hash, signer: tx.signer_id, source: "block_scan", scannedBlock: height } satisfies FoundTx) : null;
+    });
+    if (hit) return hit;
   }
   return null;
 }
@@ -305,6 +257,15 @@ export type VerifySaleOptions = {
   known?: Partial<Record<RunKind, FoundTx>>;
   /** Views already read (tests); read from the chain otherwise. */
   views?: { sale: SaleViewFields | null; result: ResultViewFields | null; config: ConfigViewFields };
+  /**
+   * The contract and rule checks (verify/checks.ts): on unless false. They read
+   * the contract account, its keys, get_bids, get_fills and the pool.
+   */
+  chain?: boolean;
+  /** sha256 hex of the contract build to expect; contracts/res/fairground.wasm unless given. */
+  pinnedContract?: string;
+  /** Bidders' own terms (verify-sale --bid-secret): a your_bid check each. */
+  bidTerms?: readonly BidTerms[];
   fetch?: typeof fetch;
   now?: () => number;
 };
@@ -325,12 +286,13 @@ const missing = (kind: RunKind, reason: MissingRun["reason"], message: string): 
 });
 
 /**
- * Finds, fetches and checks the sale's key run and clearing run. Returns the
- * verification and the transactions found (pass them back as `known`).
+ * Finds, fetches and checks the sale's key run and clearing run, then (unless
+ * `chain` is false) the contract and rule checks. Returns the verification and
+ * the transactions found (pass them back as `known`).
  */
 export async function verifySaleRuns(
   o: VerifySaleOptions,
-): Promise<{ verification: SaleVerification; found: Partial<Record<RunKind, FoundTx>> }> {
+): Promise<{ verification: FullVerification; found: Partial<Record<RunKind, FoundTx>>; chain?: ChainRead }> {
   const fetchImpl = o.fetch ?? globalFetch;
   const net = OUTLAYER_NETWORKS[o.network];
   const rpc = jsonRpc([o.rpcUrl, net.archivalRpc].filter((u, i, all) => all.indexOf(u) === i), { fetch: fetchImpl });
@@ -350,12 +312,23 @@ export async function verifySaleRuns(
   const { sale, result, config } = views;
   if (!sale) throw new Error(`There is no sale ${o.saleId} on ${o.contractId}.`);
 
+  // The contract and rule reads run while the runs are searched for. get_sale and get_result are the full views.
+  const chainRead: Promise<ChainRead> | null =
+    o.chain === false
+      ? null
+      : readChain(rpc, o.contractId, o.saleId, { sale: sale as SaleView, result: result as ResultView | null });
+
   const tee = sale.reveal_mode === "Tee";
   const wants: Record<RunKind, boolean> = {
     key: tee && !!sale.sealer_pubkey,
     clear: tee && !!result?.result_sha256,
   };
   const found: Partial<Record<RunKind, FoundTx>> = {};
+  // Both runs usually share the enclave measurements; ask the register contract once per set, and read each block once.
+  const approvals = new Map<string, Promise<boolean | null>>();
+  const heights = new Map<string, Promise<number | null>>();
+  /** The clearing run's answer, read from the close transaction, for the applied-output check. */
+  let clearOut: { answer: SealerAnswer | null; bytes: number; sha256: string } | null = null;
 
   const one = async (kind: RunKind): Promise<AttestedRun | MissingRun | null> => {
     if (!wants[kind]) return null;
@@ -409,6 +382,13 @@ export async function verifySaleRuns(
       delete found[kind];
       return missing(kind, "not_found", `Transaction ${tx.hash} holds no ${RUN_OP[kind]} run for this sale.`);
     }
+    // A final transaction never changes: passed back as `known`, it spares the next run of the checks this read.
+    found[kind] = { ...found[kind]!, tx: status };
+    if (kind === "clear") {
+      // The bytes on_execution_response returned: what the contract received, attested or not.
+      const r = findSealerRun(status, config.outlayer);
+      clearOut = { answer: r.answer, bytes: r.output.length, sha256: toHex(sha256Bytes(r.output)) };
+    }
     if (!attestation) {
       return missing(
         kind,
@@ -419,19 +399,34 @@ export async function verifySaleRuns(
 
     const parsed = parseTdxQuote(attestation.tdx_quote);
     const run = findSealerRun(status, config.outlayer);
-    const [approved, requestBlockHeight] = await Promise.all([
-      "quote" in parsed
-        ? viewCall<boolean>(rpc, net.register, "is_measurements_approved", { measurements: parsed.quote.measurements }).then(
+    const approvedOf = (measurements: unknown): Promise<boolean | null> => {
+      const k = JSON.stringify(measurements);
+      if (!approvals.has(k)) {
+        approvals.set(
+          k,
+          viewCall<boolean>(rpc, net.register, "is_measurements_approved", { measurements }).then(
             (v) => v === true,
             () => null,
-          )
-        : Promise.resolve(null),
-      run.requestBlockHash
-        ? rpc<{ header: { height: number } }>("block", { block_id: run.requestBlockHash }).then(
+          ),
+        );
+      }
+      return approvals.get(k)!;
+    };
+    const heightOf = (hash: string): Promise<number | null> => {
+      if (!heights.has(hash)) {
+        heights.set(
+          hash,
+          rpc<{ header: { height: number } }>("block", { block_id: hash }).then(
             (b) => b.header.height,
             () => null,
-          )
-        : Promise.resolve(null),
+          ),
+        );
+      }
+      return heights.get(hash)!;
+    };
+    const [approved, requestBlockHeight] = await Promise.all([
+      "quote" in parsed ? approvedOf(parsed.quote.measurements) : Promise.resolve(null),
+      run.requestBlockHash ? heightOf(run.requestBlockHash) : Promise.resolve(null),
     ]);
     let checked;
     try {
@@ -475,8 +470,18 @@ export async function verifySaleRuns(
   };
 
   const [key, clear] = await Promise.all([one("key"), one("clear")]);
+  const read = chainRead ? await chainRead : null;
+  const chain = read
+    ? chainChecks(read, {
+        contractId: o.contractId,
+        pinnedContract: o.pinnedContract ?? PINNED_CONTRACT_SHA256,
+        clear: clearOut,
+        terms: o.bidTerms,
+      })
+    : undefined;
   return {
-    verification: { simulated: false, checkedAt: now(), pinnedWasm: sale.sealer_code_hash, key, clear },
+    verification: { simulated: false, checkedAt: now(), pinnedWasm: sale.sealer_code_hash, key, clear, ...(chain ? { chain } : {}) },
     found,
+    ...(read ? { chain: read } : {}),
   };
 }

@@ -1,0 +1,250 @@
+{
+  "note": "Read-only capture from testnet, 2026-11-14: sealround.itzbeast.testnet sale nosnipe-11140458.",
+  "contract": "sealround.itzbeast.testnet",
+  "sale": "nosnipe-11140458",
+  "clearTx": {
+    "hash": "8vjEzwQFzKjZvAXB36G6Ps2MDcyEKkrSAAPbjUFXkqrK",
+    "signer": "itzbeast.testnet"
+  },
+  "clearOutputB64": "IntcInZcIjoxLFwib2tcIjp0cnVlLFwib3BcIjpcImNsZWFyXCIsXCJzYWxlX2lkXCI6XCJub3NuaXBlLTExMTQwNDU4XCIsXCJiaWRfc2V0X2hhc2hcIjpcImMyOTQ2ZmFlNDEzY2IyNTkyYTJkOGY3OTg2YTcyNTViYmZkNTVlYTdlMzRhODc4MmZhY2JlMWE1NjBmMjA5NDNcIixcInB1YmtleVwiOlwiZTdmYWJmOGRjMzMwOGM1MDNmY2NlZmYwNmQ3ZmVkNGRhOGI5NzYyZWY5YjhjNDY1YWRmZjgyMTgxYTJkOGExOVwiLFwiY2xlYXJpbmdfcHJpY2VcIjpcIjIwMDBcIixcIm5fdmFsaWRcIjo1LFwibl9pbnZhbGlkXCI6MSxcImludmFsaWRcIjpbNF0sXCJmaWxsc1wiOltbXCIyNTAwMDAwMDAwMDAwMDAwMDAwMDAwXCIsXCI1MDAwMDAwXCJdLFtcIjI1MDAwMDAwMDAwMDAwMDAwMDAwMDBcIixcIjUwMDAwMDBcIl0sW1wiMjUwMDAwMDAwMDAwMDAwMDAwMDAwMFwiLFwiNTAwMDAwMFwiXSxbXCIwXCIsXCIwXCJdLFtcIjBcIixcIjBcIl0sW1wiMjUwMDAwMDAwMDAwMDAwMDAwMDAwMFwiLFwiNTAwMDAwMFwiXV19Ig==",
+  "views": {
+    "get_sale": {
+      "sale_id": "nosnipe-11140458",
+      "status": "settled",
+      "creator": "itzbeast.testnet",
+      "token": "nosnipe-11140458.sealround.itzbeast.testnet",
+      "quote_token": "usdc.fakes.testnet",
+      "token_name": "No Snipe",
+      "token_symbol": "NOSNIPE",
+      "decimals": 18,
+      "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Crect%20width%3D'64'%20height%3D'64'%20rx%3D'14'%20fill%3D'%230b0d12'%2F%3E%3Ccircle%20cx%3D'32'%20cy%3D'32'%20r%3D'17'%20fill%3D'none'%20stroke%3D'%233d7eff'%20stroke-width%3D'4'%2F%3E%3Cpath%20d%3D'M32%209v10M32%2045v10M9%2032h10M45%2032h10'%20stroke%3D'%233d7eff'%20stroke-width%3D'4'%20stroke-linecap%3D'round'%2F%3E%3Cpath%20d%3D'M14%2050L50%2014'%20stroke%3D'%23ff5c5c'%20stroke-width%3D'5'%20stroke-linecap%3D'round'%2F%3E%3C%2Fsvg%3E",
+      "description": "Sealround evidence sale: a sniper bot, four people, a copycat and a late bid, one clearing price, and a Rhea pool opened at that price. Testnet; the token has no value.",
+      "website": null,
+      "total_supply": "20000000000000000000000",
+      "sale_supply": "10000000000000000000000",
+      "creator_allocation": "8000000000000000000000",
+      "floor_price": "1000",
+      "max_price": null,
+      "min_raise": "5000000",
+      "bid_start": "1794632661768000000",
+      "bid_end": "1794633261768000000",
+      "min_deposit": "1000000",
+      "max_deposit_per_account": "10000000",
+      "max_bids": 8,
+      "reveal_mode": "Tee",
+      "reveal_window": null,
+      "reveal_end": null,
+      "settle_timeout": "3600000000000",
+      "refund_mode_at": null,
+      "unsold_rule": "Burn",
+      "sealer_code_hash": "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb",
+      "sealer_pubkey": "e7fabf8dc3308c503fcceff06d7fed4da8b9762ef9b8c465adff82181a2d8a19",
+      "token_setup": "done",
+      "sealer_key_setup": "done",
+      "key_request_block": 277611314,
+      "created_at": "1794632391780591868",
+      "closed_at": "1794633342200302613",
+      "bid_count": 6,
+      "total_deposits": "30000000",
+      "bid_set_hash": "c2946fae413cb2592a2d8f7986a7255bbfd55ea7e34a8782facbe1a560f20943",
+      "liquidity": {
+        "dex": "ref-finance-101.testnet",
+        "raise_share_bps": 2000,
+        "pool_tokens": "2000000000000000000000",
+        "fee_bps": 30
+      }
+    },
+    "get_result": {
+      "sale_id": "nosnipe-11140458",
+      "status": "settled",
+      "fail_reason": null,
+      "clearing_price": "2000",
+      "total_sold": "10000000000000000000000",
+      "total_raised": "20000000",
+      "unsold": "0",
+      "n_valid": 5,
+      "n_invalid": 1,
+      "n_winners": 4,
+      "failed_checks": [],
+      "failed_checks_total": 0,
+      "result_sha256": "b6e3e851c2e3d3e15039b45e2f84e8047d33b5f5f269cf67d8e36ce2dc628426",
+      "input_sha256": "167e4ab1ae74d8665bbd41dbbd962d06d504e533f82f1e199c7b94d31dfe6339",
+      "clear_requests": 1,
+      "clear_request_block": 277612913,
+      "clear_attempts": 0,
+      "total_penalties": "50000",
+      "proceeds": {
+        "raise_paid": true,
+        "allocation_paid": true,
+        "unsold_burned": false,
+        "reserve_returned": true
+      },
+      "liquidity": {
+        "status": "seeded",
+        "next_step": null,
+        "in_flight": null,
+        "dex": "ref-finance-101.testnet",
+        "pool_id": 2971,
+        "usdc": "4000000",
+        "tokens": "2000000000000000000000",
+        "shares": "1000000000000000000000000",
+        "usdc_on_dex": "0",
+        "tokens_on_dex": "0",
+        "failures": 0,
+        "deadline": "1794636992374810092"
+      }
+    },
+    "get_bids": [
+      {
+        "index": 0,
+        "bidder": "sniper.itzbeast.testnet",
+        "deposit": "5000000",
+        "payload": "ByUk6mEXn1mpxfhI7YrWXhtUFScEbV1GpCn1dxcrLT3yPt1z2husbviwktxu/MzgHFU3Yv3GTLpQjn0WjH7KFXvV85Nl8d2RiJlW7orKptHVyufiOBVNfxPho5futKfVhIwxZGnIEjHzFb3zk58yrtsfDW2l788i2ewB54aZjeZIl2o5SCvekQShK7Xocjid3cZDuu/BViyOHEfP/ERm004S6rIfB5t32+ylMvo3CIMsWB9ZDxNI1xcgGDwr2tufw+4KF44TrDx80japybnjktvfu7oKo3hCbyY+xV/bj3ICAqQu/rTlWZdA/gIXK/GL5ir6KuOJc+sgBHEooeZgB4+/4dxmfBg=",
+        "placed_at": "1794632665388990307",
+        "revealed": false,
+        "claimed": true
+      },
+      {
+        "index": 1,
+        "bidder": "ana.itzbeast.testnet",
+        "deposit": "6000000",
+        "payload": "FxZHh+5VpzYLrBkvaEHrOgjXzmfGjvTF5u0LdOmwKVKp2G8sjTHVXIbqpIj9sISXaKDCsWNGHi3wl0Nt2LDsOcDC6xkX0HcV6sr5V5Q8bePkpnSdwdjJ0Hyzc+ZoNXSUvFvhhza3qNe/1pbkFDeVr7B8rqr6O8/56Kx//KFZLW3cMzmRxAj20nVu7CduIrgK9PXRy0zZUQy+zyhTL+5hgO0X15GBnWKEkXbjXINcN3hB3zX75w3c5xGKGNgh7ZWNETZ2Wuzf5j1jsws5viq7MquPwUfih4OvCn52ER5tMy+SBk+BPIbLYz6NLw94ljRy8UzXV7QyXPo1RtvZynoJesqzJm0=",
+        "placed_at": "1794632770243379048",
+        "revealed": false,
+        "claimed": true
+      },
+      {
+        "index": 2,
+        "bidder": "ravi.itzbeast.testnet",
+        "deposit": "5000000",
+        "payload": "SFKAI0bRJfvSz8DAhaeaafVLjxWGXtNV6eHSBzedKgVfMfOkusnBAbR3sznULeaKKUpKCLUPU9TahzpUbq5TsHbPg36nHWkf0HsF2iMYPe9sQnYDLFNhJSkCDvPue13f59/zT6dl6+qr5Q6qKpUTreK/ppTtN9Od02vk0LT+3Ejc6NfpBhgL291VeRzio/1LSYeaqKf1ukdD/c4yLpjAMCad3pIfH+8aqBWs9iNr+W9cpaAz6sYAvEbAA3iD6bFrhMYcI4F4+QkWG+WRW7dMJZIrUMV20CMBIEWVuTWEfO7chSfr5nKqNFQUdBJwho51K87ZlOAwwNndvVpCdhfvuZyCabEG",
+        "placed_at": "1794632777423425689",
+        "revealed": false,
+        "claimed": true
+      },
+      {
+        "index": 3,
+        "bidder": "mei.itzbeast.testnet",
+        "deposit": "3000000",
+        "payload": "PQ8WhDKdYeGU+ZTSQ+ISYP2tp4Aw14gnkVcOEpR2iHjQPUtKG4zBSk5wqdTuvwCu9nR1TYtjvOAYQY9nixsO5lFEw65ykpQ1uW8co76QsjvzKABI8q/TPl6dwLRarQs/lzwyMTj/V/ejw7JdyBvsQQ+jquIVoBRVbj4RCdiX3CXP+BUNrnuy3G6RwpfrnBfQA0hEXYRNmZjQcvrxjlmzRhfsAFAZHW/oEkTKVCs/vkuGEKUlphrA5sS/rz1SKyDsHw3fNn+pb5/0HaIJ4C3i+yiL8/dFhzLasrVkNK0Unnf/+Es/TjqyBceAEMP9reZQX+d+0ABB3HdFMabsNn7eWz48k74=",
+        "placed_at": "1794632784769322605",
+        "revealed": false,
+        "claimed": true
+      },
+      {
+        "index": 4,
+        "bidder": "copy.itzbeast.testnet",
+        "deposit": "5000000",
+        "payload": "SFKAI0bRJfvSz8DAhaeaafVLjxWGXtNV6eHSBzedKgVfMfOkusnBAbR3sznULeaKKUpKCLUPU9TahzpUbq5TsHbPg36nHWkf0HsF2iMYPe9sQnYDLFNhJSkCDvPue13f59/zT6dl6+qr5Q6qKpUTreK/ppTtN9Od02vk0LT+3Ejc6NfpBhgL291VeRzio/1LSYeaqKf1ukdD/c4yLpjAMCad3pIfH+8aqBWs9iNr+W9cpaAz6sYAvEbAA3iD6bFrhMYcI4F4+QkWG+WRW7dMJZIrUMV20CMBIEWVuTWEfO7chSfr5nKqNFQUdBJwho51K87ZlOAwwNndvVpCdhfvuZyCabEG",
+        "placed_at": "1794632792088028548",
+        "revealed": false,
+        "claimed": true
+      },
+      {
+        "index": 5,
+        "bidder": "late.itzbeast.testnet",
+        "deposit": "6000000",
+        "payload": "bohDwJr489p+k2xloSq7/30BGJusNTUn/krOzlybPiB3RiIqqrh9eHZb7fyZtikKegGUARK4JUXXCqtue7Sm+Qb8kbKQaQ9MQf3Gi+64v0SekOSIaVa6Ly5YSjIyNkXpRXwukH/uGrY+b8AtT6UXMw5tWygrjA7rC0aAnsi5jlsYuCAKUXSxqCpCo9pojdFFUUzFP4Flf1KI2x4UAnU0A09UIKOKFPxAgltV6VXkDue6jFmJKhTiLndA8NGNgDAkT9mE4m2k1bLIbVOzIyFk1qXYzXG6+xkxiSa8ZZ3yjGzbMGg+jm2ocmOBrFuxf1/uZPWR3c8bT6UD9Oac2t76uSt7qrOE",
+        "placed_at": "1794633221195523101",
+        "revealed": false,
+        "claimed": false
+      }
+    ],
+    "get_fills": [
+      {
+        "index": 0,
+        "bidder": "sniper.itzbeast.testnet",
+        "tokens": "2500000000000000000000",
+        "spent": "5000000",
+        "refund": "0",
+        "penalty": "0"
+      },
+      {
+        "index": 1,
+        "bidder": "ana.itzbeast.testnet",
+        "tokens": "2500000000000000000000",
+        "spent": "5000000",
+        "refund": "1000000",
+        "penalty": "0"
+      },
+      {
+        "index": 2,
+        "bidder": "ravi.itzbeast.testnet",
+        "tokens": "2500000000000000000000",
+        "spent": "5000000",
+        "refund": "0",
+        "penalty": "0"
+      },
+      {
+        "index": 3,
+        "bidder": "mei.itzbeast.testnet",
+        "tokens": "0",
+        "spent": "0",
+        "refund": "3000000",
+        "penalty": "0"
+      },
+      {
+        "index": 4,
+        "bidder": "copy.itzbeast.testnet",
+        "tokens": "0",
+        "spent": "0",
+        "refund": "4950000",
+        "penalty": "50000"
+      },
+      {
+        "index": 5,
+        "bidder": "late.itzbeast.testnet",
+        "tokens": "2500000000000000000000",
+        "spent": "5000000",
+        "refund": "1000000",
+        "penalty": "0"
+      }
+    ]
+  },
+  "account": {
+    "amount": "7315050390036478599999991",
+    "block_hash": "9qzKraEZKsDNVdHH9XurYScqogisNxLtSLbmXCMuuyE2",
+    "block_height": 277618937,
+    "code_hash": "GhTHg5s7c97X8gALyghMchc8o51AnjYD4qDeStHPvMM2",
+    "locked": "0",
+    "storage_paid_at": 0,
+    "storage_usage": 624389
+  },
+  "keys": {
+    "sealround.itzbeast.testnet": {
+      "block_hash": "9qzKraEZKsDNVdHH9XurYScqogisNxLtSLbmXCMuuyE2",
+      "block_height": 277618937,
+      "keys": [
+        {
+          "access_key": {
+            "nonce": 277607763000001,
+            "permission": "FullAccess"
+          },
+          "public_key": "ed25519:QrjwhKpn6BK7FJuQaXU96c9WwnjDUPzUHtFfCgPBDrS"
+        }
+      ]
+    },
+    "nosnipe-11140458.sealround.itzbeast.testnet": {
+      "block_hash": "9qzKraEZKsDNVdHH9XurYScqogisNxLtSLbmXCMuuyE2",
+      "block_height": 277618937,
+      "keys": []
+    }
+  },
+  "pool": {
+    "get_pool": {
+      "pool_kind": "SIMPLE_POOL",
+      "token_account_ids": [
+        "nosnipe-11140458.sealround.itzbeast.testnet",
+        "usdc.fakes.testnet"
+      ],
+      "amounts": [
+        "2000000000000000000000",
+        "4000000"
+      ],
+      "total_fee": 30,
+      "shares_total_supply": "1000000000000000000000000",
+      "amp": 0
+    },
+    "get_pool_shares": "1000000000000000000000000"
+  }
+}

@@ -148,19 +148,27 @@ export function SwapRoute() {
   );
 }
 
+/** The testnet sale the checks below come from. */
+const PROOF_SALE = "nosnipe-11140458";
+
 /**
- * The clearing run of testnet sale smoke-11120830 on fairground.itzbeast.testnet, as
- * `pnpm --filter web verify-sale` reported it on 13 Nov 2026. Hashes are shortened.
+ * The clearing run of testnet sale nosnipe-11140458 on sealround.itzbeast.testnet
+ * (close_sale tx 8vjEzwQF…, OutLayer attestation #95341), as
+ * `pnpm --filter web verify-sale` reported it on 14 Nov 2026: the eight
+ * attestation checks and the bid set. Hashes are shortened. Only checks that
+ * passed are listed; the contract-account key check did not (the account
+ * still had its deploy key), so it is not claimed here.
  */
 const CHECKS = [
   { label: "Attested build is the sealer the contract pins", detail: "attested f8408a87…d8cb = pinned f8408a87…d8cb" },
+  { label: "The worker measured the same build", detail: "measured f8408a87…d8cb = pinned f8408a87…d8cb" },
   { label: "Enclave measurements are approved on chain", detail: "worker.outlayer.testnet: approved" },
-  { label: "The TDX quote commits to this run", detail: "task hash ce168b…ebe1 = report data ce168b…ebe1" },
-  { label: "Input hash matches the request on chain", detail: "on chain f0d83a…b285 = attested f0d83a…b285" },
-  { label: "Output hash matches what the contract received", detail: "received 200b46…ee3d = attested 200b46…ee3d" },
-  { label: "The request came from the sale contract", detail: "fairground.itzbeast.testnet, for smoke-11120830" },
-  { label: "Bid set recomputed from the chain", detail: "recomputed 4019e5…5608 = frozen 4019e5…5608" },
-  { label: "All contract-side checks passed", detail: "14 of 14 passed" },
+  { label: "The TDX quote commits to this run", detail: "task hash dbe595…0e5d = report data dbe595…0e5d" },
+  { label: "Input hash matches the request on chain", detail: "on chain 167e4a…6339 = attested 167e4a…6339" },
+  { label: "Output hash matches what the contract received", detail: "received b6e3e8…8426 = attested b6e3e8…8426" },
+  { label: "The request came from the sale contract", detail: `sealround.itzbeast.testnet, for ${PROOF_SALE}` },
+  { label: "The enclave opened the bids with the sale's key", detail: "e7fabf…8a19 = sale key e7fabf…8a19" },
+  { label: "Bid set recomputed from the chain", detail: "6 of 6 bids, c2946f…0943 = frozen c2946f…0943" },
 ];
 
 /** A replay of the checks on a real testnet sale (see CHECKS). */
@@ -191,7 +199,7 @@ export function ChecksDemo() {
     <div ref={ref} className="panel overflow-hidden">
       <div className="flex items-center justify-between gap-4 px-5 pt-[18px] pb-2">
         <div>
-          <div className="text-h3 text-fg">Testnet sale smoke-11120830</div>
+          <div className="text-h3 text-fg">Testnet sale {PROOF_SALE}</div>
           <p className="mt-0.5 text-label text-subtle" aria-live="polite">
             <span className="num">{passed}</span> of {CHECKS.length} checks passed on the clearing run
           </p>

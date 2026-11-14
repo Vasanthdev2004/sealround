@@ -11,11 +11,13 @@ import { cn } from "@/lib/cn";
 import { getClient } from "@/lib/client";
 import { ago, dateTime, shortHash, txUrl } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
-import type { AttestedRun, MissingRun, RunCheckId, RunKind, Sale, SaleResult, SaleVerification } from "@/lib/types";
-import { BidInclusionDetail, useBidSetCheck } from "./bid-inclusion";
-import { Chain, Evidence, Note } from "./evidence";
+import type { AttestedRun, MissingRun, RunCheckId, RunKind, Sale, SaleResult } from "@/lib/types";
+import { CHAIN_ROWS } from "@/lib/verify/labels";
+import type { FullVerification } from "@/lib/verify/types";
+import { BidInclusionDetail, useBidSetCheck, useYourBidCheck } from "./bid-inclusion";
+import { Chain, ChainEvidence, chainRowState, Evidence, Note, QuoteExcerpt } from "./evidence";
 
-type Fetched = { attempt: number; verification: SaleVerification | null; error?: string };
+type Fetched = { attempt: number; verification: FullVerification | null; error?: string };
 
 /** How many rows have been revealed for a given attempt. */
 type Shown = { attempt: number; n: number };
@@ -81,7 +83,8 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
   const bidSet = useBidSetCheck(sale);
   /** Commit-reveal: the contract cleared the revealed bids itself, with no enclave. */
   const onchain = result.clearedBy === "onchain";
-  const total = (onchain ? 1 : RUN_ROWS.length) + 3;
+  const total = (onchain ? 1 : RUN_ROWS.length) + 3 + CHAIN_ROWS.length;
+  const yourBid = useYourBidCheck(sale, result, bidSet.state === "pending" ? null : bidSet.bids, bidSet.error);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,8 +98,8 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
         timers.push(window.setTimeout(() => !cancelled && setShown({ attempt, n: i }), i * STEP_MS));
       }
     };
-    // A sale the contract cleared itself (commit-reveal) never ran an enclave: there is nothing to verify.
-    const asked: Promise<SaleVerification | null> = onchain ? Promise.resolve(null) : getClient().verifySale(sale.id);
+    // A sale the contract cleared itself (commit-reveal) has no enclave run; the contract and rule checks still run.
+    const asked: Promise<FullVerification | null> = getClient().verifySale(sale.id);
     asked.then(
       (verification) => {
         if (cancelled) return;
@@ -113,7 +116,7 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
       cancelled = true;
       timers.forEach((t) => window.clearTimeout(t));
     };
-  }, [sale.id, attempt, onchain, total]);
+  }, [sale.id, attempt, total]);
 
   const current = fetched && fetched.attempt === attempt ? fetched : null;
   const revealed = shown.attempt === attempt ? shown.n : 0;
@@ -299,6 +302,20 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
     ),
   });
 
+  // The contract account, the applied output, the rules, the lengths, the pool and your bid (lib/verify).
+  for (const def of CHAIN_ROWS) {
+    const check = def.id === "your_bid" ? yourBid : (v?.chain?.checks.find((c) => c.id === def.id) ?? null);
+    const { state, idle } = chainRowState(check, def.id === "your_bid" ? check !== null : !!current);
+    rows.push({
+      key: def.id,
+      label: def.label,
+      state,
+      idle,
+      pending: def.pending,
+      body: <ChainEvidence check={check} error={def.id === "your_bid" ? undefined : fetchError} />,
+    });
+  }
+
   // ---------- the verdict ----------
 
   const states: CheckState[] = rows.map((r, i) => (i < revealed ? r.state : "pending"));
@@ -451,12 +468,11 @@ export function VerifiedPanel({ sale, result }: { sale: Sale; result: SaleResult
               </ul>
             )}
             {attested[0] && (
-              <div>
-                <div className="text-label text-subtle">
-                  TDX quote{simulated ? ", simulated" : `, ${RUN_NAME[attested[0].kind].toLowerCase()} run`}, truncated
-                </div>
-                <p className="cipher mt-1.5 line-clamp-2">{attested[0].quote}</p>
-              </div>
+              <QuoteExcerpt
+                quote={attested[0].quote}
+                label={`TDX quote${simulated ? ", simulated" : `, ${RUN_NAME[attested[0].kind].toLowerCase()} run`}`}
+                fileName={`tdx-quote-${sale.id}-${attested[0].kind}.bin`}
+              />
             )}
             <p className="text-label text-subtle">
               {simulated ? (

@@ -13,7 +13,11 @@ import { listBidSecrets, subscribeBidSecrets } from "@/lib/bid-secrets";
 import { getClient } from "@/lib/client";
 import { cn } from "@/lib/cn";
 import { useBids } from "@/lib/hooks";
-import type { BidRecord, Sale } from "@/lib/types";
+import type { BidRecord, Sale, SaleResult } from "@/lib/types";
+import { notApplicable, notRun } from "@/lib/verify/checks";
+import { factsFromApp } from "@/lib/verify/facts";
+import type { ChainCheck } from "@/lib/verify/types";
+import { checkYourBid, combineYourBid, type BidTerms } from "@/lib/verify/your-bid";
 import { useWallet } from "@/lib/wallet";
 import { Chain, Note } from "./evidence";
 
@@ -90,6 +94,83 @@ function useMyBidders(sale: Sale, bids: BidRecord[]): { account: string | null; 
     return [...out];
   }, [saved, bids, account, client.mode]);
   return { account, mine };
+}
+
+type SavedTerms = { bidder: string; maxPrice: string; maxSpend: string; commitment: string | null; source: string };
+
+/**
+ * The sealed terms this browser kept for bids in the sale: the plaintext saved
+ * after a sealed bid (components/sale/local-bid.ts) and commit-reveal bid
+ * secrets (lib/bid-secrets.ts). As one JSON string, so the snapshot compares
+ * by value.
+ */
+function savedTerms(saleId: string, scope: string): string {
+  const out = new Map<string, SavedTerms>();
+  try {
+    const prefix = localBidKey(saleId, "");
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith(prefix)) continue;
+      const j = JSON.parse(localStorage.getItem(k) ?? "null") as { max_price?: unknown; max_spend?: unknown } | null;
+      if (typeof j?.max_price !== "string" || typeof j.max_spend !== "string") continue;
+      const bidder = k.slice(prefix.length);
+      out.set(bidder, { bidder, maxPrice: j.max_price, maxSpend: j.max_spend, commitment: null, source: "terms kept in this browser" });
+    }
+  } catch {
+    // no storage, or a broken entry: nothing more saved
+  }
+  for (const s of listBidSecrets(scope)) {
+    if (s.saleId !== saleId) continue;
+    out.set(s.bidder, { bidder: s.bidder, maxPrice: s.maxPrice, maxSpend: s.maxSpend, commitment: s.commitment, source: "bid secret kept in this browser" });
+  }
+  return JSON.stringify([...out.values()].sort((a, b) => (a.bidder < b.bidder ? -1 : 1)));
+}
+
+function subscribeTerms(cb: () => void): () => void {
+  window.addEventListener("fairground:mybid", cb);
+  const off = subscribeSaved(cb);
+  return () => {
+    window.removeEventListener("fairground:mybid", cb);
+    off();
+  };
+}
+
+const DEC = /^d+$/;
+
+/**
+ * "Your bid got what the rule gives at this price", for every bid whose
+ * sealed terms this browser kept (lib/verify/your-bid.ts). Null while the
+ * bids are still loading.
+ */
+export function useYourBidCheck(
+  sale: Sale,
+  result: SaleResult,
+  bids: BidRecord[] | null,
+  bidsError: string | null,
+): ChainCheck | null {
+  const client = getClient();
+  const raw = useSyncExternalStore(
+    subscribeTerms,
+    () => savedTerms(sale.id, client.secretsScope),
+    () => "[]",
+  );
+  return useMemo(() => {
+    const terms: BidTerms[] = (JSON.parse(raw) as SavedTerms[])
+      .filter((t) => DEC.test(t.maxPrice) && DEC.test(t.maxSpend))
+      .map((t) => ({
+        saleId: sale.id,
+        bidder: t.bidder,
+        maxPrice: BigInt(t.maxPrice),
+        maxSpend: BigInt(t.maxSpend),
+        commitment: t.commitment,
+        source: t.source,
+      }));
+    if (terms.length === 0) return notApplicable("your_bid", "This browser kept no sealed terms for a bid in this sale.");
+    if (bidsError) return notRun("your_bid", `Not run: the bids could not be read (${bidsError}).`);
+    if (!bids) return null;
+    const facts = factsFromApp(client.secretsScope, sale, result, bids);
+    return combineYourBid(terms.map((t) => checkYourBid(t, facts)));
+  }, [raw, sale, result, bids, bidsError, client.secretsScope]);
 }
 
 /** The evidence under the inclusion check: the two hashes, your bid's place, and a lookup for any account. */

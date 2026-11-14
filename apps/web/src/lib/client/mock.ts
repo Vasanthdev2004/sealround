@@ -54,7 +54,6 @@ import type {
   SaleMeta,
   SaleResult,
   SaleStatus,
-  SaleVerification,
   SaleWithRelay,
   StorageResult,
   WriteResult,
@@ -74,6 +73,10 @@ import {
 import { getBidSecret, saveBidSecret } from "../bid-secrets";
 import { locksTokens, poolUsdcKept, SEED_STEPS, STAGE_LABEL, stepPhrase } from "../liquidity";
 import { iconError, markIcon } from "../token-icon";
+import { checkApplied, checkLengths, checkPool, checkRules, parseClearOutput, type ClearOutput } from "../verify/checks";
+import { factsFromApp } from "../verify/facts";
+import type { ChainCheck, ChainVerification, FullVerification } from "../verify/types";
+import type { SealerAnswer } from "../near/attestation";
 import { makeBots, makeCrowd, type CrowdBidder } from "./crowd";
 import { bidRejected, BID_REJECT_MESSAGES, FairgroundError } from "./errors";
 import type { BidPayload, FairgroundClient, JudgeDemand, JudgeProgress } from "./index";
@@ -303,6 +306,8 @@ export class MockClient implements FairgroundClient {
       await this.refreshSeed(Date.now());
       this.persist();
     } else {
+      // A demo sale whose seed a later build changed: drop it, so it is seeded again below.
+      for (const id of this.outdatedSeeds()) this.dropSeeded(id);
       // A demo sale added by a later build: seed just that one.
       const missing = new Set(SEEDED_IDS.filter((id) => !this.s.sales[id]));
       if (missing.size > 0) {
@@ -456,21 +461,40 @@ export class MockClient implements FairgroundClient {
   private async refreshSeed(now: number) {
     const keep = new Set(this.seededIds().filter((id) => this.hasUserBids(id)));
     for (const id of this.seededIds()) {
-      if (keep.has(id)) continue;
-      delete this.s.sales[id];
-      delete this.s.bids[id];
-      delete this.s.events[id];
-      delete this.s.results[id];
-      delete this.s.keys[id];
-      delete this.s.reveals[id];
-      // Without this the re-seeded sale finds its creator payout already paid,
-      // skips it, and shows its burn as still owed.
-      if (this.s.paid) delete this.s.paid[id];
-      this.clearing.delete(id);
+      if (!keep.has(id)) this.dropSeeded(id);
     }
     this.s.rolled = (this.s.rolled ?? []).filter((id) => keep.has(id));
     await this.seed(now, keep);
     if (!this.hasLiveSeed(now)) await this.rollLive(now);
+  }
+
+  /** Removes a seeded sale and everything stored for it, so it can be seeded again. */
+  private dropSeeded(id: string) {
+    delete this.s.sales[id];
+    delete this.s.bids[id];
+    delete this.s.events[id];
+    delete this.s.results[id];
+    delete this.s.keys[id];
+    delete this.s.reveals[id];
+    // Without this the re-seeded sale finds its creator payout already paid,
+    // skips it, and shows its burn as still owed.
+    if (this.s.paid) delete this.s.paid[id];
+    this.clearing.delete(id);
+  }
+
+  /**
+   * Seeded sales stored by a build whose seed for them had other terms, and
+   * that this browser never bid in. Builds before 14 Nov 2026 minted Thistle
+   * 1,000,000 tokens with a 500,000-token LP reserve that a contract cannot
+   * hold; its seed now mints only the sale supply and the creator allocation.
+   */
+  private outdatedSeeds(): string[] {
+    const defs = seedDefs(0);
+    return SEEDED_IDS.filter((id) => {
+      const sale = this.s.sales[id];
+      const def = defs.find((d) => d.id === id);
+      return !!sale && !!def && !this.hasUserBids(id) && sale.config.totalSupply !== seedTotalSupply(def);
+    });
   }
 
   /**
@@ -1434,18 +1458,12 @@ export class MockClient implements FairgroundClient {
     paid.reserve = true;
     this.refreshProceeds(sale, result);
     const allocationLeft = sale.config.creatorAllocation > 0n && !paid.allocation;
-    const e = this.log(
-      sale.id,
-      "claimed",
-      result.status === "settled"
-        ? allocationLeft
-          ? `Creator paid ${fmt(raise)} USDC of the raise. The creator allocation unlocks once the launch pool is seeded.`
-          : raise > 0n
-            ? `Creator paid: ${fmt(raise)} USDC raised and the creator allocation. Unsold tokens burned.`
-            : "Creator allocation paid. Unsold tokens burned."
-        : "Creator allocation paid. The unsold sale tokens were burned.",
-      { at, account: sale.creator, detail: "proceeds_claimed", ...(raise > 0n ? { amount: raise } : {}) },
-    );
+    const e = this.log(sale.id, "claimed", payoutText(sale.config, { raise, allocation, burn, reserve, allocationLeft }), {
+      at,
+      account: sale.creator,
+      detail: "proceeds_claimed",
+      ...(raise > 0n ? { amount: raise } : {}),
+    });
     return e.txHash;
   }
 
@@ -1597,7 +1615,7 @@ export class MockClient implements FairgroundClient {
    * contract here, so the quote and measurement rows say "simulated". The
    * hashes are real sha256 of the mock's own sealer input and output.
    */
-  async verifySale(saleId: string): Promise<SaleVerification> {
+  async verifySale(saleId: string): Promise<FullVerification> {
     await this.ready();
     await delay(400 + Math.random() * 400);
     const sale = this.sale(saleId);
@@ -1675,6 +1693,56 @@ export class MockClient implements FairgroundClient {
       pinnedWasm: sale.sealerCodeHash,
       key: tee ? await run("key") : null,
       clear: tee && result?.clearedBy === "enclave" && result.resultSha256 ? await run("clear") : null,
+      chain: await this.chainVerification(saleId),
+    };
+  }
+
+  /**
+   * The contract and rule checks NEAR mode runs (lib/verify), over the mock's
+   * own result. There is no contract or token account here, so the code and
+   * key rows say "simulated". The rest are the real checks: the sealer output
+   * is rebuilt from the stored result and must hash to its result_sha256, the
+   * rules and lengths are recomputed from the fills and the bids, and the pool
+   * is the simulated one.
+   */
+  private async chainVerification(saleId: string): Promise<ChainVerification> {
+    const stored = this.sale(saleId);
+    const sale = this.view(stored);
+    const result = this.s.results[saleId] ?? null;
+    const facts = factsFromApp(CONTRACT_ID, sale, result, this.s.bids[saleId] ?? []);
+    const simulated = (id: "contract_code" | "contract_keys" | "token_keys", label: string, value: string): ChainCheck => ({
+      id,
+      ok: true,
+      applies: true,
+      items: [{ kind: "fact", label, value, ok: true }],
+    });
+    let clear: { answer: ClearOutput | null; bytes: number; sha256: string } | null = null;
+    if (result && result.clearedBy === "enclave" && result.resultSha256) {
+      // The output the simulated sealer returned, rebuilt from what the contract stored.
+      const text = sealerOutputText({
+        saleId,
+        bidSetHash: result.bidSetHash,
+        pubkey: this.s.keys[saleId]?.pk ?? sale.sealerPubkey,
+        clearingPrice: result.clearingPrice,
+        nValid: result.nValid,
+        nInvalid: result.nInvalid,
+        invalid: result.fills.filter((f) => (f.penalty ?? 0n) > 0n).map((f) => f.index),
+        fills: result.fills.map((f) => [f.tokens, f.spent]),
+      });
+      clear = { answer: parseClearOutput(JSON.parse(text) as SealerAnswer), bytes: new TextEncoder().encode(text).length, sha256: await sha256Hex(text) };
+    }
+    const pool = result?.liquidity?.stage === "seeded" ? await this.getPool(saleId) : null;
+    return {
+      simulated: true,
+      checks: [
+        simulated("contract_code", "contract code", `simulated: the mock has no ${CONTRACT_ID} account to read`),
+        simulated("contract_keys", `${CONTRACT_ID} access keys`, "simulated: no account, so no keys"),
+        simulated("token_keys", `${sale.tokenAccount} access keys`, "simulated: no account, so no keys"),
+        checkApplied(clear?.answer ?? null, facts, clear),
+        checkRules(facts),
+        checkLengths(facts),
+        checkPool(facts, pool),
+      ],
     };
   }
 
@@ -1848,10 +1916,10 @@ export class MockClient implements FairgroundClient {
       tokenName: def.name,
       tokenSymbol: def.symbol,
       decimals: 18,
-      totalSupply: 1_000_000n * TOKEN,
+      totalSupply: seedTotalSupply(def),
       saleSupply: BigInt(def.saleSupply) * TOKEN,
-      creatorAllocation: 100_000n * TOKEN,
-      lpReserve: (1_000_000n - 100_000n - BigInt(def.saleSupply)) * TOKEN,
+      creatorAllocation: SEED_CREATOR_ALLOCATION * TOKEN,
+      lpReserve: seedTotalSupply(def) - (BigInt(def.saleSupply) + SEED_CREATOR_ALLOCATION) * TOKEN,
       floorPrice: usdcOf(def.floor),
       maxPrice: null,
       minRaise: usdcOf(def.minRaise),
@@ -1928,6 +1996,15 @@ type SeedDef = {
   description: string;
   hue: number;
   saleSupply: number;
+  /**
+   * Whole tokens minted. Without it, 1,000,000: what the sale supply and the
+   * creator allocation leave over is the simulated chain's LP reserve, which
+   * a contract does not have (on NEAR the creator allocation is everything
+   * not for sale or for a launch pool). Thistle mints exactly the sale supply
+   * plus the creator allocation, so its supply story is one a contract could
+   * show.
+   */
+  totalSupply?: number;
   floor: number;
   minRaise: number;
   start: number;
@@ -1955,7 +2032,7 @@ function seedDefs(now: number): SeedDef[] {
     {
       id: "thistle", mark: "🌿", name: "Thistle", symbol: "THSL", creator: "meadow.testnet",
       description: "Demand took only part of the supply. The unsold rest burned when the creator collected.",
-      hue: 140, saleSupply: 400_000, floor: 0.001, minRaise: 50,
+      hue: 140, saleSupply: 400_000, totalSupply: 500_000, floor: 0.001, minRaise: 50,
       start: now - 2 * DAY, end: now - 2 * DAY + 4 * HOUR, crowd: 18, bots: 1,
       closeAt: now - 2 * DAY + 4 * HOUR + 3 * MIN, claimShare: 0.5,
     },
@@ -1994,13 +2071,21 @@ function seedDefs(now: number): SeedDef[] {
   ];
 }
 
+/** Whole tokens every seeded sale pays its creator. */
+const SEED_CREATOR_ALLOCATION = 100_000n;
+
+/** A seeded sale's minted supply in base units (see SeedDef.totalSupply). */
+function seedTotalSupply(def: Pick<SeedDef, "totalSupply">): bigint {
+  return BigInt(def.totalSupply ?? 1_000_000) * TOKEN;
+}
+
 /** The judge-mode sale's mark. */
 const JUDGE_MARK = "⚖️";
 
 /** A demo sale's mark by id (rolling copies "fairt-2" take their base's), for state stored before icons. */
 function demoMark(id: string, judge: boolean): string | null {
   if (judge) return JUDGE_MARK;
-  const base = id.replace(/-d+$/, "");
+  const base = id.replace(/-\d+$/, "");
   return seedDefs(0).find((d) => d.id === base)?.mark ?? null;
 }
 
@@ -2016,6 +2101,27 @@ function fmt(v: bigint): string {
   const whole = v / USDC;
   const frac = (v % USDC).toString().padStart(6, "0").replace(/0+$/, "");
   return frac ? `${whole}.${frac}` : `${whole}`;
+}
+
+/**
+ * The creator payout row's text: only what this claim_proceeds call paid or
+ * burned (the NEAR client's `payoutNote` says the same from the views). A
+ * sold-out sale burns nothing, so its row names no burn.
+ */
+export function payoutText(
+  c: Pick<SaleConfig, "decimals" | "tokenSymbol">,
+  p: { raise: bigint; allocation: boolean; burn: bigint; reserve: boolean; allocationLeft: boolean },
+): string {
+  const paid = [...(p.raise > 0n ? [`${fmt(p.raise)} USDC raised`] : []), ...(p.allocation ? ["the creator allocation"] : [])];
+  return [
+    paid.length > 0
+      ? `Creator paid: ${paid.join(" and ")}.`
+      : p.burn === 0n && p.reserve
+        ? "Creator payout: the unused NEAR reserve returned."
+        : "Creator payout sent.",
+    ...(p.burn > 0n ? [`${fmtTokens(p.burn, c.decimals)} ${c.tokenSymbol} burned.`] : []),
+    ...(p.allocationLeft ? ["The creator allocation unlocks once the launch pool is seeded."] : []),
+  ].join(" ");
 }
 
 /** Whole tokens with separators, up to 2 decimals: "20,000". */
