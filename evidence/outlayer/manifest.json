@@ -1,5 +1,5 @@
 {
-  "about": "OutLayer runs of three Sealround testnet sales, checked with OutLayer's own verifier. Each bundle re-checks offline: outlayer-verify bundle <file> --offline",
+  "about": "OutLayer runs of four Sealround testnet sales, checked with OutLayer's own verifier. Each bundle re-checks offline: outlayer-verify bundle <file> --offline",
   "checked_at": "2026-11-14T06:00Z",
   "tool": {
     "repo": "https://github.com/out-layer/outlayer-verify",
@@ -18,6 +18,88 @@
     "note": "The tool's built-in testnet API, https://testnet-api.outlayer.fastnear.com, answers HTTP 410 api_moved, so --api is required."
   },
   "runs": [
+    {
+      "sale": "swarm-11141341",
+      "contract": "sealround.itzbeast.testnet",
+      "run": "sale key (pubkey)",
+      "contract_method": "create_sale",
+      "transaction": "3hZjbcvzJkfcRyhs9rvNSiJhGZ5JfCpknJTfA6nijV9j",
+      "outlayer_task": 108109,
+      "outlayer_request": 45576,
+      "executed_at": "2026-11-14T13:43:57Z",
+      "block_height": 277664486,
+      "caller": "itzbeast.testnet",
+      "project": "itzbeast.testnet/fairground-sealer",
+      "build_target": "wasm32-wasip1",
+      "wasm_sha256": "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb",
+      "input_sha256": "0bfd85f1d25de6b5821ebd4e85855e57fc6ac9dbbbc323cc306ceabe54f90f57",
+      "output_sha256": "4d4c3ed60a7ab1cafa8cc3c3d4113161744b31b69fa215329aae89ad8d39f189",
+      "rtmr3": "528235764e42c8ec9bbd3d58543dddba5f2eb43f18ad580385bd03991bbeaded7fde1b0f24697a4506742a44a7f7b884",
+      "tcb_status": "UpToDate",
+      "collateral": {
+        "fmspc": "b0c06f000000",
+        "sha256": "2e80992e78a9e76e5726db22b7399c553439574e6fe512a3b311ae4c3d559140",
+        "published_by": "worker.outlayer.testnet",
+        "read_from_chain_at_block": 276791207,
+        "api_copy_matches_chain": true,
+        "valid_from": "2026-11-08T00:15:55Z",
+        "valid_until": "2026-12-08T00:15:19Z"
+      },
+      "verdict": {
+        "overall": "PROVEN",
+        "authenticity": "pass",
+        "identity": "pass",
+        "binding": "pass",
+        "input": "pass",
+        "output": "pass"
+      },
+      "bundle": "swarm-11141341/key-3hZjbcvz.json",
+      "bundle_sha256": "9941a53efa037b2c32f22e05dfd789e7ce2426a0118ccf27fc173abf0ff2b143",
+      "report": "swarm-11141341/key-3hZjbcvz.txt",
+      "command": "outlayer-verify tx 3hZjbcvzJkfcRyhs9rvNSiJhGZ5JfCpknJTfA6nijV9j --network testnet --api https://testnet-api.outlayer.ai --rpc https://near-testnet.drpc.org --archival-rpc https://archival-rpc.testnet.fastnear.com --bundle swarm-11141341/key-3hZjbcvz.json --no-color",
+      "offline_command": "outlayer-verify bundle swarm-11141341/key-3hZjbcvz.json --offline"
+    },
+    {
+      "sale": "swarm-11141341",
+      "contract": "sealround.itzbeast.testnet",
+      "run": "clearing (clear)",
+      "contract_method": "close_sale",
+      "transaction": "J8BVuftwEERxteNEhWGag7haDwoc2oYK4spDx9bacyft",
+      "outlayer_task": 108364,
+      "outlayer_request": 45690,
+      "executed_at": "2026-11-14T14:03:30Z",
+      "block_height": 277666652,
+      "caller": "itzbeast.testnet",
+      "project": "itzbeast.testnet/fairground-sealer",
+      "build_target": "wasm32-wasip1",
+      "wasm_sha256": "f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb",
+      "input_sha256": "5d4a61a2b6c29bf2fc1a778ec467681f0c36a0a027c14b0d474452ae4c59f8a7",
+      "output_sha256": "c95f28ea71718116823e7e90302dd10955716061c64097a17e255d5f41e77fca",
+      "rtmr3": "d85416a5a567dd0313fd66c309f736ec608d1e0e0c246d069517a616bd3d01d6a6bef8f2f6467d239ce3754de16f99b6",
+      "tcb_status": "UpToDate",
+      "collateral": {
+        "fmspc": "b0c06f000000",
+        "sha256": "2e80992e78a9e76e5726db22b7399c553439574e6fe512a3b311ae4c3d559140",
+        "published_by": "worker.outlayer.testnet",
+        "read_from_chain_at_block": 276791207,
+        "api_copy_matches_chain": true,
+        "valid_from": "2026-11-08T00:15:55Z",
+        "valid_until": "2026-12-08T00:15:19Z"
+      },
+      "verdict": {
+        "overall": "PROVEN",
+        "authenticity": "pass",
+        "identity": "pass",
+        "binding": "pass",
+        "input": "pass",
+        "output": "pass"
+      },
+      "bundle": "swarm-11141341/clear-J8BVuftw.json",
+      "bundle_sha256": "6d873994392abfed4deb1a78ea820ec9d607d04a39dbb0aa39307af0be375cf8",
+      "report": "swarm-11141341/clear-J8BVuftw.txt",
+      "command": "outlayer-verify tx J8BVuftwEERxteNEhWGag7haDwoc2oYK4spDx9bacyft --network testnet --api https://testnet-api.outlayer.ai --rpc https://near-testnet.drpc.org --archival-rpc https://archival-rpc.testnet.fastnear.com --bundle swarm-11141341/clear-J8BVuftw.json --no-color",
+      "offline_command": "outlayer-verify bundle swarm-11141341/clear-J8BVuftw.json --offline"
+    },
     {
       "sale": "nosnipe-11140458",
       "contract": "sealround.itzbeast.testnet",

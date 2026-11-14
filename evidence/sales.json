@@ -23,6 +23,20 @@
       "mode": "tee",
       "afterLock": false,
       "note": "Six bids: sniper 3.6 s after open, copycat voided, settled at 0.002, pool 2971. Ran before the contract key was deleted."
+    },
+    {
+      "contract": "sealround.itzbeast.testnet",
+      "sale": "ember-11141303",
+      "mode": "commit-reveal",
+      "afterLock": true,
+      "note": "Commit-reveal, cleared on chain. 3 bids: a sniper bot 25.2 s after open and 2 people; settled at the 0.001 floor, pool 2979; 417,600 unsold tokens burn at the creator payout. Ran after the contract key was deleted."
+    },
+    {
+      "contract": "sealround.itzbeast.testnet",
+      "sale": "swarm-11141341",
+      "mode": "tee",
+      "afterLock": true,
+      "note": "20 bids: 6 sniper bots from 3.2 s after open, 12 people, a copycat voided and a bid 8 s before the close; settled at 0.002 (2 x floor), pool 2981. Ran after the contract key was deleted."
     }
   ]
 }

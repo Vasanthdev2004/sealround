@@ -1,7 +1,7 @@
 import type { FairgroundClient } from "@/lib/client";
 import { MAX_BIDS_PER_SALE } from "@/lib/client/rules";
 import { readDemoView } from "@/lib/chapters/demo";
-import { seriesFor, type ChapterRound } from "@/lib/chapters/model";
+import { isLanternPilot, LANTERN_STORY, seriesFor, type ChapterRound } from "@/lib/chapters/model";
 import { chapterLink } from "@/lib/chapters/reminders";
 import { resolveChapterSandbox } from "@/lib/chapters/sandbox";
 import type { ChapterPayout } from "@/lib/chapters/verification";
@@ -111,6 +111,9 @@ export async function checkCI(signal: AbortSignal): Promise<JudgeResult> {
     headers: { Accept: "application/vnd.github+json" },
   });
   if (!response.ok) {
+    if (response.status === 404) {
+      return { state: "unavailable", detail: "GitHub returned HTTP 404. This check needs a public repository and a Check workflow on main." };
+    }
     return { state: "unavailable", detail: `GitHub did not provide a public workflow result (HTTP ${response.status}).` };
   }
   const { workflow_runs } = await response.json() as { workflow_runs?: WorkflowRun[] };
@@ -206,6 +209,7 @@ export async function checkChapters(app: AppConfig, client: Pick<CheckClient, "g
   let stories = 0;
   let paid = 0;
   let incomplete = false;
+  let lanternDemoAvailable = false;
   if (app.mode === "near" && (app.near.network === "mainnet" || (!process.env.NEXT_PUBLIC_CHAPTERS_FACTORY
     && !(app.near.network === "sandbox" && process.env.NEXT_PUBLIC_CHAPTERS_CONTRACT)))) {
     return { state: "pending", detail: "Chapters is awaiting configuration on this network." };
@@ -217,6 +221,7 @@ export async function checkChapters(app: AppConfig, client: Pick<CheckClient, "g
       const sale = await client.getSale(listed.id);
       if (!sale) { incomplete = true; continue; }
       const series = seriesFor(sale);
+      if (app.mode === "mock" && isLanternPilot(series)) lanternDemoAvailable = LANTERN_STORY.length >= 2;
       const sandbox = app.mode === "near" ? await resolveChapterSandbox(sale, app) : null;
       if (app.mode === "near" && !sandbox) continue;
       let rounds: ChapterRound[];
@@ -256,6 +261,13 @@ export async function checkChapters(app: AppConfig, client: Pick<CheckClient, "g
       signal.throwIfAborted();
       incomplete = true;
     }
+  }
+  if (!incomplete && !linkedPaid && lanternDemoAvailable) {
+    return {
+      state: "passed",
+      detail: `Lantern has ${LANTERN_STORY.length} bundled Chapters ready to play. This browser has ${paid} simulated winning artist payout records.`,
+      links: [{ href: "/token/lantern#meme-chapters", label: "Play Lantern’s Chapters" }, ...links],
+    };
   }
   return {
     state: incomplete ? "unavailable" : linkedPaid ? "passed" : "pending",

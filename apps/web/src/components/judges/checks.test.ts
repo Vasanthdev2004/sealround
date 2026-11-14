@@ -45,7 +45,7 @@ describe("judge checklist checks", () => {
     vi.stubGlobal("fetch", fetch);
     await expect(checkCI(signal)).resolves.toMatchObject({ state: "passed", detail: expect.stringContaining("aaaaaaaa") });
     await expect(checkCI(signal)).resolves.toMatchObject({ state: "failed" });
-    await expect(checkCI(signal)).resolves.toMatchObject({ state: "unavailable" });
+    await expect(checkCI(signal)).resolves.toMatchObject({ state: "unavailable", detail: expect.stringContaining("needs a public repository") });
     expect(fetch.mock.calls[0][0]).toContain("check.yml/runs?branch=main");
   });
 
@@ -78,6 +78,16 @@ describe("judge checklist checks", () => {
       state: "listed", detail: expect.stringContaining("2 final transaction records checked this run"),
     });
     expect(fetch.mock.calls.some(([, init]) => JSON.parse(String(init.body)).method === "EXPERIMENTAL_tx_status")).toBe(true);
+  });
+
+  it("passes on the two bundled Lantern chapters in a fresh demo without crediting payouts", async () => {
+    const lantern = { ...sale, id: "lantern", status: "settled", name: "Lantern" } as const;
+    const getSale = vi.fn().mockResolvedValue({ id: lantern.id, config: { tokenName: lantern.name, tokenSymbol: "LNTN" } } as Sale);
+    vi.mocked(readDemoView).mockReturnValueOnce({ rounds: [], votes: {}, balance: null });
+    await expect(checkChapters(mock, { getSale }, [lantern], signal)).resolves.toMatchObject({
+      state: "passed", detail: "Lantern has 2 bundled Chapters ready to play. This browser has 0 simulated winning artist payout records.",
+      links: [{ href: "/token/lantern#meme-chapters", label: "Play Lantern’s Chapters" }],
+    });
   });
 
   it("keeps a paid winner as the parent after a no-winner round but requires the next parent to be paid", async () => {

@@ -62,20 +62,36 @@ export const LIVE_SALES: readonly LiveSale[] = [
     afterLock: false,
     note: "Six bids: a sniper 3.6 s after open, a copycat voided, settled at 0.002 USDC, launch pool 2971 on Rhea. Ran while the contract still had its deploy key.",
   },
+  {
+    contract: "sealround.itzbeast.testnet",
+    sale: "ember-11141303",
+    mode: "commit-reveal",
+    afterLock: true,
+    note: "Commit-reveal: three bids, settled at the 0.001 USDC floor, launch pool 2979 on Rhea. The 417,600 tokens demand did not take burn at the creator payout.",
+  },
+  {
+    contract: "sealround.itzbeast.testnet",
+    sale: "swarm-11141341",
+    mode: "tee",
+    afterLock: true,
+    note: "Twenty bids: six sniper bots from 3.2 s after open, twelve people, a copycat voided and a bid 8 s before the close. All 17 winners paid 0.002 USDC; launch pool 2981 on Rhea.",
+  },
 ];
 
 /**
- * The live sniper bot's run in nosnipe-11140458, from `get_bids` and
- * `get_fills` (read 14 Nov 2026): sniper.itzbeast.testnet bid 3.6 s after the
- * window opened, late.itzbeast.testnet 559.4 s after (of 600 s). Each got 2,500
- * tokens for 5 USDC, so both paid 0.002 USDC per token, the clearing price.
+ * The first sniper bot in swarm-11141341, from `get_bids` and `get_fills`
+ * (read 14 Nov 2026), a sale created after the contract was locked:
+ * swarm-04.itzbeast.testnet bid 3.2 s after the window opened (one of six
+ * bots in the first 4.2 s), late.itzbeast.testnet 891.7 s after (of 900 s).
+ * The bot got 3,500 tokens for 7 USDC and the late bidder 2,500 for 5 USDC,
+ * so both paid 0.002 USDC per token, the clearing price.
  */
 export const LIVE_SNIPER = {
   contract: "sealround.itzbeast.testnet",
-  sale: "nosnipe-11140458",
-  sniperAfterOpen: "3.6 s",
-  lateAfterOpen: "559.4 s",
-  windowSeconds: 600,
+  sale: "swarm-11141341",
+  sniperAfterOpen: "3.2 s",
+  lateAfterOpen: "891.7 s",
+  windowSeconds: 900,
   price: "0.002",
 } as const;
 

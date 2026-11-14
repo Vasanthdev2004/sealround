@@ -24,12 +24,14 @@ sale. Our own checks (`pnpm --filter web verify-sale`, and the Verified panel
 on the result page) test eight things per run but say "Not checked here: the
 signature chain up to Intel". The bundles below close that gap.
 
-All six runs passed, in the tool's words: `PROVEN  every check passed: this
+All eight runs passed, in the tool's words: `PROVEN  every check passed: this
 input produced this output, inside genuine Intel TDX hardware, running code
 approved on chain.`
 
 | Sale (contract) | Run | Transaction | OutLayer task | Ran at (UTC) | Verdict | Bundle |
 | --- | --- | --- | ---: | --- | --- | --- |
+| `swarm-11141341` (`sealround.itzbeast.testnet`) | sale key | `3hZjbcvzJkfcRyhs9rvNSiJhGZ5JfCpknJTfA6nijV9j` | 108109 | 2026-11-14 13:43:57 | PROVEN | `outlayer/swarm-11141341/key-3hZjbcvz.json` |
+| `swarm-11141341` (`sealround.itzbeast.testnet`) | clearing | `J8BVuftwEERxteNEhWGag7haDwoc2oYK4spDx9bacyft` | 108364 | 2026-11-14 14:03:30 | PROVEN | `outlayer/swarm-11141341/clear-J8BVuftw.json` |
 | `nosnipe-11140458` (`sealround.itzbeast.testnet`) | sale key | `D94S8AmXhyY2rNJ4aoMtEzEqG3DDwAqsCs3UknNpwuj4` | 102567 | 2026-11-14 04:59:55 | PROVEN | `outlayer/nosnipe-11140458/key-D94S8AmX.json` |
 | `nosnipe-11140458` (`sealround.itzbeast.testnet`) | clearing | `8vjEzwQFzKjZvAXB36G6Ps2MDcyEKkrSAAPbjUFXkqrK` | 102710 | 2026-11-14 05:16:30 | PROVEN | `outlayer/nosnipe-11140458/clear-8vjEzwQF.json` |
 | `nosnipe-11140429` (`sealround.itzbeast.testnet`) | sale key | `7srGSogu9337s5WiUzwYEza4djr2W5cAVZr8CfPVG6Ty` | 102309 | 2026-11-14 04:30:33 | PROVEN | `outlayer/nosnipe-11140429/key-7srGSogu.json` |
@@ -56,7 +58,7 @@ tool proves:
    signed by that certificate, QE report covers the attestation key, QE
    report meets the QE Identity policy, enclave report signed by the
    attestation key, platform TCB matches TCB Info. Intel TCB status:
-   `UpToDate` for all six. The collateral (FMSPC `b0c06f000000`, sha256
+   `UpToDate` for all eight. The collateral (FMSPC `b0c06f000000`, sha256
    `2e80992e…9140`, valid 2026-11-08 00:15:55 to 2026-12-08 00:15:19 UTC,
    which covers both the 12 Nov and the 14 Nov runs) was read from
    `worker.outlayer.testnet`'s contract state at block 276,791,207 on an
@@ -118,7 +120,7 @@ cd evidence/outlayer
 for f in */*.json; do outlayer-verify bundle "$f" --offline --short; done
 ```
 
-You should see six lines, one per bundle, for example
+You should see eight lines, one per bundle, for example
 `PROVEN task 102710 (execute) dbe5956a41a2b771…cf190e5d`, and exit code 0.
 Drop `--short` to see the full report: the record, the values read from the
 signed quote, the collateral, and both values of every comparison. Exit codes:
@@ -126,6 +128,8 @@ signed quote, the collateral, and both values of every comparison. Exit codes:
 
 We ran this loop on Windows and on Linux (Debian 13 in Docker with
 `--network none`, so nothing could be fetched): six `PROVEN`, exit 0 each.
+The two `swarm-11141341` bundles were added later the same day and re-checked
+offline on Windows: `PROVEN`, exit 0 each. CI re-checks all eight on Linux.
 
 ### Re-check a run online, from the chain
 
@@ -183,7 +187,8 @@ the tool takes on trust offline:
 - Endpoints used for the bundles: API `https://testnet-api.outlayer.ai`, RPC
   `https://rpc.testnet.fastnear.com`, archival RPC
   `https://archival-rpc.testnet.fastnear.com`. Checked on 2026-11-14 at about
-  06:00 UTC.
+  06:00 UTC; the two `swarm-11141341` runs at about 14:15 UTC with
+  `--rpc https://near-testnet.drpc.org`.
 
 ### What went wrong along the way
 
@@ -191,7 +196,7 @@ the tool takes on trust offline:
   with `--api`.
 - One later confirmation run on Linux hit FastNear's rate limit on the
   approved-list read and reported `INCOMPLETE` (exit 2). Fixed with another
-  RPC. The six bundles come from runs where every check, Identity included,
+  RPC. The eight bundles come from runs where every check, Identity included,
   passed.
 - Nothing else failed. The transaction lookup works for our runs although the
   request comes from the sale contract inside `create_sale` and `close_sale`:
