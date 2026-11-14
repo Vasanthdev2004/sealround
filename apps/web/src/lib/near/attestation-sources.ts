@@ -45,6 +45,7 @@ import {
   type SealerAnswer,
   type TxStatus,
 } from "./attestation";
+import { rpcEndpoints } from "./rpc";
 import type { ResultView, SaleView } from "./views";
 
 export type OutLayerNetwork = "testnet" | "mainnet";
@@ -295,7 +296,8 @@ export async function verifySaleRuns(
 ): Promise<{ verification: FullVerification; found: Partial<Record<RunKind, FoundTx>>; chain?: ChainRead }> {
   const fetchImpl = o.fetch ?? globalFetch;
   const net = OUTLAYER_NETWORKS[o.network];
-  const rpc = jsonRpc([o.rpcUrl, net.archivalRpc].filter((u, i, all) => all.indexOf(u) === i), { fetch: fetchImpl });
+  // The configured endpoint and its fallbacks (rpc.ts), then the archival node for history.
+  const rpc = jsonRpc([...rpcEndpoints(o.rpcUrl), net.archivalRpc].filter((u, i, all) => all.indexOf(u) === i), { fetch: fetchImpl });
   const now = o.now ?? Date.now;
 
   let views: NonNullable<VerifySaleOptions["views"]>;

@@ -94,6 +94,22 @@ keys fairground.itzbeast.testnet                                              # 
 | A progress page with a log of every mint and burn | Progress: `/sale/<id>` shows the countdown, deposits against the minimum raise, bids over time and the sealed-bid size check while bids are open, then "Opening N sealed bids in the enclave" at close (C20). Mint and burn log: `/sale/<id>/result` and `/token/<id>` list the one mint at sale creation and the burn at the creator payout with their transactions and the supply now (C15, C16). The sale's on-chain event log ("History") has creation, bids, close, settlement, every claim, the creator payout with the burn and the launch pool's events. The token's own `ft_mint` and `ft_burn` events are on the explorer. |
 | A simulation of community behaviour before choosing parameters | C11 and the Bot Arena ([section 6](#6-bot-arena-results)) |
 
+### Also entered: Privacy & Private AI, Unstoppable DeFi
+
+The privacy here is what sets the price: a bid nobody can read before the close cannot be sniped or front-run.
+
+| Track | Brief item | Where |
+| --- | --- | --- |
+| Privacy | Processing inside a TEE, with an attestation anyone can check | Bids are opened only by the pinned sealer in Intel TDX on OutLayer (C3); OutLayer's own verifier proves all six testnet runs up to Intel's signature (C24, [evidence/](evidence/README.md)). OutLayer's endpoints take no verifier nonce, so each run is tied to its sale by hashes and block instead ([contracts/DESIGN.md](contracts/DESIGN.md) "Spec deviations" 1) |
+| Privacy | A Verified panel that lists what was checked | The result page's **Verified** panel: eight checks per enclave run, the bid set, and the contract and rules checks (C10, C25) |
+| Privacy | Nothing private kept on a server | Bids are sealed in the browser (C2); the chain stores only ciphertexts of a fixed length, so even the size says nothing (`bidsizes`, C2). The relayer parses sealed bids in memory and never stores or logs them ([apps/relayer/README.md](apps/relayer/README.md) "Privacy"). In TEE mode no bid's max price is ever published, not even after the sale (commit-reveal mode reveals them on chain) |
+| Privacy | Sample data, not real users | Judge mode's sale uses invented bidders, labelled simulated |
+| DeFi | A real market mechanism on chain | Uniform-price sealed-bid auction; the contract re-checks the enclave's result and pays out (C4, C25); launch pool on Rhea at the clearing price with LP shares held by the keyless contract (C8; pool 2971 on testnet) |
+| DeFi | Refunded and failed states handled | A missed minimum raise or an enclave that never answers refunds every deposit (C6); a copycat bid is voided with a 1 % penalty (section 7); 1Click `REFUNDED` and `FAILED` funding states are shown ([section 10](#10-failure-cases)) |
+| DeFi | Where the money is at every step | "Where's my money" on the sale and result pages: deposit, tokens, spent, penalty and refund per bid |
+| DeFi | No funds needed to try it; real quotes | Judge mode (C1); "Fund from any chain" shows live 1Click dry quotes on `/sale/fairt`; live swaps stay off outside a configured mainnet deployment |
+| DeFi | History with explorer links | Result page History and the transaction lists in [section 7](#7-testnet-results) |
+
 ## Contents
 
 1. [What Sealround is](#sealround) (above, with the claims table)

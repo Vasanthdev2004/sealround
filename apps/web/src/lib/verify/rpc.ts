@@ -91,22 +91,32 @@ export function jsonRpc(urls: string[], opts: JsonRpcOptions = {}): JsonRpc {
     return reply.result;
   };
 
+  // A busy URL hands the call to the next one at once; only when every URL in
+  // a round was busy does the call wait and go round again (up to `retries`
+  // more rounds). A refusal (an RPC error, such as history a regular node no
+  // longer keeps) goes straight to the last URL, the archival node, since the
+  // other regular nodes would refuse it too.
+  const lastIndex = urls.length - 1;
   return async <T>(method: string, params: unknown): Promise<T> => {
     let last: unknown = new Error("no RPC URL");
-    for (const url of urls) {
-      for (let attempt = 0; ; attempt++) {
+    for (let round = 0; round <= retries; round++) {
+      let busy = false;
+      for (let i = 0; i < urls.length; i++) {
         try {
-          return await once<T>(url, method, params);
+          return await once<T>(urls[i], method, params);
         } catch (e) {
           last = e;
-          if (attempt < retries && retryable(e)) {
-            const wait = retryDelayMs * 3 ** attempt;
-            await sleep(wait + Math.random() * wait * 0.5);
+          if (retryable(e)) {
+            busy = true;
             continue;
           }
-          break;
+          if (i >= lastIndex) throw e instanceof Error ? e : new Error(String(e));
+          i = lastIndex - 1;
         }
       }
+      if (!busy || round === retries) break;
+      const wait = retryDelayMs * 3 ** round;
+      await sleep(wait + Math.random() * wait * 0.5);
     }
     throw last instanceof Error ? last : new Error(String(last));
   };
