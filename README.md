@@ -6,7 +6,7 @@
 
 [![Check](https://github.com/Vasanthdev2004/sealround/actions/workflows/check.yml/badge.svg)](https://github.com/Vasanthdev2004/sealround/actions/workflows/check.yml) [![Live testnet](https://github.com/Vasanthdev2004/sealround/actions/workflows/live-testnet.yml/badge.svg)](https://github.com/Vasanthdev2004/sealround/actions/workflows/live-testnet.yml) [![NEAR testnet](https://img.shields.io/badge/NEAR-testnet-0052FF?logo=near&logoColor=white)](#7-testnet-results) [![TEE](https://img.shields.io/badge/TEE-Intel%20TDX%20on%20OutLayer-0052FF)](#5-architecture-and-trust-assumptions) [![License: MIT](https://img.shields.io/badge/license-MIT-3D7EFF)](LICENSE)
 
-**[Live demo](https://sealround-demo.vercel.app)** &nbsp;·&nbsp; **[Judge checklist](https://sealround-demo.vercel.app/judges)** &nbsp;·&nbsp; **[Testnet results](#7-testnet-results)** &nbsp;·&nbsp; **[Verify a sale](#verify-a-sale-yourself)** &nbsp;·&nbsp; **[Claims](#claims-and-how-to-check-them)**
+**[Live demo](https://sealround-demo.vercel.app)** &nbsp;·&nbsp; **[Testnet app](https://sealround-testnet.vercel.app)** &nbsp;·&nbsp; **[Judge checklist](https://sealround-demo.vercel.app/judges)** &nbsp;·&nbsp; **[Testnet results](#7-testnet-results)** &nbsp;·&nbsp; **[Verify a sale](#verify-a-sale-yourself)** &nbsp;·&nbsp; **[Claims](#claims-and-how-to-check-them)**
 
 ▶ **[Watch the 90-second launch video](https://x.com/BuildWithBeast/status/2121632139133534449)**
 
@@ -109,7 +109,7 @@ Every claim below says which of these it was checked in.
 | --- | --- | --- | --- |
 | **Judge mode** (mock, the default) | Bid encryption (libsodium sealed box, the exact format the contract accepts), the clearing math (`@fairground/clearing`, the reference the Rust port matches), the launch pool maths, the bid-set hash | The chain, the accounts, the enclave and its attestation, the gas relayer, the Rhea pool. The pages label these "simulated" or "sim". | The hosted demo, or `pnpm dev` and open `/judge` |
 | **Local sandbox** | A nearcore sandbox chain in Docker, the committed `contracts/res/fairground.wasm`, OutLayer's own contract, the pinned enclave job (`enclave/res/fairground_sealer.wasm`) run by a local wasmtime runner with a test master secret, the real relayer | The TDX hardware and OutLayer's worker: a stand-in serves the contract's requests with the pinned job. No attestation exists. | `pnpm --filter web e2e:sandbox` |
-| **Testnet** | The contract on NEAR testnet, OutLayer's testnet TDX workers, OutLayer's attestations, Rhea on testnet (`ref-finance-101.testnet`) | Nothing, but the USDC is a test token (`usdc.fakes.testnet`) | [Section 7](#7-testnet-results) |
+| **Testnet** | The contract on NEAR testnet, OutLayer's testnet TDX workers, OutLayer's attestations, Rhea on testnet (`ref-finance-101.testnet`) | Nothing, but the USDC is a test token (`usdc.fakes.testnet`) | https://sealround-testnet.vercel.app with a testnet wallet; [section 7](#7-testnet-results) |
 
 ### Claims and how to check them
 
@@ -215,7 +215,11 @@ Also: [Repository layout](#repository-layout), [Deploying](#deploying).
 
 Judge mode runs a whole sale in your browser: 50 fictional people, 3 sniper bots and 1 copycat bid, the sale closes, the enclave clears it, the launch pool is seeded, and you get the result. The chain, the accounts, the enclave, its attestation, the relayer and the pool are simulated; the bid encryption and the clearing math are the real code (see [Three ways to run it](#three-ways-to-run-it)).
 
-**Hosted demo.** https://sealround-demo.vercel.app builds from `main` and runs in mock mode, so every page in the claims table opens there without a local run (checked 14 Nov 2026: `/judges`, `/token/thistle`, `/sale/moth/kit`, `/attack` and `/agents` answer 200). To run it locally:
+**Hosted demo.** https://sealround-demo.vercel.app builds from `main` and runs in mock mode, so every page in the claims table opens there without a local run (checked 14 Nov 2026: `/judges`, `/token/thistle`, `/sale/moth/kit`, `/attack` and `/agents` answer 200).
+
+**Testnet app.** https://sealround-testnet.vercel.app is the same app from `main` in NEAR mode on `sealround.itzbeast.testnet`: the real sales (`swarm-11141341`, `ember-11141303` and the rest), their Verified panels read from the chain and OutLayer, and a real wallet (Meteor, Intear, Ledger, Nightly or NEAR CLI) to bid in an open sale or create one. No gas relayer is hosted, so the wallet pays a little testnet NEAR for gas; "Get 10 test USDC" in the bid form mints test USDC. Judge mode and the seeded demo sales exist only on the hosted demo.
+
+To run it locally:
 
 ```sh
 pnpm install     # about 1 minute on a fresh clone
