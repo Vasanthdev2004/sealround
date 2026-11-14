@@ -126,7 +126,7 @@ pnpm --filter web live-bot report --key-file "$key\<bot>.testnet.json" --wait --
 pnpm --filter web live-bot report --account <copycat>.testnet
 ```
 
-`--rpc <url>` picks another RPC than `https://rpc.testnet.near.org`.
+`--rpc <url>` picks another RPC than `https://rpc.testnet.fastnear.com`.
 Without `LIVE_BOT_RELAYER_URL` (or with `--direct`) the bot signs and pays
 for its own transactions, which skips the relayer's round trip.
 

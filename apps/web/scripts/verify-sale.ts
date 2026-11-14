@@ -22,8 +22,8 @@ import { jsonRpc, verifySaleRuns, viewCall, type OutLayerNetwork } from "../src/
 import type { AttestationFact, AttestedRun, MissingRun, RunCheckId } from "../src/lib/types";
 
 const RPC: Record<OutLayerNetwork, string> = {
-  testnet: "https://rpc.testnet.near.org",
-  mainnet: "https://rpc.mainnet.near.org",
+  testnet: "https://rpc.testnet.fastnear.com",
+  mainnet: "https://rpc.mainnet.fastnear.com",
 };
 
 /** The Verified panel's wording (src/components/result/verified-panel.tsx). */

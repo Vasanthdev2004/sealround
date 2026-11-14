@@ -58,8 +58,8 @@ export class ConfigError extends Error {
 }
 
 const DEFAULT_RPC: Record<NearNetwork, string> = {
-  mainnet: "https://rpc.mainnet.near.org",
-  testnet: "https://rpc.testnet.near.org",
+  mainnet: "https://rpc.mainnet.fastnear.com",
+  testnet: "https://rpc.testnet.fastnear.com",
   sandbox: "http://127.0.0.1:3030",
 };
 

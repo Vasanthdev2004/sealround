@@ -68,6 +68,9 @@ param(
     [ValidateRange(6, 240)][int]$DurationMinutes = 10,
     [string]$Deposit = '3',
     [string]$AppUrl = '',
+    # The bots' RPC. rpc.testnet.near.org dropped bot calls during the first
+    # run ("Could not reach the NEAR RPC node"); FastNear answered every read.
+    [string]$BotRpc = 'https://rpc.testnet.fastnear.com',
     [switch]$Execute
 )
 
@@ -124,7 +127,20 @@ function Wait-Until {
 # environment; the key always comes from a key file.
 function Get-BotArguments {
     param([string]$Command, [string[]]$Extra)
-    @('--filter', 'web', 'live-bot', $Command, '--network', $Network, '--contract', $Contract, '--sale', $script:Sale) + $Extra
+    # The bot needs --account as well as --key-file; the key file is <account>.json.
+    $account = @()
+    $i = [Array]::IndexOf($Extra, '--key-file')
+    if ($i -ge 0) { $account = @('--account', [IO.Path]::GetFileNameWithoutExtension($Extra[$i + 1])) }
+    @('--filter', 'web', 'live-bot', $Command, '--network', $Network, '--rpc', $BotRpc, '--contract', $Contract, '--sale', $script:Sale) + $account + $Extra
+}
+
+<# The bidder's bid in this sale (read-only), or $null when it has none or the read fails. #>
+function Get-BidOf {
+    param([string]$Name)
+    try {
+        Invoke-NearView -RpcUrl $BotRpc -Account $Contract -Method 'get_bid' `
+            -ArgsJson (ConvertTo-Json -Compress @{ sale_id = $script:Sale; bidder = (Get-BidderId $Name) })
+    } catch { $null }
 }
 
 $sale = $null
@@ -249,12 +265,18 @@ switch ($Phase) {
         foreach ($name in $bidders.Keys) {
             if (-not (Test-Path -LiteralPath (Get-KeyFile $name))) { throw "No key file for $(Get-BidderId $name): run -Phase Accounts." }
         }
-        if ((Get-NowNs) -ge $end - 150L * 1000000000L) { throw "Too late: bidding ends $(Format-Ns $end) and the late bid needs two minutes." }
+        # The phase can be run again after a failed step: bidders that already
+        # have a bid (read-only) are left out of the plan.
+        $placed = @{}
+        foreach ($name in $bidders.Keys) { $placed[$name] = [bool](Get-BidOf $name) }
+        if (-not $placed['late'] -and (Get-NowNs) -ge $end - 150L * 1000000000L) { throw "Too late: bidding ends $(Format-Ns $end) and the late bid needs two minutes." }
         $logDir = Get-OutDir $Network
         $sniperLog = Join-Path $logDir "evidence-sniper-$($script:Sale).log"
         $s = $bidders['sniper']
         $sniperArgs = Get-BotArguments 'snipe' @('--key-file', (Get-KeyFile 'sniper'), '--deposit', $s.deposit, '--max-price', $s.price, '--max-spend', $s.spend)
-        Add-Check $plan "Start the sniper: it waits for $(Format-Ns $start) and bids in the first block" {
+        if ($placed['sniper']) {
+            Add-Note $plan 'sniper has a bid already. Skipping.'
+        } else { Add-Check $plan "Start the sniper: it waits for $(Format-Ns $start) and bids in the first block" {
             # pnpm.cmd, not the .ps1 shim: Start-Process runs executables. No
             # argument has a space (key files live under the user's home).
             $pnpm = (Get-Command pnpm.cmd -ErrorAction Stop).Source
@@ -262,24 +284,33 @@ switch ($Phase) {
             $script:SniperProcess = Start-Process -FilePath $pnpm -ArgumentList $sniperArgs -WorkingDirectory $script:RepoRoot `
                 -RedirectStandardOutput $sniperLog -RedirectStandardError "$sniperLog.err" -WindowStyle Hidden -PassThru
             Write-Host "Sniper started (process $($script:SniperProcess.Id)); log: $sniperLog"
-        }
+        } }
         Add-Check $plan 'Wait for the open, plus 30 seconds' { Wait-Until ($start + 30L * 1000000000L) 'Until the people bid' }
         foreach ($name in @('ana', 'ravi', 'mei')) {
             $b = $bidders[$name]
+            if ($placed[$name]) { Add-Note $plan "$name has a bid already. Skipping."; continue }
             Add-Command $plan "$name bids: deposit $($b.deposit), max price $($b.price), max spend $($b.spend)" 'pnpm' `
                 (Get-BotArguments 'bid' @('--key-file', (Get-KeyFile $name), '--budget', $b.deposit, '--deposit', $b.deposit,
                     '--max-price', $b.price, '--max-spend', $b.spend, '--direct')) -Signs `
                 -Expect 'bid_placed with its index; the deposit is public, the price and spend are sealed.'
         }
-        Add-Command $plan 'copy replays ravi''s sealed bid from its own account' 'pnpm' `
-            (Get-BotArguments 'copycat' @('--key-file', (Get-KeyFile 'copy'), '--victim', (Get-BidderId 'ravi'),
-                '--deposit', $bidders['copy'].deposit)) -Signs `
-            -Expect 'Accepted (same id length): the enclave finds that the sealed bid names ravi, voids it, and copy pays the 1 % penalty.'
-        Add-Check $plan 'Wait for the last two minutes of the window' { Wait-Until ($end - 120L * 1000000000L) 'Until the late bid' }
+        if ($placed['copy']) {
+            Add-Note $plan 'copy has a bid already. Skipping.'
+        } else {
+            Add-Command $plan 'copy replays ravi''s sealed bid from its own account' 'pnpm' `
+                (Get-BotArguments 'copycat' @('--key-file', (Get-KeyFile 'copy'), '--victim', (Get-BidderId 'ravi'),
+                    '--deposit', $bidders['copy'].deposit)) -Signs `
+                -Expect 'Accepted (same id length): the enclave finds that the sealed bid names ravi, voids it, and copy pays the 1 % penalty.'
+        }
         $l = $bidders['late']
-        Add-Command $plan "late bids: deposit $($l.deposit), max price $($l.price), max spend $($l.spend)" 'pnpm' `
-            (Get-BotArguments 'bid' @('--key-file', (Get-KeyFile 'late'), '--budget', $l.deposit, '--deposit', $l.deposit,
-                '--max-price', $l.price, '--max-spend', $l.spend, '--direct')) -Signs
+        if ($placed['late']) {
+            Add-Note $plan 'late has a bid already. Skipping.'
+        } else {
+            Add-Check $plan 'Wait for the last two minutes of the window' { Wait-Until ($end - 120L * 1000000000L) 'Until the late bid' }
+            Add-Command $plan "late bids: deposit $($l.deposit), max price $($l.price), max spend $($l.spend)" 'pnpm' `
+                (Get-BotArguments 'bid' @('--key-file', (Get-KeyFile 'late'), '--budget', $l.deposit, '--deposit', $l.deposit,
+                    '--max-price', $l.price, '--max-spend', $l.spend, '--direct')) -Signs
+        }
         Add-Check $plan 'The sniper''s result' {
             if ($script:SniperProcess -and -not $script:SniperProcess.HasExited) { $script:SniperProcess.WaitForExit(60000) | Out-Null }
             foreach ($file in @($sniperLog, "$sniperLog.err")) {
@@ -303,8 +334,9 @@ switch ($Phase) {
         }
         $closed = $now -and @('settled', 'failed') -contains [string]$now.status
         $seeded = $now -and $now.liquidity -and [string]$now.liquidity.status -eq 'seeded'
+        # A sold-out sale has nothing to burn, so its unsold_burned flag stays false.
         $proceedsDone = $now -and $now.proceeds -and $now.proceeds.raise_paid -and $now.proceeds.allocation_paid -and
-            $now.proceeds.unsold_burned -and $now.proceeds.reserve_returned
+            ($now.proceeds.unsold_burned -or [string]$now.unsold -eq '0') -and $now.proceeds.reserve_returned
 
         if ($closed) {
             Add-Note $plan "Already closed: the sale is $($now.status). Skipping close_sale."
@@ -342,14 +374,12 @@ switch ($Phase) {
             }
         }
         foreach ($name in $bidders.Keys) {
-            $bid = $null
-            if ($closed) {
-                try {
-                    $bid = Invoke-NearView -RpcUrl $net.rpcUrl -Account $Contract -Method 'get_bid' `
-                        -ArgsJson (ConvertTo-Json -Compress @{ sale_id = $script:Sale; bidder = (Get-BidderId $name) })
-                } catch { $bid = $null }
+            $bid = Get-BidOf $name
+            if (-not $bid) {
+                Add-Note $plan "$name has no bid in this sale. Nothing to claim."
+                continue
             }
-            if ($bid -and $bid.claimed) {
+            if ($bid.claimed) {
                 Add-Note $plan "$name has claimed already. Skipping."
                 continue
             }

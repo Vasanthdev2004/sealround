@@ -23,7 +23,7 @@ const PINNED_SHA256 = "8918c505017ceb57646bdd863c34e4fe56e2edc7756963d6f4a1f38d6
 // The block the pinned copy was first read at (12 Nov 2026), for the archival fallback.
 const PINNED_BLOCK = 277_345_406;
 const SOURCES = [
-  { rpc: "https://rpc.testnet.near.org", at: { finality: "final" } },
+  { rpc: "https://rpc.testnet.fastnear.com", at: { finality: "final" } },
   { rpc: "https://archival-rpc.testnet.fastnear.com", at: { block_id: PINNED_BLOCK } },
 ];
 

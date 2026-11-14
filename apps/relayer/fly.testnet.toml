@@ -4,7 +4,7 @@ primary_region = "fra"
 
 [env]
   NETWORK = "testnet"
-  NEAR_RPC_URL = "https://rpc.testnet.near.org"
+  NEAR_RPC_URL = "https://rpc.testnet.fastnear.com"
   FAIRGROUND_CONTRACT = "sealround.itzbeast.testnet"
   USDC_CONTRACTS = "usdc.fakes.testnet,3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"
   CLIENT_IP_HEADER = "fly-client-ip"

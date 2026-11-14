@@ -34,7 +34,7 @@ describe("parseConfig", () => {
     const c = near({ NEXT_PUBLIC_FAIRGROUND_CONTRACT: "fairground.testnet" });
     expect(c).toMatchObject({
       network: "testnet",
-      rpcUrl: "https://rpc.testnet.near.org",
+      rpcUrl: "https://rpc.testnet.fastnear.com",
       contractId: "fairground.testnet",
       usdcContract: "usdc.fakes.testnet",
       relayerUrl: null,

@@ -56,8 +56,8 @@ Every claim below says which of these it was checked in.
 Read-only testnet helpers used above (bash; Node 24 has `fetch`):
 
 ```sh
-view() { node -e 'const [a,m,j]=process.argv.slice(1);fetch("https://rpc.testnet.near.org",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"query",params:{request_type:"call_function",finality:"final",account_id:a,method_name:m,args_base64:Buffer.from(j).toString("base64")}})}).then(r=>r.json()).then(r=>console.log(Buffer.from(r.result.result).toString()))' "$1" "$2" "$3"; }
-keys() { curl -s https://rpc.testnet.near.org -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":{\"request_type\":\"view_access_key_list\",\"finality\":\"final\",\"account_id\":\"$1\"}}"; echo; }
+view() { node -e 'const [a,m,j]=process.argv.slice(1);fetch("https://rpc.testnet.fastnear.com",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"query",params:{request_type:"call_function",finality:"final",account_id:a,method_name:m,args_base64:Buffer.from(j).toString("base64")}})}).then(r=>r.json()).then(r=>console.log(Buffer.from(r.result.result).toString()))' "$1" "$2" "$3"; }
+keys() { curl -s https://rpc.testnet.fastnear.com -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":{\"request_type\":\"view_access_key_list\",\"finality\":\"final\",\"account_id\":\"$1\"}}"; echo; }
 
 view fairground.itzbeast.testnet get_result '{"sale_id":"smoke-11120830"}'   # "status":"settled","clearing_price":"2000",...,"failed_checks":[]
 view smoke-11120830.fairground.itzbeast.testnet ft_total_supply '{}'          # "900000000000000000000"

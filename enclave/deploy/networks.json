@@ -1,7 +1,7 @@
 {
   "testnet": {
     "nearCliNetwork": "testnet",
-    "rpcUrl": "https://rpc.testnet.near.org",
+    "rpcUrl": "https://rpc.testnet.fastnear.com",
     "outlayerContract": "outlayer.testnet",
     "outlayerApi": "https://testnet-api.outlayer.ai",
     "fastfsHost": "test.fastfs.io",
@@ -10,7 +10,7 @@
   },
   "mainnet": {
     "nearCliNetwork": "mainnet",
-    "rpcUrl": "https://rpc.mainnet.near.org",
+    "rpcUrl": "https://rpc.mainnet.fastnear.com",
     "outlayerContract": "outlayer.near",
     "outlayerApi": "https://api.outlayer.ai",
     "fastfsHost": "main.fastfs.io",

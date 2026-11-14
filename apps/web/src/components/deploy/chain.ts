@@ -6,7 +6,7 @@
 
 export const TESTNET = {
   network: "testnet" as const,
-  rpcUrl: "https://rpc.testnet.near.org",
+  rpcUrl: "https://rpc.testnet.fastnear.com",
   outlayer: "outlayer.testnet",
   explorerTx: "https://testnet.nearblocks.io/txns/",
   explorerAccount: "https://testnet.nearblocks.io/address/",

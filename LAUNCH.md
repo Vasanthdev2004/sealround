@@ -33,7 +33,7 @@ Contents: [placeholders](#placeholders) ·
 | `<sale id>` | the smoke sale's id, printed by `5-smoke-sale.ps1` | `smoke-11111530` |
 | `<evidence sale id>` | the evidence sale's id, printed by `8-evidence-sale.ps1 -Phase Create` and kept in `enclave\deploy\out\testnet\evidence-sale.json` | `nosnipe-11131200` |
 | `<tx hash>` | a transaction hash from near CLI's output | |
-| `<rpc-url>` | a mainnet JSON-RPC URL from a provider (the public `rpc.mainnet.near.org` is rate limited) | |
+| `<rpc-url>` | a mainnet JSON-RPC URL from a provider (the public `rpc.mainnet.near.org` is deprecated and rate limited; FastNear's public `rpc.mainnet.fastnear.com` is also rate limited) | |
 | `<pilot start>` | the announced pilot start, UTC, at least a day ahead | `2026-11-13T12:00:00Z` |
 
 Session variables. Set them in every new PowerShell window (switch to the
@@ -642,7 +642,7 @@ stdin import. Enter the private key at the masked prompt.
 | Variable | Testnet | Mainnet | Where the value comes from |
 | --- | --- | --- | --- |
 | `NETWORK` | `testnet` | `mainnet` | |
-| `NEAR_RPC_URL` | `https://rpc.testnet.near.org` | `<rpc-url>` | your RPC provider for mainnet |
+| `NEAR_RPC_URL` | `https://rpc.testnet.fastnear.com` | `<rpc-url>` | your RPC provider for mainnet |
 | `RELAYER_ACCOUNT_ID` | `<relayer>.testnet` | `relayer.<owner>.near` | part 1, step M1 |
 | `RELAYER_PRIVATE_KEY` | `ed25519:...` | `ed25519:...` | `near account export-account <relayer account> using-private-key network-config <network>` |
 | `FAIRGROUND_CONTRACT` | `sealround.itzbeast.testnet` | `fairground.<owner>.near` | the deployed account |
@@ -760,7 +760,7 @@ production origin as the relayer's `CORS_ORIGINS`. The matching block in
 | --- | --- | --- | --- | --- |
 | `NEXT_PUBLIC_FAIRGROUND_CONTRACT` | not set | `sealround.itzbeast.testnet` | `fairground.<owner>.near` | the deployed account |
 | `NEXT_PUBLIC_NEAR_NETWORK` | not set | `testnet` | `mainnet` | |
-| `NEXT_PUBLIC_NEAR_RPC_URL` | not set | `https://rpc.testnet.near.org` | `<rpc-url>` | your RPC provider |
+| `NEXT_PUBLIC_NEAR_RPC_URL` | not set | `https://rpc.testnet.fastnear.com` | `<rpc-url>` | your RPC provider |
 | `NEXT_PUBLIC_USDC_CONTRACT` | not set | `usdc.fakes.testnet` | optional, default `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` | must be in the contract's `allowed_quote_tokens` and first in the relayer's `USDC_CONTRACTS` |
 | `NEXT_PUBLIC_RELAYER_URL` | not set | `https://<relayer-app-testnet>.fly.dev` | `https://<relayer-app-mainnet>.fly.dev` | part 3 (no trailing slash) |
 | `NEXT_PUBLIC_SEALER_CODE_HASH` | not set | `f8408a875ec685394d00937cfc320c8b5e8c2a1e8398cfdf34987aa91001d8cb` | same | `$SHA`; without it the code-hash check cannot pass |
