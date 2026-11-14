@@ -26,6 +26,11 @@
  * false, or null when it could not run) and `detail`; checks that do not
  * apply to the sale are listed under `notApplicable`.
  *
+ * --all (in place of --sale) checks every sale the contract lists (get_sales),
+ * oldest first: each settled or failed sale gets the same checks and one summary
+ * line; sales still running are listed as not final yet. With --json it prints
+ * one object with a `sales` array.
+ *
  * It sends no transaction and needs no key. Exit code 0 when every check that
  * applies ran and passed, 1 when one failed or could not run, 2 on bad options.
  */
@@ -50,7 +55,10 @@ type BidView = { index: number; bidder: string; deposit: string; payload: string
 type CheckLine = { id: string; label: string; ok: boolean | null; detail: string };
 
 const USAGE =
-  "usage: pnpm --filter web verify-sale --contract <contract> --sale <sale-id> [--network testnet|mainnet] [--rpc <url>] [--bid-secret <file>]... [--json]";
+  "usage: pnpm --filter web verify-sale --contract <contract> (--sale <sale-id> | --all) [--network testnet|mainnet] [--rpc <url>] [--bid-secret <file>]... [--json]";
+
+/** Statuses whose result is final, so every check applies. */
+const FINAL = new Set(["settled", "failed"]);
 
 function usage(message: string): never {
   console.error(message);
@@ -88,12 +96,31 @@ function readTerms(files: string[], contractId: string, saleId: string, say: (li
   return out;
 }
 
+type Options = { network: OutLayerNetwork; contractId: string; rpcUrl: string; json: boolean; secretFiles: string[] };
+
+/** The outcome of one sale's checks, as --json prints it. */
+type SaleOutcome = {
+  ok: boolean;
+  network: OutLayerNetwork;
+  contract: string;
+  sale: string;
+  checkedAt: string;
+  pinnedSealer: string;
+  checks: CheckLine[];
+  failed: string[];
+  notApplicable: { id: string; label: string; detail: string }[];
+  bidders: string[];
+};
+
+type SaleRow = { sale_id: string; status: string };
+
 async function main() {
   const { values } = parseArgs({
     options: {
       network: { type: "string", default: "testnet" },
       contract: { type: "string" },
       sale: { type: "string" },
+      all: { type: "boolean", default: false },
       rpc: { type: "string" },
       "bid-secret": { type: "string", multiple: true },
       json: { type: "boolean", default: false },
@@ -103,11 +130,68 @@ async function main() {
   if (network !== "testnet" && network !== "mainnet") usage("--network is testnet or mainnet.");
   const contractId = values.contract?.trim();
   const saleId = values.sale?.trim();
-  if (!contractId || !saleId) usage("--contract and --sale are required.");
-  const rpcUrl = values.rpc?.trim() || RPC[network];
+  if (!contractId) usage("--contract is required.");
+  if (!saleId === !values.all) usage("Pass either --sale <sale-id> or --all.");
+  const o: Options = {
+    network,
+    contractId,
+    rpcUrl: values.rpc?.trim() || RPC[network],
+    json: values.json ?? false,
+    secretFiles: values["bid-secret"] ?? [],
+  };
+  if (saleId) {
+    const outcome = await verifyOne(o, saleId, false);
+    if (o.json) console.log(JSON.stringify(outcome, null, 2));
+    process.exit(outcome.ok ? 0 : 1);
+  }
+  await verifyAll(o);
+}
+
+/** Every sale the contract lists, oldest first. */
+async function listSales(o: Options): Promise<SaleRow[]> {
+  const rpc = jsonRpc([o.rpcUrl]);
+  const out: SaleRow[] = [];
+  for (let from = 0; ; from += 50) {
+    const page = await viewCall<SaleRow[]>(rpc, o.contractId, "get_sales", { from_index: from, limit: 50 });
+    out.push(...page);
+    if (page.length < 50) return out;
+  }
+}
+
+async function verifyAll(o: Options) {
+  const say = (line: string) => (o.json ? console.error(line) : console.log(line));
+  const status = (s: SaleRow) => String(s.status).toLowerCase();
+  const sales = await listSales(o);
+  const final = sales.filter((s) => FINAL.has(status(s)));
+  const running = sales.filter((s) => !FINAL.has(status(s)));
+  say(`${o.contractId} (${o.network}) lists ${sales.length} sale(s): ${final.length} final, ${running.length} not final yet.`);
+  const outcomes: (SaleOutcome & { status: string })[] = [];
+  for (const s of final) {
+    const outcome = await verifyOne(o, s.sale_id, true);
+    outcomes.push({ ...outcome, status: status(s) });
+    const passed = outcome.checks.filter((c) => c.ok === true).length;
+    const head = `${s.sale_id} (${status(s)}): ${passed} of ${outcome.checks.length} checks`;
+    say(outcome.ok ? `[PASS] ${head}` : `[FAIL] ${head}; failed or not run: ${outcome.failed.join(", ")}`);
+  }
+  for (const s of running) say(`[OPEN] ${s.sale_id} (${status(s)}): not final yet, checked once it settles`);
+  const ok = outcomes.every((x) => x.ok);
+  if (o.json) {
+    const notFinal = running.map((s) => ({ sale: s.sale_id, status: status(s) }));
+    console.log(JSON.stringify({ ok, network: o.network, contract: o.contractId, checkedAt: new Date().toISOString(), sales: outcomes, notFinal }, null, 2));
+  } else {
+    const bad = outcomes.filter((x) => !x.ok).map((x) => x.sale);
+    say("");
+    say(ok ? `Every final sale passed every check (${outcomes.length}).` : `Some sales failed or could not be checked: ${bad.join(", ")}.`);
+  }
+  process.exit(ok ? 0 : 1);
+}
+
+/** Runs every check for one sale. Prints the full report unless `quiet` or --json; returns the outcome. */
+async function verifyOne(o: Options, saleId: string, quiet: boolean): Promise<SaleOutcome> {
+  const { network, contractId, rpcUrl } = o;
   // Notes go to stderr in --json mode, so stdout stays one JSON object.
-  const say = (line: string) => (values.json ? console.error(line) : console.log(line));
-  const terms = readTerms(values["bid-secret"] ?? [], contractId, saleId, say);
+  const say = (line: string) => (o.json ? console.error(line) : console.log(line));
+  const terms = quiet ? [] : readTerms(o.secretFiles, contractId, saleId, say);
 
   const { verification, chain: read } = await verifySaleRuns({ network, rpcUrl, contractId, saleId, bidTerms: terms });
 
@@ -166,27 +250,19 @@ async function main() {
   const failed = lines.filter((l) => l.ok !== true);
   const ok = failed.length === 0;
 
-  if (values.json) {
-    console.log(
-      JSON.stringify(
-        {
-          ok,
-          network,
-          contract: contractId,
-          sale: saleId,
-          checkedAt: new Date(verification.checkedAt).toISOString(),
-          pinnedSealer: verification.pinnedWasm,
-          checks: lines,
-          failed: failed.map((l) => l.id),
-          notApplicable: skipped.map((c) => ({ id: c.subject ? `${c.id}:${c.subject}` : c.id, label: CHAIN_LABELS[c.id], detail: c.note ?? "" })),
-          bidders: bidSet.bidders,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(ok ? 0 : 1);
-  }
+  const outcome: SaleOutcome = {
+    ok,
+    network,
+    contract: contractId,
+    sale: saleId,
+    checkedAt: new Date(verification.checkedAt).toISOString(),
+    pinnedSealer: verification.pinnedWasm,
+    checks: lines,
+    failed: failed.map((l) => l.id),
+    notApplicable: skipped.map((c) => ({ id: c.subject ? `${c.id}:${c.subject}` : c.id, label: CHAIN_LABELS[c.id], detail: c.note ?? "" })),
+    bidders: bidSet.bidders,
+  };
+  if (o.json || quiet) return outcome;
 
   console.log(`Sale ${saleId} on ${contractId} (${network}); the contract pins sealer ${verification.pinnedWasm}`);
   for (const run of runs) {
@@ -225,7 +301,7 @@ async function main() {
   if (!terms.length) console.log("  Your bid: pass --bid-secret <file> to check a bid's fill against the rule from its own terms.");
   console.log("");
   console.log(ok ? "Every check passed." : `Some checks failed or could not run: ${failed.map((l) => l.id).join(", ")}.`);
-  process.exit(ok ? 0 : 1);
+  return outcome;
 }
 
 main().catch((e) => {

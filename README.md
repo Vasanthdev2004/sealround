@@ -354,7 +354,7 @@ What covers the gap:
 The result page's **Verified** panel and the `verify-sale` command run the same code (`apps/web/src/lib/near/attestation.ts`, `attestation-sources.ts`, `apps/web/src/lib/bid-inclusion.ts`). Both are read-only: no key, no transaction.
 
 ```sh
-pnpm --filter web verify-sale --contract <contract> --sale <sale-id> [--network testnet|mainnet] [--rpc <url>] [--bid-secret <file>]... [--json]
+pnpm --filter web verify-sale --contract <contract> (--sale <sale-id> | --all) [--network testnet|mainnet] [--rpc <url>] [--bid-secret <file>]... [--json]
 ```
 
 For each enclave run of the sale (the sale key at `create_sale`, the clearing at `close_sale`) it finds the transaction (by scanning the block the contract recorded, then OutLayer's job list), fetches OutLayer's attestation for it (`/attestations/by-tx/<hash>`) and runs eight checks:
@@ -385,7 +385,7 @@ Last, "Contract and rules" checks what the enclave cannot vouch for (`apps/web/s
 | pool | A seeded launch pool opened at the clearing price and the exchange credits its LP shares to the contract (not applicable without a pool) |
 | your_bid | With `--bid-secret <file>` (a live-bot receipt, an MCP bid secret or the app's export): the sealed bytes on chain hash to the receipt's, and the fill is what the rule gives that bid at the clearing price |
 
-`--json` prints one object (`ok`, `checks[]` with `id`, `label`, `ok`, `detail`, `failed`, `notApplicable`) and nothing else on stdout. The exit code is 0 when every check that applies passed, 1 when one failed or could not run, 2 on bad options.
+`--all` checks every sale the contract lists (`get_sales`), not only the ones we picked: one line per settled or failed sale, open sales listed as not final yet. The scheduled **Live testnet** workflow runs it for every contract in `evidence/sales.json` every six hours, so a new sale is checked without anyone adding it. `--json` prints one object (`ok`, `checks[]` with `id`, `label`, `ok`, `detail`, `failed`, `notApplicable`) and nothing else on stdout. The exit code is 0 when every check that applies passed, 1 when one failed or could not run, 2 on bad options.
 
 The quote's signature chain up to Intel is not checked by `verify-sale` or the panel; OutLayer's own open-source verifier, `outlayer-verify`, checks it. Every OutLayer run of the testnet sales in section 7 passes it, and its proof bundles are in [evidence/](evidence/README.md):
 
