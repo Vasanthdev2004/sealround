@@ -10,6 +10,8 @@
  *   connector is created without `features.signDelegateActions`, so wallets
  *   that cannot sign NEP-366 delegates still show up: they work through the
  *   paid fallback, and `canSignDelegates` tells the UI which kind is connected.
+ *   On testnet the picker offers only wallets that work there (see
+ *   `connectorOptions`): HOT and MyNearWallet have no testnet mode.
  * - "dev" (NEAR mode on a local sandbox only): an account from
  *   NEXT_PUBLIC_DEV_ACCOUNTS signing with its key. Refused on any other
  *   network (config.ts `devSignerAllowed`, near/dev-signer.ts).
@@ -22,7 +24,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
 import type { ActionSigner } from "@fairground/relayer-client";
-import type { NearConnector, NearWalletBase } from "@hot-labs/near-connect";
+import type { NearConnector, NearConnectorOptions, NearWalletBase } from "@hot-labs/near-connect";
 import { getClient } from "./client";
 import { appConfig, isNearMode, type NearConfig, type NearNetwork } from "./config";
 import { randomHex } from "./crypto";
@@ -160,13 +162,50 @@ async function adoptWallet(wallet: NearWalletBase, accountId: string) {
   });
 }
 
+/**
+ * Wallets whose NEAR Connect manifest says `testnet: true` but that cannot
+ * finish a Sealround bid there. Ethereum Wallets (evm-on-near.dev, 0.1.4 in
+ * the manifest of 14 Nov 2026) signs for an Ethereum-derived NEAR account,
+ * which starts with no NEAR to pay gas, and it cannot sign the delegates the
+ * relayer pays for.
+ */
+export const TESTNET_EXCLUDED_WALLETS: readonly string[] = ["ethereum-wallets"];
+
+/** The wallets to name when someone needs one for NEAR testnet. */
+export const TESTNET_WALLETS_HINT = "Meteor Wallet and Intear Wallet work on testnet in the browser.";
+
+/**
+ * NEAR Connect's options. NEAR Connect itself leaves out, on testnet, every
+ * wallet whose manifest does not list testnet (HOT, MyNearWallet, OKX, NEAR
+ * Mobile, ...) and, without a WalletConnect project, the WalletConnect ones.
+ * On testnet we also drop TESTNET_EXCLUDED_WALLETS and hand the app's RPC to
+ * wallets that read it (NEAR CLI), so they do not fall back to their own
+ * default endpoint. On 14 Nov 2026 that left Meteor Wallet, Intear Wallet,
+ * Ledger, Nightly and NEAR CLI (see the wallet tests).
+ */
+export function connectorOptions(config: Pick<NearConfig, "network" | "rpcUrl">): NearConnectorOptions {
+  if (config.network === "mainnet") return { network: "mainnet" };
+  return {
+    network: "testnet",
+    excludedWallets: [...TESTNET_EXCLUDED_WALLETS],
+    providers: { testnet: [config.rpcUrl] },
+  };
+}
+
+/** What to say when NEAR Connect has no wallet to offer (its list comes from GitHub at run time). */
+export function noWalletsText(network: NearNetwork): string {
+  return network === "mainnet"
+    ? "No NEAR wallet could be loaded. Reload the page and try again."
+    : `No NEAR testnet wallet could be loaded. Reload the page and try again. ${TESTNET_WALLETS_HINT}`;
+}
+
 let connector: Promise<NearConnector> | null = null;
 
 /** The NEAR Connect connector for this tab, created on first use (browser only). */
 function getConnector(config: NearConfig): Promise<NearConnector> {
   connector ??= import("@hot-labs/near-connect").then(({ NearConnector }) => {
     // No `features` filter: a wallet that cannot sign delegates still works through the paid fallback.
-    const c = new NearConnector({ network: config.network === "mainnet" ? "mainnet" : "testnet" });
+    const c = new NearConnector(connectorOptions(config));
     c.on("wallet:signIn", ({ wallet, accounts }) => {
       const first = accounts[0]?.accountId;
       if (first) void adoptWallet(wallet, first);
@@ -299,6 +338,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setNear({ connecting: true, error: null });
     try {
       const c = await getConnector(config);
+      // An empty picker would leave nothing to click: say why instead.
+      await c.whenManifestLoaded;
+      if (c.availableWallets.length === 0) throw new Error(noWalletsText(config.network));
       const wallet = await c.connect();
       const accounts = await wallet.getAccounts();
       const first = accounts[0]?.accountId;

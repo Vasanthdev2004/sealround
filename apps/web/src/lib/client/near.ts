@@ -134,6 +134,25 @@ const WALLET_GAS = {
   seed_liquidity: 300n * TGAS,
   abandon_liquidity: 300n * TGAS,
 } as const;
+/**
+ * The test USDC on testnet: Ref Finance's usdc.fakes.testnet ("Bridged USDC",
+ * 6 decimals). Its `mint(account_id, amount)` is open to any caller, takes no
+ * deposit and refuses an account that is not registered on the token.
+ * components/sale/get-test-usdc.tsx keeps the same name (its tests check).
+ */
+export const TESTNET_TEST_USDC = "usdc.fakes.testnet";
+
+/** The faucet's mint call: `mint` on the USDC contract for `account`, 30 TGas, no deposit. */
+export function testUsdcMintAction(usdcContract: string, account: string, amount: bigint): FairgroundAction {
+  return {
+    receiverId: usdcContract,
+    methodName: "mint",
+    args: { account_id: account, amount: amount.toString() },
+    gas: WALLET_GAS.mint,
+    deposit: 0n,
+  };
+}
+
 /** A relayed seed or abandon call stays under the relayer's gas cap: it runs one or two steps, and a second call the rest. */
 const RELAYED_LIQUIDITY_GAS = 150n * TGAS;
 /** Launch liquidity stages that keep the sale tokens locked (liquidity.rs `locks_tokens`). */
@@ -1350,12 +1369,21 @@ export class NearClient implements FairgroundClient {
   /**
    * Test USDC from the token's open `mint` (usdc.fakes.testnet, or mock-ft on
    * a sandbox): a wallet transaction signed by the connected account. Not on
-   * mainnet. With `key`, a second call with the same key mints nothing
-   * (remembered in this browser).
+   * mainnet, and on testnet only for usdc.fakes.testnet (TESTNET_TEST_USDC).
+   * That token's `mint` refuses an account that is not registered on it,
+   * so the account is registered first (the relayer pays, or the wallet
+   * pays 0.00125 NEAR). With `key`, a second call with the same key mints
+   * nothing (remembered in this browser).
    */
   async faucet(account: string, amount: bigint, opts: { key?: string } = {}): Promise<Balances> {
     if (!this.capabilities.faucet) {
       throw new FairgroundError("not_supported", "There is no test USDC faucet on mainnet.");
+    }
+    if (this.config.network === "testnet" && this.usdcContract !== TESTNET_TEST_USDC) {
+      throw new FairgroundError(
+        "not_supported",
+        `${this.usdcContract} has no open mint. Only ${TESTNET_TEST_USDC} can be minted on testnet.`,
+      );
     }
     const usedKey = opts.key ? `fairground:faucet:${this.usdcContract}:${opts.key}` : null;
     const used = () => {
@@ -1369,7 +1397,7 @@ export class NearClient implements FairgroundClient {
       await this.ensureUsdcStorage(account);
       const before = (await this.getBalances(account)).usdc;
       await this.send(
-        this.walletCall(this.usdcContract, "mint", { account_id: account, amount: amount.toString() }, WALLET_GAS.mint, 0n),
+        testUsdcMintAction(this.usdcContract, account, amount),
         this.pusher(account),
         undefined,
         false,

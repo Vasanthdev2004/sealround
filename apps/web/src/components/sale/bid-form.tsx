@@ -20,6 +20,7 @@ import { priceStr, shortHash, usdcStr } from "@/lib/format";
 import type { BidPlaintext, BidRecord, PaidReason, Sale } from "@/lib/types";
 import { useWallet } from "@/lib/wallet";
 import { BidPreview } from "./bid-preview";
+import { GetTestUsdc } from "./get-test-usdc";
 import { saveLocalBid } from "./local-bid";
 import { SealTransition, type SealState } from "./seal-transition";
 
@@ -94,6 +95,7 @@ export function BidForm({
         ) : undefined
       }
     >
+      {showInputs && !seal && <GetTestUsdc sale={sale} className="mb-5 border-b border-line pb-5" />}
       {seal && <SealTransition state={seal} pubkey={sale.sealerPubkey} />}
       {/* The relayer refused after the first signature: say why before the wallet asks again. */}
       <PaidFallbackPrompt fallback={fallback} what="the bid" className="mt-5" />

@@ -1,0 +1,253 @@
+{
+  "version": "1.1.0",
+  "wallets": [
+    {
+      "id": "hot-wallet",
+      "name": "HOT Wallet",
+      "type": "sandbox",
+      "version": "1.0.4",
+      "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/refs/heads/main/repository/hotwallet.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "signInAndSignMessage": true,
+        "signDelegateActions": true,
+        "signInWithFunctionCallKey": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "meteor-wallet",
+      "name": "Meteor Wallet",
+      "type": "sandbox",
+      "version": "1.1.1",
+      "executor": "https://raw.githubusercontent.com/Meteor-Wallet/meteor_wallet_sdk/data-storage/storage/meteor-near-connect-latest.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "signInWithFunctionCallKey": true,
+        "signDelegateActions": true,
+        "mainnet": true,
+        "testnet": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "intear-wallet",
+      "name": "Intear Wallet",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://wallet.intear.tech/near-selector.js",
+      "features": {
+        "signMessage": true,
+        "signTransaction": false,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "signInWithoutAddKey": true,
+        "verifyOwner": false,
+        "testnet": true,
+        "signDelegateActions": true,
+        "signInAndSignMessage": true,
+        "signInWithFunctionCallKey": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "ledger",
+      "name": "Ledger",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://raw.githubusercontent.com/near/near-connect-ledger/refs/heads/main/ledger-executor.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signInWithFunctionCallKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "signDelegateActions": true,
+        "mainnet": true,
+        "testnet": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "mynearwallet",
+      "name": "MyNearWallet",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/refs/heads/main/repository/mnw.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signInWithFunctionCallKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "okx-wallet",
+      "name": "OKX Wallet",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/refs/heads/main/repository/okx.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signInWithFunctionCallKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "near-mobile",
+      "name": "NEAR Mobile",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://near-mobile-production.aws.peersyst.tech/connector/near-connect.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signInWithFunctionCallKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "signDelegateActions": true,
+        "verifyOwner": false,
+        "mainnet": true,
+        "testnet": false
+      },
+      "permissions": {}
+    },
+    {
+      "id": "trezu-wallet",
+      "name": "Trezu Wallet",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://trezu.app/_next/static/near-connect/trezu-wallet.js",
+      "features": {
+        "signInWithoutAddKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "nightly-wallet",
+      "name": "Nightly Wallet",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/refs/heads/main/repository/nightly.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signInWithFunctionCallKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "testnet": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "wallet-connect",
+      "name": "Wallet Connect",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/refs/heads/main/repository/wallet-connect.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signInWithFunctionCallKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "testnet": true
+      },
+      "permissions": {
+        "walletConnect": true
+      }
+    },
+    {
+      "id": "unity-wallet",
+      "name": "Unity Wallet",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/refs/heads/main/repository/wallet-connect.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signInWithFunctionCallKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "testnet": true
+      },
+      "permissions": {
+        "walletConnect": true
+      }
+    },
+    {
+      "id": "hana-wallet",
+      "name": "Hana Wallet",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://raw.githubusercontent.com/Hana-Technology/near-connect/refs/heads/feature/hana-wallet/repository/hana.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "ethereum-wallets",
+      "name": "Ethereum Wallets",
+      "type": "sandbox",
+      "version": "0.1.4",
+      "executor": "https://evm-on-near.dev/executor.js",
+      "features": {
+        "signMessage": false,
+        "signTransaction": false,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": false,
+        "signInWithFunctionCallKey": false,
+        "signDelegateActions": false,
+        "mainnet": true,
+        "testnet": true
+      },
+      "permissions": {}
+    },
+    {
+      "id": "near-cli",
+      "name": "NEAR CLI",
+      "type": "sandbox",
+      "version": "1.0.0",
+      "executor": "https://raw.githubusercontent.com/near/near-cli-connect/refs/heads/main/dist/near-cli.js",
+      "features": {
+        "signMessage": true,
+        "signInWithoutAddKey": true,
+        "signInAndSignMessage": true,
+        "signAndSendTransaction": true,
+        "signAndSendTransactions": true,
+        "signDelegateActions": true,
+        "signInWithFunctionCallKey": true,
+        "mainnet": true,
+        "testnet": true
+      },
+      "permissions": {}
+    }
+  ]
+}
