@@ -65,8 +65,6 @@ export function Review({
   const description = draft.description.trim();
   const busy = submitting || created;
   const pool = !!derived.pool;
-  // The contract has one creator share: without a launch pool it does not hold an LP reserve apart.
-  const lpUnlocked = near && !pool && (derived.values.lp ?? 0n) > 0n;
 
   return (
     <div className="flex flex-col gap-8 lg:gap-10">
@@ -137,18 +135,13 @@ export function Review({
             />
           </dl>
 
-          {(warnings.length > 0 || lpUnlocked) && (
+          {warnings.length > 0 && (
             <div className="flex flex-col gap-2">
               {warnings.map((n) => (
                 <Note key={n.id} tone={n.tone}>
                   {n.text}
                 </Note>
               ))}
-              {lpUnlocked && (
-                <Note tone="warn">
-                  The LP reserve is not locked on chain: every token not for sale is paid to your account.
-                </Note>
-              )}
             </div>
           )}
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/panel";
 import { getClient } from "@/lib/client";
 import { validateConfig } from "@/lib/client/mock";
@@ -22,7 +23,7 @@ import { SimulateSection } from "./simulate-section";
 import { SummaryCard } from "./summary-card";
 import { TokenSection } from "./token-section";
 import { WindowSection } from "./window-section";
-import type { SectionProps } from "./form-kit";
+import { FormSection, Note, type SectionProps } from "./form-kit";
 import {
   DEFAULT_DRAFT,
   FIELD_ORDER,
@@ -64,6 +65,51 @@ function focusHeading() {
   window.setTimeout(() => focusEl(document.querySelector<HTMLElement>("main h1")), 60);
 }
 
+/**
+ * The contract's launch-pool exchange (get_config `dex`), asked up to three
+ * times with a pause between: one failed read from a busy public RPC must not
+ * quietly take the Launch pool section off the form.
+ */
+async function readDex(): Promise<string | null> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await getClient().getLiquidityDex();
+    } catch (e) {
+      if (attempt >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 2_000 * 2 ** attempt));
+    }
+  }
+}
+
+/** In place of the Launch pool section when the contract's config could not be read. */
+function PoolUnknown({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  // The failure on screen when Read again was pressed: reading until a new answer replaces it.
+  const [pressedOn, setPressedOn] = useState<Error | null>(null);
+  const reading = pressedOn === error;
+  return (
+    <FormSection id="pool" n={7} title="Launch pool">
+      <Note tone="warn">
+        Could not read whether this contract can open a launch pool (its config did not load), so the pool options are
+        hidden. A sale created now opens no pool.
+      </Note>
+      <div aria-live="polite">
+        <Button
+          variant="tactile"
+          size="sm"
+          className="max-sm:h-10"
+          disabled={reading}
+          onClick={() => {
+            setPressedOn(error);
+            onRetry();
+          }}
+        >
+          {reading ? "Reading the config…" : "Read again"}
+        </Button>
+      </div>
+    </FormSection>
+  );
+}
+
 /** /create: a sectioned form beside a sticky summary of the sale, then a review step. */
 export function CreateSale() {
   const router = useRouter();
@@ -72,8 +118,10 @@ export function CreateSale() {
   const salesQ = useClientQuery(() => getClient().listSales(), ["create:sales"], 0);
   const sales = salesQ.data;
   // The exchange launch pools go to (get_config `dex`). None: the contract takes no launch liquidity.
-  const dexQ = useClientQuery(() => getClient().getLiquidityDex(), ["create:dex"], 0);
+  const dexQ = useClientQuery(readDex, ["create:dex"], 0);
   const dex = dexQ.data ?? null;
+  // The read failed every time: say so where the Launch pool section would be.
+  const dexError = dexQ.data === undefined ? dexQ.error : null;
 
   const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT);
   // Time of the last edit. Null until then, so nothing reads the clock while prerendering.
@@ -90,7 +138,8 @@ export function CreateSale() {
   const [cost, setCost] = useState<CreateCost>({ state: "idle" });
 
   const taken = new Set((sales ?? []).map((s) => s.config.tokenSymbol));
-  const poolOpts = { pool: dex !== null };
+  // On the contract the rest of the supply goes to the creator unless a launch pool takes it.
+  const poolOpts = { pool: dex !== null, restToCreator: mode === "near" };
   const derived = derive(draft, taken, now, poolOpts);
   const errorCount = Object.keys(derived.errors).length;
 
@@ -248,6 +297,7 @@ export function CreateSale() {
           <Insights derived={derived} />
           <ModeSection {...sectionProps} status={statuses.mode} />
           {dex !== null && <PoolSection {...sectionProps} status={statuses.pool} dex={dex} />}
+          {dexError && <PoolUnknown error={dexError} onRetry={dexQ.refetch} />}
           <SimulateSection derived={derived} />
           <FixedRules />
         </div>

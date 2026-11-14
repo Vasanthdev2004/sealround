@@ -82,7 +82,8 @@ function ResultPage({ id }: { id: string }) {
 
   return (
     <div className="flex w-full flex-col gap-10 sm:gap-14">
-      <DocumentTitle title={`${s.config.tokenName} result`} />
+      {/* The same words as the server's title (lib/og/sale-card.ts saleMeta), so the tab keeps the symbol. */}
+      <DocumentTitle title={`${s.config.tokenName} (${s.config.tokenSymbol}) result`} />
       {done && result.data ? (
         <Outcome sale={s} result={result.data} />
       ) : (

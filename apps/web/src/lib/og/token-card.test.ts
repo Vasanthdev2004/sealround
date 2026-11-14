@@ -131,6 +131,17 @@ describe("tokenCard", () => {
     expect(card.note).toBe("Pool opened at 0.001956 USDC per LNTN.");
   });
 
+  it("takes the supply from the token contract when the caller read it", () => {
+    // Holders burned 12,400 more after the launch burn: ft_total_supply says 970K.
+    const card = tokenCard(views(), 970_000n * E18)!;
+    expect(card.stats[0]).toEqual({ label: "Supply now", value: "970K", unit: "LNTN" });
+    expect(card.stats[1]).toEqual({ label: "Burned", value: "17.6K", unit: "LNTN" });
+    // Before the burn landed the views can only say "after the burn"; the token says what it holds now.
+    const owed = views({ result: { ...RESULT, proceeds: { ...RESULT.proceeds, unsold_burned: false } } });
+    expect(tokenCard(owed, 1_000_000n * E18)!.stats[0]).toEqual({ label: "Supply now", value: "1M", unit: "LNTN" });
+    expect(tokenCard(views(), null)!.stats[0]).toEqual(tokenCard(views())!.stats[0]);
+  });
+
   it("is null before settlement, for a failed sale and without the result", () => {
     expect(tokenCard(views({ sale: { ...SALE, status: "open" } }))).toBeNull();
     expect(tokenCard(views({ sale: { ...SALE, status: "failed" }, result: { ...RESULT, status: "failed" } }))).toBeNull();
@@ -168,6 +179,24 @@ describe("tokenImage", () => {
       expect(isPng(png)).toBe(true);
       expect(pngSize(png)).toEqual({ width: 1200, height: 630 });
     }
+  });
+
+  it("reads the token's supply once per drawing, and draws the card without it when that read fails", async () => {
+    const seen: SaleCardViews[] = [];
+    const supply = async (v: SaleCardViews) => {
+      seen.push(v);
+      return 970_000n * E18;
+    };
+    const res = await tokenImage("lantern", { read: async () => views(), fonts: noFonts, supply });
+    expect(res.headers.get("cache-control")).toContain("s-maxage=300");
+    expect(seen).toHaveLength(1);
+
+    const failing = async () => {
+      throw new Error("rpc down");
+    };
+    const fallback = await tokenImage("lantern", { read: async () => views(), fonts: noFonts, supply: failing });
+    expect(fallback.headers.get("cache-control")).toContain("s-maxage=300");
+    expect(isPng(new Uint8Array(await fallback.arrayBuffer()))).toBe(true);
   });
 
   it("falls back to the generic card when the sale cannot be read or drawn", async () => {

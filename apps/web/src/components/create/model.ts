@@ -282,6 +282,8 @@ export type Derived = {
   poolAvailable: boolean;
   /** The launch pool, when available and switched on. */
   pool: PoolInsight | null;
+  /** The creator gets the whole rest of the supply (the contract, no launch pool): the creator field is not used. */
+  restToCreator: boolean;
 };
 
 // ---------- parsing ----------
@@ -326,17 +328,29 @@ function shareBps(raw: string): number | null {
   return bps >= 1 && bps <= MAX_RAISE_SHARE_BPS ? bps : null;
 }
 
+/** What `derive` needs to know about the chain the sale is created on. */
+export type DeriveOpts = {
+  /** The contract takes launch liquidity, so `poolOn` counts. */
+  pool?: boolean;
+  /**
+   * The sale is created on the NEAR contract, which keeps no reserve apart
+   * from a launch pool: every token not for sale and not in the pool goes to
+   * the creator (sale.rs, `creator_allocation`). The simulated chain keeps an
+   * LP reserve, so mock mode leaves this off.
+   */
+  restToCreator?: boolean;
+};
+
+/** True when the creator gets the whole rest of the supply: the contract, and no launch pool switched on. */
+export function restGoesToCreator(d: Pick<Draft, "poolOn">, opts: DeriveOpts): boolean {
+  return !!opts.restToCreator && !(opts.pool && d.poolOn);
+}
+
 /**
  * Parse and check the whole draft. `taken` holds symbols that already have a
  * token account. `now` is null until the first edit, so time checks wait.
- * `opts.pool`: the contract takes launch liquidity, so `poolOn` counts.
  */
-export function derive(
-  d: Draft,
-  taken: ReadonlySet<string>,
-  now: number | null,
-  opts: { pool?: boolean } = {},
-): Derived {
+export function derive(d: Draft, taken: ReadonlySet<string>, now: number | null, opts: DeriveOpts = {}): Derived {
   const errors: Derived["errors"] = {};
   const v: Values = {};
   const notices: Notice[] = [];
@@ -375,14 +389,27 @@ export function derive(
   if (sale.e !== undefined) err("saleSupply", sale.e);
   else v.sale = sale.v;
 
-  const creator = wholeTokens(d.creatorAllocation, null);
-  if (creator.e !== undefined) err("creatorAllocation", creator.e);
-  else v.creator = creator.v;
+  // On the contract without a launch pool, the creator's share is simply the
+  // rest of the supply (sale.rs: total - sale - pool reserve); the creator
+  // field is not read then.
+  const restToCreator = restGoesToCreator(d, opts);
+  if (!restToCreator) {
+    const creator = wholeTokens(d.creatorAllocation, null);
+    if (creator.e !== undefined) err("creatorAllocation", creator.e);
+    else v.creator = creator.v;
+  }
 
   let shares: Shares | null = null;
   if (v.total !== undefined && v.sale !== undefined) {
     if (v.sale > v.total) {
       err("saleSupply", "More than the total supply.", true);
+    } else if (restToCreator) {
+      v.creator = v.total - v.sale;
+      v.lp = 0n;
+      if (v.total > 0n) {
+        const s = (v.sale * 10_000n) / v.total;
+        shares = { sale: s, creator: 10_000n - s, lp: 0n };
+      }
     } else if (v.creator !== undefined) {
       if (v.sale + v.creator > v.total) {
         err("creatorAllocation", "Sale supply plus this is more than the total supply.", true);
@@ -606,7 +633,7 @@ export function derive(
         }
       : null;
 
-  return { values: v, errors, notices, insights, shares, ready, poolAvailable, pool };
+  return { values: v, errors, notices, insights, shares, ready, poolAvailable, pool, restToCreator };
 }
 
 /**

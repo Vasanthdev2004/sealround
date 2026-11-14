@@ -17,7 +17,7 @@ import { Panel } from "@/components/ui/panel";
 import { TipCard, TipRow } from "@/components/visual/chart-bits";
 import { shortAccount, tokenStr, usdcStr } from "@/lib/format";
 import type { Sale } from "@/lib/types";
-import { isBot, isYou, pct, pctStr, toFloat, type ResultFill } from "./compute";
+import { isBot, isYou, pct, pctStr, rolesKnown, toFloat, type ResultFill } from "./compute";
 import { FairScorecard } from "./scorecard";
 
 /*
@@ -27,7 +27,13 @@ import { FairScorecard } from "./scorecard";
  */
 const COLOR = { person: "var(--viz-people)", bot: "var(--viz-bot)", you: "var(--viz-fairground)" } as const;
 const OPACITY = { person: 0.5, bot: 1, you: 1 } as const;
+/**
+ * Legend words. "People" and "Bots" only where the fills carry demo labels
+ * (rolesKnown); a real contract stores no roles, so there every other winner
+ * is just a bidder.
+ */
 const NAME = { person: "People", bot: "Bots", you: "You" } as const;
+const NAME_NO_ROLES = { ...NAME, person: "Bidders" } as const;
 type Kind = keyof typeof COLOR;
 
 type Datum = {
@@ -78,6 +84,7 @@ export function Distribution({ sale, fills, account }: { sale: Sale; fills: Resu
   }
 
   const kinds = new Set(data.map((d) => d.kind));
+  const names = rolesKnown(fills) ? NAME : NAME_NO_ROLES;
 
   return (
     <Panel
@@ -94,7 +101,7 @@ export function Distribution({ sale, fills, account }: { sale: Sale; fills: Resu
                 style={{ background: COLOR[k], opacity: OPACITY[k] }}
                 aria-hidden
               />
-              {NAME[k]}
+              {names[k]}
             </li>
           ))}
       </ul>

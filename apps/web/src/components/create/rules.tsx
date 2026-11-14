@@ -207,8 +207,8 @@ export function TermsLedger({
           </Group>
           <Group title="Allocation" edit="saleSupply" onEdit={onEdit}>
             <Row k="For sale" v={tokens(v.sale, s?.sale)} />
-            <Row k="Creator" v={tokens(v.creator, s?.creator)} />
-            <Row k={pool ? "Launch pool reserve" : "LP reserve"} v={tokens(v.lp, s?.lp)} />
+            <Row k={derived.restToCreator ? "Creator, the rest" : "Creator"} v={tokens(v.creator, s?.creator)} />
+            {!derived.restToCreator && <Row k={pool ? "Launch pool reserve" : "LP reserve"} v={tokens(v.lp, s?.lp)} />}
           </Group>
           <Group title="Price" edit="floor" onEdit={onEdit}>
             <Row k="Floor" v={price(v.floor)} />

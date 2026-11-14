@@ -5,16 +5,38 @@
  * always answers with an image.
  */
 
+import { appConfig } from "../config";
+import { createRpc } from "../near/rpc";
+import { readTokenSupply } from "../near/token-supply";
+import { saleFromView } from "../near/views";
 import { AppCard, SaleCardImage, renderCard, renderCardBytes } from "./cards";
 import { loadOgFonts, type OgFont } from "./fonts";
 import { saleCard, type SaleCard } from "./sale-card";
-import { saleViewsForCard, type SaleCardViews } from "./sale-data";
+import { OG_RPC_TIMEOUT_MS, saleViewsForCard, type SaleCardViews } from "./sale-data";
 import { tokenCard } from "./token-card";
 
 type Deps = {
   read?: (saleId: string) => Promise<SaleCardViews | null>;
   fonts?: () => Promise<OgFont[] | undefined>;
+  /** The token's supply now; null when it was not read. */
+  supply?: (views: SaleCardViews) => Promise<bigint | null>;
 };
+
+/**
+ * The settled token's ft_total_supply, or null (not settled, no token yet, or
+ * the read failed). One view call per drawing; the card's cache header lets a
+ * CDN keep it for five minutes, so it is not a call per view of the card.
+ * Page titles (tokenMeta) do not read it.
+ */
+async function supplyForCard(views: SaleCardViews): Promise<bigint | null> {
+  if (views.sale.status !== "settled" || !views.result) return null;
+  const c = appConfig();
+  if (c.mode !== "near") return null;
+  const sale = saleFromView(views.sale);
+  if (!sale.tokenAccount || (sale.tokenSetup !== undefined && sale.tokenSetup !== "done")) return null;
+  const rpc = createRpc(c.near.rpcUrls ?? c.near.rpcUrl, { timeoutMs: OG_RPC_TIMEOUT_MS, retries: 0 });
+  return readTokenSupply(rpc, sale.tokenAccount).catch(() => null);
+}
 
 async function draw(card: SaleCard, fonts: OgFont[] | undefined, saleId: string): Promise<ArrayBuffer> {
   try {
@@ -34,7 +56,8 @@ export async function tokenImage(saleId: string, deps: Deps = {}): Promise<Respo
   ]);
   if (views) {
     try {
-      const card = tokenCard(views) ?? saleCard(views.sale, views.result, views.network);
+      const supplyNow = await (deps.supply ?? supplyForCard)(views).catch(() => null);
+      const card = tokenCard(views, supplyNow) ?? saleCard(views.sale, views.result, views.network);
       const bytes = await draw(card, fonts, saleId);
       return new Response(bytes, {
         headers: {

@@ -9,21 +9,28 @@
 
 import { tokenFigures } from "@/components/token/figures";
 import { priceStr, tokenStr } from "../format";
+import { supplyFigure } from "../near/token-supply";
 import { resultFromViews, saleFromView } from "../near/views";
 import { cardText, saleCard, type SaleCard } from "./sale-card";
 import type { SaleCardViews } from "./sale-data";
 
 const count = (n: number) => n.toLocaleString("en-US");
 
-/** The token card of a settled sale; null for any other sale, or without its result. */
-export function tokenCard(views: SaleCardViews): SaleCard | null {
+/**
+ * The token card of a settled sale; null for any other sale, or without its
+ * result. `supplyNow` is the token's ft_total_supply when the caller read it
+ * (the image route does; titles do not): the supply stat then says what the
+ * token contract holds now instead of what the sale's views imply.
+ */
+export function tokenCard(views: SaleCardViews, supplyNow?: bigint | null): SaleCard | null {
   const { sale: sv, result: rv, network } = views;
   if (sv.status !== "settled" || !rv) return null;
   const sale = saleFromView(sv);
   // Fills are not read for a card: the winners count comes from get_result.
   const result = resultFromViews(sv, [], rv, []);
   if (!result || result.status !== "settled") return null;
-  const f = tokenFigures(sale, result, rv.n_winners);
+  const figures = tokenFigures(sale, result, rv.n_winners);
+  const f = { ...figures, supply: supplyFigure(figures.supply, supplyNow) };
   const base = saleCard(sv, rv, network);
   const sym = base.symbol;
   const seeded = result.liquidity?.stage === "seeded";

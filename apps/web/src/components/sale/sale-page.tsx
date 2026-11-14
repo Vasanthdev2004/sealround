@@ -113,7 +113,8 @@ function SaleLoaded({ sale }: { sale: Sale }) {
 
   return (
     <div>
-      <DocumentTitle title={sale.config.tokenName} />
+      {/* The same words as the server's title (lib/og/sale-card.ts saleMeta). */}
+      <DocumentTitle title={`${sale.config.tokenName} (${sale.config.tokenSymbol})`} />
       {/* The status panel carries the page's one "simulated" line, so the header does not. */}
       <SaleHeader sale={sale} simulatedNote={false} />
 
