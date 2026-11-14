@@ -327,18 +327,37 @@ jobs:
           : > "$out/all.md"
           # tr: jq on Windows (a local dry run) ends lines with CR LF.
           contracts=$(jq -r '[.sales[].contract] | unique | .[]' "$SALES_FILE" | tr -d '\r')
+          # Failures other than the two lock checks, across every sale in one answer.
+          other_failures() {
+            jq '[.sales[].failed[] | sub(":.*$"; "") | select(. != "contract_keys" and . != "contract_code")] | length' "$1" | tr -d '\r'
+          }
           for contract in $contracts; do
             json="$out/all-$contract.json"
+            try="$out/all-$contract.try.json"
+            rm -f "$json"
+            best=""
             status=1
+            # This step runs right after the per-sale checks, so a rate-limited
+            # RPC (HTTP 429) can leave a check unread and listed as failed. An
+            # answer with such failures is kept, and the next RPC is tried after
+            # a pause; the answer with the fewest failures is reported. A real
+            # failure fails on every RPC, so it still shows.
             for rpc in $RPC_LIST; do
               status=0
               timeout --kill-after=10 900 \
                 pnpm --silent --dir apps/web verify-sale --network "$NETWORK" --rpc "$rpc" --contract "$contract" --all --json \
-                > "$json" 2> "$out/all-$contract.err" || status=$?
+                > "$try" 2> "$out/all-$contract.err" || status=$?
               cat "$out/all-$contract.err"
-              if jq -e '.sales' "$json" > /dev/null 2>&1; then break; fi
-              echo "No answer for $contract via $rpc (exit $status), trying the next RPC in 15 s"
-              sleep 15
+              if jq -e '.sales' "$try" > /dev/null 2>&1; then
+                n=$(other_failures "$try")
+                if [ -z "$best" ] || [ "$n" -lt "$best" ]; then cp "$try" "$json"; best=$n; fi
+                if [ "$best" -eq 0 ]; then break; fi
+                echo "$n check(s) failed or did not run for $contract via $rpc; trying the next RPC in 30 s"
+                sleep 30
+              else
+                echo "No answer for $contract via $rpc (exit $status), trying the next RPC in 15 s"
+                sleep 15
+              fi
             done
             if ! jq -e '.sales' "$json" > /dev/null 2>&1; then
               echo "::error::verify-sale --all on $contract gave no result (exit $status)"
