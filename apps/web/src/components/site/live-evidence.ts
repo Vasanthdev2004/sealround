@@ -67,7 +67,7 @@ export const LIVE_SALES: readonly LiveSale[] = [
     sale: "ember-11141303",
     mode: "commit-reveal",
     afterLock: true,
-    note: "Commit-reveal: three bids, settled at the 0.001 USDC floor, launch pool 2979 on Rhea. The 417,600 tokens demand did not take burn at the creator payout.",
+    note: "Commit-reveal: three bids, settled at the 0.001 USDC floor, launch pool 2979 on Rhea. The 417,600 tokens demand did not take were burned at the creator payout: supply 722,000 to 304,400.",
   },
   {
     contract: "sealround.itzbeast.testnet",
