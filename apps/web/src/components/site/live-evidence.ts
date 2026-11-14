@@ -30,13 +30,14 @@ export const LIVE_EXPLORER = "https://testnet.nearblocks.io";
 export const LIVE_CONTRACT = "sealround.itzbeast.testnet";
 
 /**
- * True once `view_access_key_list` on LIVE_CONTRACT returns no keys. Read on
- * 14 Nov 2026 at 06:00 UTC: one full-access key, so not locked yet.
+ * True once `view_access_key_list` on LIVE_CONTRACT returns no keys. The last
+ * key was deleted at 12:39:05 UTC on 14 Nov 2026; FastNear and drpc both
+ * returned `"keys":[]` at block 277,658,078.
  */
-export const LIVE_CONTRACT_LOCKED = false;
+export const LIVE_CONTRACT_LOCKED = true;
 
 /** The transaction that deleted the contract account's last key, once there is one. */
-export const LIVE_LOCK_TX: string | null = null;
+export const LIVE_LOCK_TX: string | null = "6kCHNqDZYeLbkL41uPwMuRKddMbKqn4FmFLn8ZY76MpK";
 
 /** Every live sale, oldest first. */
 export const LIVE_SALES: readonly LiveSale[] = [
