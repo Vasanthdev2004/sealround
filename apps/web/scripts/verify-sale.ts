@@ -60,6 +60,18 @@ const USAGE =
 /** Statuses whose result is final, so every check applies. */
 const FINAL = new Set(["settled", "failed"]);
 
+/**
+ * A busy RPC is asked again after 2, 6 and 18 s (plus jitter) instead of the
+ * page's half-second steps. Blocks and transactions older than about two days
+ * come only from the archival node, and a run of checks (CI checks every sale
+ * twice in a row) can use up its rate limit; the run search would then find
+ * nothing.
+ */
+const PATIENCE = { retries: 3, retryDelayMs: 2_000 };
+
+/** --all checks a sale again after this pause when a check could not run (a read failed). */
+const RECHECK_AFTER_MS = 30_000;
+
 function usage(message: string): never {
   console.error(message);
   console.error(USAGE);
@@ -149,7 +161,7 @@ async function main() {
 
 /** Every sale the contract lists, oldest first. */
 async function listSales(o: Options): Promise<SaleRow[]> {
-  const rpc = jsonRpc([o.rpcUrl]);
+  const rpc = jsonRpc([o.rpcUrl], PATIENCE);
   const out: SaleRow[] = [];
   for (let from = 0; ; from += 50) {
     const page = await viewCall<SaleRow[]>(rpc, o.contractId, "get_sales", { from_index: from, limit: 50 });
@@ -167,11 +179,22 @@ async function verifyAll(o: Options) {
   say(`${o.contractId} (${o.network}) lists ${sales.length} sale(s): ${final.length} final, ${running.length} not final yet.`);
   const outcomes: (SaleOutcome & { status: string })[] = [];
   for (const s of final) {
-    const outcome = await verifyOne(o, s.sale_id, true);
+    let outcome = await verifyOne(o, s.sale_id, true);
+    // A check that could not run (ok null) is usually a read the RPC refused for the moment:
+    // check the sale once more after a pause and keep the answer with fewer failures.
+    // A check that ran and failed (ok false) is an answer from the chain; it is not retried.
+    if (!outcome.ok && outcome.checks.some((c) => c.ok === null)) {
+      sayFailed(say, outcome);
+      say(`  ${s.sale_id}: a check could not run; checking the sale again in ${RECHECK_AFTER_MS / 1000} s`);
+      await new Promise((r) => setTimeout(r, RECHECK_AFTER_MS));
+      const again = await verifyOne(o, s.sale_id, true);
+      if (again.failed.length < outcome.failed.length) outcome = again;
+    }
     outcomes.push({ ...outcome, status: status(s) });
     const passed = outcome.checks.filter((c) => c.ok === true).length;
     const head = `${s.sale_id} (${status(s)}): ${passed} of ${outcome.checks.length} checks`;
     say(outcome.ok ? `[PASS] ${head}` : `[FAIL] ${head}; failed or not run: ${outcome.failed.join(", ")}`);
+    if (!outcome.ok) sayFailed(say, outcome);
   }
   for (const s of running) say(`[OPEN] ${s.sale_id} (${status(s)}): not final yet, checked once it settles`);
   const ok = outcomes.every((x) => x.ok);
@@ -186,6 +209,11 @@ async function verifyAll(o: Options) {
   process.exit(ok ? 0 : 1);
 }
 
+/** One line per check that failed or could not run, with its detail (cut to 400 characters). */
+function sayFailed(say: (line: string) => void, outcome: SaleOutcome) {
+  for (const c of outcome.checks.filter((c) => c.ok !== true)) say(`  ${c.ok === null ? "not run" : "failed"} ${c.id}: ${c.detail}`.slice(0, 400));
+}
+
 /** Runs every check for one sale. Prints the full report unless `quiet` or --json; returns the outcome. */
 async function verifyOne(o: Options, saleId: string, quiet: boolean): Promise<SaleOutcome> {
   const { network, contractId, rpcUrl } = o;
@@ -193,13 +221,20 @@ async function verifyOne(o: Options, saleId: string, quiet: boolean): Promise<Sa
   const say = (line: string) => (o.json ? console.error(line) : console.log(line));
   const terms = quiet ? [] : readTerms(o.secretFiles, contractId, saleId, say);
 
-  const { verification, chain: read } = await verifySaleRuns({ network, rpcUrl, contractId, saleId, bidTerms: terms });
+  const { verification, chain: read } = await verifySaleRuns({
+    network,
+    rpcUrl,
+    contractId,
+    saleId,
+    bidTerms: terms,
+    rpcPatience: PATIENCE,
+  });
 
   // The bid set: every bid the contract lists, hashed the way the contract froze it. The contract checks
   // already read get_sale and get_bids; read them here only when that failed.
   let facts = read?.facts ?? null;
   if (!facts) {
-    const rpc = jsonRpc([rpcUrl]);
+    const rpc = jsonRpc([rpcUrl], PATIENCE);
     const sale = await viewCall<{ bid_count: number; bid_set_hash: string; closed_at: string | null }>(rpc, contractId, "get_sale", {
       sale_id: saleId,
     });

@@ -26,7 +26,7 @@
 import { sha256Bytes, toHex } from "@fairground/clearing";
 import { PINNED_CONTRACT_SHA256 } from "../../components/deploy/chain";
 import type { AttestedRun, MissingRun, RunKind, RunTxSource } from "../types";
-import { jsonRpc, viewCall, type JsonRpc } from "../verify/rpc";
+import { jsonRpc, viewCall, type JsonRpc, type JsonRpcOptions } from "../verify/rpc";
 import { chainChecks, readChain, type ChainRead } from "../verify/sources";
 import type { FullVerification } from "../verify/types";
 import type { BidTerms } from "../verify/your-bid";
@@ -272,6 +272,12 @@ export type VerifySaleOptions = {
   pinnedContract?: string;
   /** Bidders' own terms (verify-sale --bid-secret): a your_bid check each. */
   bidTerms?: readonly BidTerms[];
+  /**
+   * How long a busy node is waited for (verify/rpc.ts). The defaults suit a
+   * page; the command line waits longer, since old blocks come only from the
+   * archival node and a run of checks can spend its rate limit.
+   */
+  rpcPatience?: Pick<JsonRpcOptions, "retries" | "retryDelayMs">;
   fetch?: typeof fetch;
   now?: () => number;
 };
@@ -302,7 +308,10 @@ export async function verifySaleRuns(
   const fetchImpl = o.fetch ?? globalFetch;
   const net = OUTLAYER_NETWORKS[o.network];
   // The configured endpoint and its fallbacks (rpc.ts), then the archival node for history.
-  const rpc = jsonRpc([...rpcEndpoints(o.rpcUrl), net.archivalRpc].filter((u, i, all) => all.indexOf(u) === i), { fetch: fetchImpl });
+  const rpc = jsonRpc([...rpcEndpoints(o.rpcUrl), net.archivalRpc].filter((u, i, all) => all.indexOf(u) === i), {
+    fetch: fetchImpl,
+    ...o.rpcPatience,
+  });
   const now = o.now ?? Date.now;
 
   let views: NonNullable<VerifySaleOptions["views"]>;
